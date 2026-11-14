@@ -8,6 +8,11 @@ run counts when it leaves a blocking finding open, or when its output is invalid
 out doesn't count: it is started once more, and two review timeouts in a row wait for a person. A
 command that times out at ship, such as `verify` or a check, counts like any other failure.
 
+A command the shell couldn't start (exit 127: not found; 126: found but not executable) is recorded as
+`could_not_run`, not as a failure of the change: nothing was checked. It still counts as an attempt, so a
+missing tool can't loop for ever, and a verify that couldn't run is never taken for a red base. Install the
+tool to go on, and open a ticket so that `[commands] provision` (or `setup`) installs it on every machine.
+
 At the budget, the consult pack advises once, and you get one more attempt. If that fails too, the ticket
 waits for a person. Without the pack, it waits for a person at the budget.
 

@@ -11,7 +11,7 @@ import re
 from . import areas, gitx
 from .project import event, review_path, ticket_path
 from .ticket import rank
-from .util import now_iso, run_shell, tail
+from .util import could_not_run, now_iso, run_shell, tail
 
 SECURITY = """Security. This list is a checklist, not a ceiling. Report only what someone could exploit in this application:
 1. authorization: checked at object level and on every path;
@@ -185,8 +185,8 @@ def brief(project, f, role, ledger, disputed=None):
         job = "Review this change for security only. You are the security seat."
     else:
         look_for = (f"Only whether this one finding holds. If it does, return it with `repeats` set to {disputed} and its "
-                    "severity. If it doesn't, return an empty list. `summary` says why. When it has evidence, run the "
-                    "command again.")
+                    "severity; when the problem is real but this change didn't cause it, the severity is parked. If it "
+                    "doesn't hold, return an empty list. `summary` says why. When it has evidence, run the command again.")
         job = f"Decide whether finding {disputed} holds. You are the refuter."
     parts = [
         f"# Review brief: ticket {t.id}, {f.tier}", "", f"This run's job: {job}", "",
@@ -280,6 +280,11 @@ def run(project, f, role, receipt, disputed=None, prompt=None):
         receipt.record(step, False, f.patch_id, "timeout", ms, counted=False,
                        output=f"The {role} run passed timeout_secs ({timeout}s).")
         return None
+    if could_not_run(code):
+        receipt.record(step, False, f.patch_id, could_not_run(code), ms, status="could_not_run",
+                       output=f"The {role} command could not start, so nothing was reviewed. [review] command:\n"
+                              f"$ {project.config['review']['command']}\n{tail(output, 30)}")
+        return None
     try:
         data, meta = _structured(output)
         errors = validate(project, head, t.id, data, ledger, role, disputed) if code == 0 else [f"exit {code}"]
@@ -304,8 +309,11 @@ def run(project, f, role, receipt, disputed=None, prompt=None):
         if finding.get("repeats"):
             fid = finding["repeats"]
             severity = ledger.findings[fid].get("severity")
+            if role == "refuter" and finding.get("severity") == "parked":
+                severity = "parked"  # real, but not this change's doing: the refuter parks it
             outcome = "parked" if severity == "parked" else "open"
-            events.append(event(t.id, "finding", id=fid, outcome=outcome, by="refuter" if role == "refuter" else "reviewer"))
+            events.append(event(t.id, "finding", id=fid, outcome=outcome, by="refuter" if role == "refuter" else "reviewer",
+                                **({"reason": data["summary"]} if role == "refuter" and outcome == "parked" else {})))
         else:
             fid = f"F{next_number}"
             next_number += 1
@@ -321,7 +329,10 @@ def run(project, f, role, receipt, disputed=None, prompt=None):
         events = []  # the sweep's findings become tickets, not ledger entries
     if role == "refuter" and not data["findings"]:
         events.append(event(t.id, "finding", id=disputed, outcome="declined", by="refuter", reason=data["summary"]))
-    blocking = [x for x in entry["findings"] if (ledger.findings.get(x.get("repeats"), x).get("severity") == "blocking")]
+    parked_by_refuter = [x["repeats"] for x in entry["findings"]
+                         if role == "refuter" and x.get("repeats") and x.get("severity") == "parked"]
+    blocking = [x for x in entry["findings"] if (ledger.findings.get(x.get("repeats"), x).get("severity") == "blocking")
+                and x.get("repeats") not in parked_by_refuter]
     if role == "security":
         # The seat's new blocking findings each go to a refuter at once; the refuter's
         # verdict is what fails. A repeat of one the refuter already upheld stays open.
@@ -329,7 +340,8 @@ def run(project, f, role, receipt, disputed=None, prompt=None):
     if role == "sweep":
         blocking = []  # a sweep never blocks a merge
     passed = not blocking
-    detail = (f"run {entry['run']}: dismissed {disputed}" if role == "refuter" and passed else
+    detail = (f"run {entry['run']}: parked {disputed}" if role == "refuter" and parked_by_refuter else
+              f"run {entry['run']}: dismissed {disputed}" if role == "refuter" and passed else
               f"run {entry['run']}: upheld {disputed}" if role == "refuter" else
               f"run {entry['run']}: {len(blocking)} blocking, {len(entry['findings'])} findings")
     receipt.record(step, passed, f.patch_id, detail, ms, cost_usd=meta.get("cost_usd"),

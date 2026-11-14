@@ -25,7 +25,7 @@ stores state. Never edit it by hand: the guard denies it.
 | `amended` | `rail amend NN` | `contract` (the new hash), `changed` (any of `done_contract`, `scope`, `tier`), `added_paths`, `needs_approval` | When `needs_approval` is true, the ticket waits until a later `accepted` |
 | `claimed` | A claim or a takeover inside `next` | `session`, `takeover`, and in a cloud session `session_url` | The `implementing` state. `next` finds this session's ticket by it, and the pull request ends with the last `session_url` |
 | `saved` | `rail save`, the save hooks, and `advance` before a long command | `via` (`save`, `stop`, `pulse`, `advance`), `files` | Shows the ticket is alive: its `at` is what `[claim] stale_minutes` is measured from |
-| `step` | Every step the engine runs (below) | `step`, `status` (`ran`), `result` (`pass`, `fail`), `patch_id`, `counted`, `detail`, `duration_ms`, `cost_usd` | The retry budget and the pull request's Evidence table |
+| `step` | Every step the engine runs (below) | `step`, `status` (`ran`, or `could_not_run` when the shell couldn't start the command: exit 127 or 126), `result` (`pass`, `fail`; always `fail` when it couldn't run), `patch_id`, `counted`, `detail`, `duration_ms`, `cost_usd` | The retry budget and the pull request's Evidence table |
 | `shipped` | Every ship step passed for the current patch | `patch_id`, `head`, `tier`, `size` | CI's "not shipped yet" test, and the `reviewing` and `in-ci` states |
 | `tier_raised` | Ship raises the tier | `from`, `to`, `reason` (`size`, `risk_paths`, `migration_paths`), `detail` | The ticket's tier from then on |
 | `finding` | A review run reports or repeats a finding; `rail answer`; a refuter or the owner decides one | `id`, `outcome` (`open`, `fixed`, `declined`, `parked`), `by` (`reviewer`, `author`, `refuter`, `owner`), `reason`, `disputed`. The first event for an id also has `severity`, `claim` and `check` | `advance` and CI: no finding may be open. The sweep reads the parked ones and the `check` of fixed ones |
@@ -71,7 +71,8 @@ A sample:
 | `sweep` | `rail sweep` | Never |
 | `merge` | `advance`, with no remote | The base branch moved during the merge |
 
-**The retry budget.** A step's attempts are its `step` events with `result: "fail"` and `counted` not false,
+**The retry budget.** A step's attempts are its `step` events with `result: "fail"` and `counted` not false
+(a command that couldn't run is an attempt too),
 since that step last passed or since a person's `continued` or approval, whichever is later. At
 `[retry] budget` attempts consult runs once for that step and the agent gets one more attempt; if that fails
 too, the ticket waits for a person (`rail docs retries`).

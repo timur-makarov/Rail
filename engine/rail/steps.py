@@ -8,7 +8,11 @@ from . import doclint, gitx, rules
 from .project import event, events_path, ticket_path
 from .state import raised_tier
 from .ticket import Ticket, lint, rank
-from .util import match_any, minutes_since, run_shell, tail
+from .util import MISSING_HELP, could_not_run, match_any, minutes_since, run_shell, tail
+
+# A step's status: it ran and passed or failed, or the shell could not start its command (could_not_run, a failure
+# that checked nothing). Both are attempts, and both count toward the step's retry budget.
+TRIED = ("ran", "could_not_run")
 
 class Run:
     """The receipt of one command: the steps it ran, their events, and the first failure."""
@@ -24,7 +28,7 @@ class Run:
     def record(self, step, passed, patch_id=None, detail=None, duration_ms=None, output="", status="ran",
                counted=True, cost_usd=None):
         receipt = {"step": step, "status": status}
-        if status == "ran":
+        if status in TRIED:
             receipt["result"] = "pass" if passed else "fail"
             fields = {"step": step, "status": status, "result": receipt["result"]}
             if patch_id is not None:
@@ -41,7 +45,7 @@ class Run:
         if detail:
             receipt["detail"] = detail
         self.steps.append(receipt)
-        if status == "ran" and not passed and not self.failure:
+        if status in TRIED and not passed and not self.failure:
             self.failure = (step, output or detail or "")
         return passed
 
@@ -69,9 +73,11 @@ def run_command(project, cwd, nn, step, command, run, patch_id=None, label=None)
     keep_alive(project, run.t)
     code, output, ms = run_shell(command, cwd, {"RAIL_TICKET": nn, "RAIL_BASE": project.base_ref},
                                  project.config["commands"]["timeout_secs"])
-    status = "timeout" if code is None else f"exit {code}"
+    missing = could_not_run(code)
+    status = missing or ("timeout" if code is None else f"exit {code}")
     detail = (f"{label}: {status}" if code != 0 else label) if label else status
-    return run.record(step, code == 0, patch_id, detail, ms, output=f"$ {command}\n{tail(output)}")
+    return run.record(step, code == 0, patch_id, detail, ms, output=f"$ {command}\n{tail(output)}",
+                      status="could_not_run" if missing else "ran")
 
 
 # --- claim -----------------------------------------------------------------------
@@ -215,7 +221,8 @@ def base_fails_verify(project):
         if project.config["commands"]["setup"]:
             run_shell(project.config["commands"]["setup"], path, {"RAIL_TICKET": ""}, timeout)
         code, output, _ = run_shell(project.config["commands"]["verify"], path, {"RAIL_TICKET": ""}, timeout)
-        return None if code == 0 else tail(output)
+        # verify that can't start on the base proves nothing about the base: the ticket's own failure stands
+        return None if code == 0 or could_not_run(code) else tail(output)
     finally:
         gitx.git(["worktree", "remove", "--force", path], project.root, check=False)
 
@@ -244,8 +251,9 @@ def ship(project, f, run):
     patch_id = project.patch_id(ref)
     text = gitx.read_blobs([f"{ref}:{ticket_path(t.id)}"], project.root)[f"{ref}:{ticket_path(t.id)}"]
     tier = check(project, t.id, Ticket(text or ""), ref, wt, f.tier, run, patch_id, accepted=f.accepted)
-    if tier is None and run.failure[0] == "verify":
-        # A red base spends no budget: two tickets that each pass can break main together.
+    if tier is None and run.failure[0] == "verify" and run.events[-1].get("status") != "could_not_run":
+        # A red base spends no budget: two tickets that each pass can break main together. A verify that could
+        # not start is the machine's lack, not the base's: it is never taken for a red base.
         red = base_fails_verify(project)
         if red:
             run.events[-1]["counted"] = False
@@ -264,6 +272,8 @@ def ship(project, f, run):
 
 def ship_failed_brief(t, run):
     step, output = run.failure
+    if any(s.get("status") == "could_not_run" for s in run.steps):
+        return f"Ship of ticket {t.id} could not run '{step}'.\n{output}\n\n{MISSING_HELP} Then run: rail advance {t.id}"
     return f"Ship of ticket {t.id} failed at '{step}'.\n{output}\n\nFix it in the worktree, then run: rail advance {t.id}"
 
 
@@ -287,7 +297,8 @@ def describe(project, t, ticket, tier):
         if e.get("event") != "step":
             continue
         name = f"check: {e.get('detail')}" if e.get("step") == "checks" else e.get("step")
-        rows.append(f"| {name} | {e.get('status')}, {e.get('result')} |")
+        said = "could not run" if e.get("status") == "could_not_run" else f"{e.get('status')}, {e.get('result')}"
+        rows.append(f"| {name} | {said} |")
     from .review import Ledger, load_doc
     ledger = Ledger(t.events, load_doc(t.review_text, t.id))
     for role in ("review", "security"):

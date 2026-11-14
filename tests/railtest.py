@@ -167,8 +167,9 @@ def check_shape(answer):
     assert answer["owner"] in ("agent", "human", "none"), answer
     assert answer["action"]["kind"] in ("script", "agent_task", "human_wait", "rest"), answer
     for step in answer["steps"]:
-        assert step["status"] in ("ran", "not_run", "unavailable"), step
-        assert ("result" in step) == (step["status"] == "ran"), step
+        assert step["status"] in ("ran", "could_not_run", "not_run", "unavailable"), step
+        assert ("result" in step) == (step["status"] in ("ran", "could_not_run")), step
+        assert step["status"] != "could_not_run" or step["result"] == "fail", step
 
 
 class GitHub:

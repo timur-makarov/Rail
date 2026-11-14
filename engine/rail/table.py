@@ -5,6 +5,7 @@ consult); `next` makes the move, derives the facts again, and reads the table on
 """
 
 from .project import ticket_path
+from .util import MISSING_HELP
 
 TRANSITIONS = {"ACCEPT_AUTO", "CLAIM", "RESUME", "CONSULT", "GO", "REBASE_BEHIND", "CONTRACT_MERGED"}
 MERGE_PATIENCE = 600  # seconds a requested merge may take before a person looks
@@ -34,7 +35,8 @@ def _findings(f, intro):
         "", intro,
         f"Fix each blocking finding in the worktree. Then answer every finding: rail answer {f.id} F1 fixed \"what you"
         f" changed\", or declined \"why it is not a problem\", or parked \"a real problem this change didn't cause\".",
-        "Declining a blocking finding disputes it, and a fresh refuter decides.",
+        "Declining or parking a blocking finding disputes it, and a fresh refuter decides whether it holds and whether"
+        " this change caused it.",
         *[f"- {f.ledger.describe(fid)}" for fid in ids],
     ])
 
@@ -89,8 +91,24 @@ def _assumptions(f):
 
 def _step_failed(f):
     e = f.last_fail
+    if e.get("status") == "could_not_run":
+        return (f"The last ship of ticket {f.id} could not run '{e.get('step')}': {e.get('detail', '')}. {MISSING_HELP}"
+                f" Then run: rail advance {f.id}") + _findings(f, "Open review findings:") + _note(f)
     return (f"The last ship of ticket {f.id} failed at '{e.get('step')}': {e.get('detail', '')}. Nothing has changed"
             f" since. Fix the cause in {f.cwd}, then run: rail advance {f.id}") + _findings(f, "Open review findings:") + _note(f)
+
+
+def _could_not_run(f, steps):
+    """For a person at the retry cap: which of the capped steps last ended without running at all."""
+    last = {}
+    for e in f.t.events:
+        if e.get("event") == "step" and e.get("step") in steps:
+            last[e["step"]] = e
+    missing = [f"'{s}' ({e.get('detail')})" for s, e in last.items() if e.get("status") == "could_not_run"]
+    if not missing:
+        return ""
+    return (f" Its last attempt at {_join(missing)} could not run: the shell couldn't start the command or a tool it"
+            f" calls, so nothing was checked.")
 
 
 def _setup_failed(f):
@@ -106,8 +124,9 @@ def _answer(f):
 def _capped(f):
     steps = _join(f.capped)
     return (f"Ticket {f.id} used its retry budget at '{steps}' ({f.project.config['retry']['budget']} attempts, then the"
-            f" attempt after consult). A person looks at the journal and the branch {f.t.name}, then continues it:"
-            f" rail accept {f.id} \"what to do differently\". That gives a fresh budget." + _go(f))
+            f" attempt after consult).{_could_not_run(f, f.capped)} A person looks at the journal and the branch"
+            f" {f.t.name}, then continues it: rail accept {f.id} \"what to do differently\". That gives a fresh"
+            f" budget." + _go(f))
 
 
 def _pr(f):
@@ -212,7 +231,8 @@ ROWS = [
                f" that waits for input, then continues it: rail accept {f.id}." + _go(f)),
     ("FINDING_UPHELD",     "human", "human_wait",  lambda f: f.ledger.disputed_again(),
      lambda f: f"The refuter upheld {_join(f.ledger.disputed_again())} on ticket {f.id}, and the agent still disputes it."
-               f" A person decides: rail answer {f.id} F1 declined \"why\" --owner, or rail accept {f.id} \"how to fix it\"."),
+               f" A person decides: rail answer {f.id} F1 declined \"why\" --owner, rail answer {f.id} F1 parked"
+               f" \"why\" --owner when this change didn't cause it, or rail accept {f.id} \"how to fix it\"."),
     ("HOLD",               "human", "human_wait",  lambda f: "rail:needs-you" in f.labels
                                                    and not (f.state == "merge-ready" and not f.auto),
      lambda f: f"A person holds ticket {f.id} with the label rail:needs-you on {_pr(f)}. They continue it with the"

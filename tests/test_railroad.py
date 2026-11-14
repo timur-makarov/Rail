@@ -8,7 +8,9 @@ import threading
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import ARCHITECTURE, CONFIG, RailTest, ticket
+from railtest import ARCHITECTURE, CHECK_ADD, CONFIG, FAKE, RailTest, ticket
+
+CHECK_ADD_PIPED = CHECK_ADD + " 2>&1 | tail -5"
 
 
 def read(path):
@@ -209,6 +211,77 @@ class Ship(RailTest):
         self.assertEqual((failed["steps"][0]["step"], failed["steps"][0]["result"]), ("rebase", "fail"))
         self.assertIn("src/calc.py", failed["steps"][0]["detail"])
         self.assertEqual(failed["state"], "implementing")
+
+
+def journal(p, nn="1", branch="1-fix-add"):
+    return [json.loads(l) for l in p.git("show", f"{branch}:.rail/journal/{nn}-events.jsonl").splitlines()]
+
+
+class Commands(RailTest):
+    """How the engine runs a configured command, and what it records when the command can't start."""
+
+    def test_a_failure_inside_a_pipe_fails_the_check(self):
+        # In sh (dash on Linux) a pipe's status is its last command's, so `CHECK | tail` passed with CHECK failing.
+        p = self.fixture()
+        p.add(ticket(check=CHECK_ADD_PIPED))
+        p.rail("next")
+        failed = p.rail("advance", "1", expect=3)
+        self.assertEqual(failed_step(failed), ("checks", f"{CHECK_ADD_PIPED}: exit 1"))
+        self.assertIn("AssertionError", failed["action"]["brief"])
+        p.fix_calc("1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")
+
+    def test_a_verify_that_cannot_start_could_not_run_and_is_never_taken_for_a_red_base(self):
+        p = self.fixture(config=CONFIG.replace("python3 -m py_compile src/calc.py", "no-such-test-runner --all"))
+        p.add(ticket())
+        p.rail("next")
+        p.fix_calc("1")
+        first = p.rail("advance", "1", expect=3)
+        verify = [s for s in first["steps"] if s["step"] == "verify"][0]
+        self.assertEqual((verify["status"], verify["result"], verify["detail"]),
+                         ("could_not_run", "fail", "could not run (exit 127: command not found)"))
+        self.assertEqual(first["reason"]["code"], "STEP_FAILED")
+        self.assertIn("Ship of ticket 1 could not run 'verify'.", first["action"]["brief"])
+        self.assertIn("no-such-test-runner: command not found", first["action"]["brief"])  # the shell's own line
+        self.assertIn("Nothing was checked", first["action"]["brief"])
+        self.assertIn("could not run 'verify': could not run (exit 127: command not found). Nothing was checked",
+                      p.rail("next", "--ticket", "1")["action"]["brief"])
+        recorded = [e for e in journal(p) if e["event"] == "step" and e["step"] == "verify"][-1]
+        self.assertEqual((recorded["status"], recorded["result"]), ("could_not_run", "fail"))
+        self.assertNotIn("counted", recorded)  # an attempt like any other: the budget bounds it
+        self.assertEqual(p.rail("next", "--ticket", "1")["reason"]["code"], "STEP_FAILED")  # not RED_BASE
+        self.assertEqual(len(p.rail("status")["tickets"]), 1)  # and no fix ticket for the base
+        second = p.rail("advance", "1", expect=3)  # the budget: consult advises, one more attempt
+        self.assertIn("consult says", second["action"]["brief"])
+        capped = p.rail("advance", "1", expect=3)
+        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertIn("Its last attempt at 'verify' (could not run (exit 127: command not found)) could not run",
+                      capped["action"]["brief"])
+
+    def test_a_check_that_cannot_start_says_so_and_a_failing_one_does_not(self):
+        p = self.fixture()
+        p.add(ticket(check="./src/calc.py"))  # there, but not executable: 126
+        p.rail("next")
+        p.fix_calc("1")
+        failed = p.rail("advance", "1", expect=3)
+        check = failed["steps"][-1]
+        self.assertEqual((check["step"], check["status"], check["detail"]),
+                         ("checks", "could_not_run", "./src/calc.py: could not run (exit 126: found but could not be run)"))
+        fails = [e for e in journal(p) if e["event"] == "step" and e["step"] == "verify"]
+        self.assertEqual([(e["status"], e["result"]) for e in fails], [("ran", "pass")])
+
+    def test_a_reviewer_that_cannot_start_reviewed_nothing(self):
+        p = self.fixture(config=CONFIG.replace(f"python3 {FAKE}\"\n\n[consult]", "no-such-reviewer\"\n\n[consult]"))
+        p.add(ticket(tier="MEDIUM"))
+        p.rail("next")
+        p.fix_calc("1")
+        failed = p.rail("advance", "1", expect=3)
+        review = [s for s in failed["steps"] if s["step"] == "review"][0]
+        self.assertEqual((review["status"], review["result"], review["detail"]),
+                         ("could_not_run", "fail", "could not run (exit 127: command not found)"))
+        self.assertEqual(failed["state"], "reviewing")
+        recorded = [e for e in journal(p) if e["event"] == "step" and e["step"] == "review"]
+        self.assertEqual([e["status"] for e in recorded], ["could_not_run"])
 
 
 class Claim(RailTest):

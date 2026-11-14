@@ -11,8 +11,9 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   needed, then take the next ticket or stop.
 - `action.kind` is `agent_task` (do the brief), `script` (run `action.command`), `human_wait` (a person
   acts; the brief says what) or `rest` (nothing to do).
-- `steps` lists what the command ran: `ran` with `pass` or `fail`, `not_run`, or `unavailable`. A skipped
-  step never looks like a pass.
+- `steps` lists what the command ran: `ran` with `pass` or `fail`, `could_not_run` with `fail` (the shell
+  couldn't start the command: it isn't on the machine, or isn't executable), `not_run`, or `unavailable`. A
+  skipped step never looks like a pass, and a step that couldn't start never looks like a check that ran.
 - Exit codes: 0 when the command worked, 2 for a usage error, 3 when a step failed.
 
 ## What next does

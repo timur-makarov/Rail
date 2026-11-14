@@ -15,6 +15,12 @@ LABELS = {
     "rail:needs-you": ("d93f0b", "Rail: this ticket waits for a person"),
 }
 
+# Whose comments speak for the repository: those of people who can push to it. GitHub gives every comment an
+# author_association; a stranger's is NONE, CONTRIBUTOR or FIRST_TIME_CONTRIBUTOR, and so is most bots'.
+TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")
+# The engine comments with the person's own credentials, so its comments are told apart by this mark.
+ENGINE_MARK = "<!-- rail -->"
+
 
 # What one Forge has read from GitHub holds until something can have changed it: a write of the engine's own (a
 # pull request, a label, a merge, a push), a fetch, or a shell command, during which CI may have finished.

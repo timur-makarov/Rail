@@ -31,9 +31,11 @@ rail answer NN F2 declined "why it is not a problem"
 rail answer NN F3 parked "a real problem this change didn't cause"
 ```
 
-You can't decline a blocking finding: declining one disputes it, and a fresh refuter decides at the next
-`advance`. The refuter sees the location, the claim and the evidence, not your argument. If it upholds the
-finding and you still can't fix it, a person decides, with `rail answer NN F1 declined "why" --owner`.
+You can't decline or park a blocking finding: either answer disputes it, and a fresh refuter decides at the
+next `advance`. The refuter sees the location, the claim and the evidence, not your argument. It dismisses
+the finding, parks it (the problem is real, but this change didn't cause it), or upholds it. If it upholds
+the finding and you still can't fix it, a person decides, with `rail answer NN F1 declined "why" --owner`
+or `rail answer NN F1 parked "why" --owner`.
 
 When you fix a finding, `advance` ships the fix and reviews the whole change again. A finding marked fixed
 counts only once a later run doesn't repeat it.

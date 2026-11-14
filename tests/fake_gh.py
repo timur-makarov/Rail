@@ -138,7 +138,8 @@ def handle(state, method, path, body):
     if len(rest) == 3 and rest[0] == "issues" and rest[2] == "comments":
         comments = state.setdefault("comments", {}).setdefault(rest[1], [])
         if method == "POST":
-            comments.append({"body": body["body"], "user": {"login": "rail"}, "created_at": "2026-11-11T12:00:00Z"})
+            comments.append({"body": body["body"], "user": {"login": "owner"}, "author_association": "OWNER",
+                             "created_at": "2026-11-11T12:00:00Z"})  # the engine writes with the person's token
             return respond(201, comments[-1])
         return respond(200, comments)
     if len(rest) == 2 and rest[0] == "issues" and method == "GET":

@@ -3,6 +3,7 @@
 import datetime
 import os
 import re
+import shutil
 import signal
 import subprocess
 import time
@@ -110,13 +111,42 @@ def globs_overlap(a, b):
 AFTER_SHELL = []  # called after every shell command: what the engine remembers about git and GitHub may be old
 
 
+# The exit codes a shell gives a command it could not start: 127 when it isn't found, 126 when it is found but
+# can't be run (not executable, a directory). A check that ends this way checked nothing.
+COULD_NOT_RUN = {126: "found but could not be run", 127: "command not found"}
+
+
+# What to do about it, for the agent's brief.
+MISSING_HELP = ("Nothing was checked: the shell couldn't start the command or a tool it calls, which isn't on this"
+                " machine or isn't executable. If your change removed, renamed or broke it, put it back. Otherwise"
+                " install it here to go on, and open a ticket so that [commands] provision (or setup) installs it on"
+                " every machine.")
+
+
+def could_not_run(code):
+    """The words for a command the shell could not start, or None when it ran (or timed out)."""
+    return f"could not run (exit {code}: {COULD_NOT_RUN[code]})" if code in COULD_NOT_RUN else None
+
+
+def shell(command):
+    """The argv that runs a configured command. A failure anywhere in a pipe fails the command (pipefail), so
+    `pytest | tail -20` fails when pytest fails, and `pytest | head` fails when head cuts pytest off before it ends.
+    bash has pipefail on Linux and macOS alike; Linux's sh (dash) has none. Without bash, sh gets it where its
+    shell knows the option, as busybox's does."""
+    bash = shutil.which("bash")
+    if bash:
+        return [bash, "-o", "pipefail", "-c", command]
+    return ["sh", "-c", "(set -o pipefail) 2>/dev/null && set -o pipefail; " + command]
+
+
 def run_shell(command, cwd, env_extra=None, timeout=None, stdin=None):
-    """Run a command through sh, with `stdin` as its input. Returns (exit code or None on timeout, output, ms)."""
+    """Run a command through the shell (see `shell`), with `stdin` as its input. Returns (exit code or None on
+    timeout, output, ms)."""
     env = dict(os.environ)
     env.update(env_extra or {})
     start = time.monotonic()
     proc = subprocess.Popen(
-        ["sh", "-c", command], cwd=cwd, env=env, stdin=subprocess.DEVNULL if stdin is None else subprocess.PIPE,
+        shell(command), cwd=cwd, env=env, stdin=subprocess.DEVNULL if stdin is None else subprocess.PIPE,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE if stdin is not None else subprocess.STDOUT, text=True,
         start_new_session=True,
     )

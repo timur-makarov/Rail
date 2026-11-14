@@ -11,6 +11,9 @@ verify = ""                               # reader: ship and CI. The whole proje
 provision = ""                            # reader: rail provision, next in a cloud session, and CI. Installs, as root, what the
                                           # checks need on a machine made for the work; never run on a person's own computer
 timeout_secs = 900                        # reader: every command run: setup, verify, each check, each review run
+                                          # Every command runs through bash -o pipefail: a failure anywhere in a pipe
+                                          # fails it, so `pytest | tail -20` fails with pytest. A tool the shell can't
+                                          # find (exit 127) is recorded as could not run, not as a failure
 
 [risk_paths]                              # reader: add (floors matched against scope_paths) and ship (changed files)
 HIGH = [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".claude/**", ".github/workflows/**"]
@@ -32,7 +35,8 @@ depth = 1                                 # reader: doc-lint; the directory dept
 ignore = []
 
 [review]                                  # reader: advance; runs in the ticket's worktree with the brief on stdin
-# the command runs through sh; --json-schema takes the schema's text, not a path. The engine resets the worktree afterwards
+# the command runs through bash -o pipefail, as every command here does; --json-schema takes the schema's text, not a
+# path. The engine resets the worktree afterwards
 command = '''claude -p --safe-mode --system-prompt-file .rail/engine/reviewer.md --tools Read,Grep,Glob,Bash,Edit,Write --allowedTools Bash,Edit,Write --disallowedTools 'Bash(git push *)' --output-format json --json-schema "$(cat .rail/engine/review-v1.json)"'''
 
 model = ""                                # the model the reviewer runs on, such as "claude-opus-5-5"; empty is the CLI's default

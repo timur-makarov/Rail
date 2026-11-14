@@ -96,6 +96,50 @@ class Review(RailTest):
         self.assertIn("You are the refuter.", refuter)
         self.assertNotIn("which is right", refuter)  # it never sees the author's argument
 
+    def test_parking_a_blocking_finding_disputes_it_and_the_refuter_decides_whose_problem_it_is(self):
+        # Parked meant "a real problem this change didn't cause", and closed a blocking finding with nobody else
+        # looking: the author could wave any blocking finding through. Now a fresh refuter decides.
+        p = self.fixture()
+        self.medium(p)
+        p.queue_reviews(found(BLOCKING), found(BLOCKING | {"repeats": "F1", "severity": "parked"},
+                                               summary="Real, but add() was already wrong on main."))
+        p.rail("advance", "1", expect=3)
+        disputed = p.rail("answer", "1", "F1", "parked", "add() was like this before.")
+        self.assertEqual((disputed["state"], disputed["reason"]["code"]), ("reviewing", "REVIEW"))
+        self.assertEqual(events(p, "1-fix-add", "finding")[-1]["disputed"], True)
+        done = p.rail("advance", "1")
+        self.assertEqual(done["state"], "merge-ready", done)
+        self.assertEqual(done["steps"][-1]["detail"], "run 2: parked F1")
+        last = events(p, "1-fix-add", "finding")[-1]
+        self.assertEqual((last["outcome"], last["by"], last["reason"]),
+                         ("parked", "refuter", "Real, but add() was already wrong on main."))
+        refuter = p.briefs()[1]["brief"]
+        self.assertIn("this change didn't cause it, the severity is parked", refuter)
+        self.assertNotIn("was like this before", refuter)  # it never sees the author's argument
+
+    def test_a_blocking_finding_the_refuter_upholds_stays_blocking_however_the_author_parks_it(self):
+        p = self.fixture()
+        self.medium(p)
+        p.queue_reviews(found(BLOCKING), found(BLOCKING | {"repeats": "F1"}, summary="This change made it."))
+        p.rail("advance", "1", expect=3)
+        p.rail("answer", "1", "F1", "parked")
+        upheld = p.rail("advance", "1", expect=3)
+        self.assertEqual(upheld["steps"][-1]["detail"], "run 2: upheld F1")
+        again = p.rail("answer", "1", "F1", "parked", "Still not mine.")
+        self.assertEqual((again["owner"], again["reason"]["code"]), ("human", "FINDING_UPHELD"))
+        self.assertIn("parked \"why\" --owner", again["action"]["brief"])
+        owner = p.rail("answer", "1", "F1", "parked", "It predates this ticket; ticket 9 fixes it.", "--owner")
+        self.assertEqual(owner["state"], "merge-ready")
+
+    def test_an_advisory_finding_parks_without_a_refuter(self):
+        p = self.fixture()
+        self.medium(p)
+        p.queue_reviews(found(ADVISORY))
+        p.rail("advance", "1")
+        done = p.rail("answer", "1", "F1", "parked", "The whole module lacks docstrings.")
+        self.assertEqual(done["state"], "merge-ready")
+        self.assertEqual(len(p.briefs()), 1)
+
     def test_an_upheld_finding_the_agent_still_disputes_waits_for_a_person(self):
         p = self.fixture()
         self.medium(p)

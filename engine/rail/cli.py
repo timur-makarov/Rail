@@ -15,7 +15,8 @@ from .project import Project, event, events_path, ticket_path
 from .state import OPEN, derive, floor
 from .table import TRANSITIONS, first_match
 from .ticket import Ticket, branch_name, highest, lint, rank, with_id, with_tier
-from .util import RailError, age, cloud, disposable, match_any, session_url
+from .forge import ENGINE_MARK, TRUSTED
+from .util import RailError, age, cloud, could_not_run, disposable, match_any, session_url, shell
 
 VERBS = ("init", "add", "accept", "amend", "answer", "next", "advance", "status", "context", "drop", "doctor", "ci",
          "consult", "docs", "intake", "sweep", "provision", "save")
@@ -213,13 +214,18 @@ def update_pr(project, f, receipts):
 
 
 def person_comments(project, f):
-    """PR comments since the ticket's last journal event: what a person said during the wait."""
+    """PR comments since the ticket's last journal event: what a person said during the wait.
+
+    Only people who can push to the repository speak for it. On a public repository anyone can comment, and a
+    stranger's comment would reach the agent as the owner's words; a bot's (author_association NONE) is no person's.
+    The engine's own comments carry ENGINE_MARK and are left out too."""
     if not f.pr:
         return ""
     moves = [e["at"] for e in f.t.events if e.get("event") != "saved" and e.get("at")]  # a save isn't a move
     since = moves[-1] if moves else ""
     said = [c["body"].strip() for c in project.forge.comments(f.pr["number"])
-            if c.get("created_at", "") >= since and c.get("body")]
+            if c.get("created_at", "") >= since and c.get("body") and c.get("author_association") in TRUSTED
+            and ENGINE_MARK not in c["body"]]
     return "\n".join(said)
 
 
@@ -524,9 +530,10 @@ def cmd_answer(project, args):
     if args.outcome == "declined" and not args.reason:
         raise RailError("a decline needs a reason")
     by = "owner" if args.owner else "author"
-    if args.outcome == "declined" and by == "author" and f.ledger.findings[fid].get("severity") == "blocking":
-        # The author can't decline a blocking finding: declining disputes it, and a fresh refuter decides.
-        record = event(f.id, "finding", id=fid, outcome="open", by="author", disputed=True, reason=args.reason)
+    if args.outcome in ("declined", "parked") and by == "author" and f.ledger.findings[fid].get("severity") == "blocking":
+        # The author can't close a blocking finding: declining or parking it disputes it, and a fresh refuter
+        # decides whether it holds and whether this change caused it.
+        record = event(f.id, "finding", id=fid, outcome="open", by="author", disputed=True, reason=args.reason or "")
     else:
         record = event(f.id, "finding", id=fid, outcome=args.outcome, by=by, reason=args.reason or "")
     ensure_local(project, f.t)
@@ -1070,7 +1077,8 @@ def release_issue(project, f):
         if "rail" in {l["name"] for l in issue.get("labels", [])}:
             project.forge.remove_label(number, "rail")
             link = f.pr["html_url"] if f.pr else f"branch {f.t.name}"
-            project.forge.comment(number, f"Ticket {f.id} was dropped ({link}). Label this issue `rail` again to retry.")
+            project.forge.comment(number, f"Ticket {f.id} was dropped ({link}). Label this issue `rail` again to retry."
+                                          f"\n{ENGINE_MARK}")
     except ForgeError:
         pass
 
@@ -1311,11 +1319,13 @@ def run_provision(project, run):
     if passed and command:
         as_root = command
         if os.geteuid() != 0 and subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode == 0:
-            as_root = f"sudo -n -E sh -c {shlex.quote(command)}"  # a CI runner isn't root, and its sudo asks no password
+            # a CI runner isn't root, and its sudo asks no password. The command runs as every other does (pipefail)
+            as_root = "sudo -n -E " + " ".join(shlex.quote(word) for word in shell(command))
         code, output, ms = steps.run_shell(as_root, project.root, {"RAIL_BASE": project.base_ref},
                                            project.config["commands"]["timeout_secs"])
-        passed = run.record("provision", code == 0, None, "timeout" if code is None else f"exit {code}", ms,
-                            output=f"$ {command}\n{steps.tail(output)}")
+        missing = could_not_run(code)
+        passed = run.record("provision", code == 0, None, missing or ("timeout" if code is None else f"exit {code}"),
+                            ms, output=f"$ {command}\n{steps.tail(output)}", status="could_not_run" if missing else "ran")
     if passed:
         path = _provision_marker(project)
         os.makedirs(os.path.dirname(path), exist_ok=True)

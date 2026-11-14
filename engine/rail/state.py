@@ -111,7 +111,7 @@ class Facts:
                     continued_at = i
                 else:
                     accepted_at = i
-            elif kind == "step" and e.get("status") == "ran":
+            elif kind == "step" and e.get("status") in ("ran", "could_not_run"):
                 step = e.get("step")
                 if e.get("result") == "pass":
                     attempts[step] = 0
