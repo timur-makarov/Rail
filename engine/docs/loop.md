@@ -18,7 +18,7 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
 
 ## What next does
 
-`next` makes some moves itself: it accepts a ticket whose tier is in `auto_tiers`, claims a ticket, makes
+`next` makes some moves itself: it accepts an AUTO ticket, claims a ticket, makes
 its worktree in `.claude/worktrees/NN`, copies the files `.worktreeinclude` lists, and runs `setup` there.
 It prefers this session's own tickets; then tickets no session holds (a shipped ticket, which any session
 may move through CI and the merge, and work an ended session left); then new work in ID order. A ticket
@@ -46,12 +46,13 @@ also takes in issues labelled `rail`, and every command that meets a wait labels
 
 In the ticket's worktree, `advance` commits your in-scope changes and ships: it rebases onto a moved base,
 then runs ticket lint, the ASSUMED rows, scope, structure rules, the migration fields, size, doc-lint,
-`verify` and each `Check:` line. On MEDIUM and HIGH it then runs the review. With no remote, a ready
-ticket in `auto_tiers` is merged by the next `advance` (run it from the project's root: the merge removes the
-worktree), as a squash commit on the base branch; other tiers
-wait for `rail accept NN` first. With a remote, every ticket has a pull request; once its required checks
-are green, `advance` merges an `auto_tiers` ticket through GitHub's async merge, and a person merges the
-rest. When only CI waits remain, `next` returns `gh run watch` for the run, then `rail next`.
+`verify` and each `Check:` line. Then it runs the review, unless every changed file is in
+`[review] skip_paths` (see [review](review.md)). With no remote, a ready AUTO ticket is merged by the next
+`advance` (run it from the project's root: the merge removes the worktree), as a squash commit on the base
+branch; a PERSON ticket waits for `rail accept NN` first. With a remote, every ticket has a pull request;
+once its required checks are green, `advance` merges an AUTO ticket through GitHub's async merge, and a
+person merges a PERSON ticket. When only CI waits remain, `next` returns `gh run watch` for the run, then
+`rail next`.
 
 When the rebase meets a conflict, `advance` undoes it and asks you to rebase by hand. While that rebase is
 open in the worktree, `next`, `advance` and `save` only say how to end it (`REBASING`), and nothing is
@@ -63,4 +64,6 @@ lost.
 - `rail status`: every ticket, its state and owner, LAST (the age of its last journal event) and NOTE (what it
   waits for, a stale warning, or its pull request), then leftovers to clean up.
 - `rail context NN`: the `## Areas` rows a ticket touches, and a directory digest.
+- `rail stats`: what the merged tickets' journals say: tickets by tier, failed steps, and the reviewer's
+  cost and hit rate.
 - `rail docs TOPIC`: these pages. `rail docs cli` and `rail docs config` are the references.

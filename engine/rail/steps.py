@@ -163,8 +163,7 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None):
 
     needed, reason = raised_tier(project, changed)
     if rank(needed) > rank(tier):
-        globs = project.config["risk_paths"].get(needed, []) + (project.config["migration_paths"] if needed == "HIGH" else [])
-        hits = [p for p in changed if match_any(globs, p)]
+        hits = [p for p in changed if match_any(project.config[reason], p)]
         run.events.append(event(nn, "tier_raised", **{"from": tier, "to": needed, "reason": reason,
                                                      "detail": ", ".join(hits[:5])}))
         tier = needed
@@ -178,12 +177,12 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None):
             return _stop(run, "migration")
 
     count, _ = rules.size(project, ref, cwd)
-    cap = project.config["size"].get(tier)
+    cap = project.config["size"]["cap"] if tier == "AUTO" else None  # a PERSON change has no cap: a person reads it
     run.record("size", True, patch_id, f"size {count}/{cap}" if cap else f"size {count}")
     sized = rules.size_tier(project, tier, count)
     if rank(sized) > rank(tier):
         run.events.append(event(nn, "tier_raised", **{"from": tier, "to": sized, "reason": "size",
-                                                     "detail": f"{count} changed lines, over the {tier} cap of {cap}"}))
+                                                     "detail": f"{count} changed lines, over the cap of {cap}"}))
         tier = sized
     run.size = count
 
@@ -299,8 +298,14 @@ def describe(project, t, ticket, tier):
         name = f"check: {e.get('detail')}" if e.get("step") == "checks" else e.get("step")
         said = "could not run" if e.get("status") == "could_not_run" else f"{e.get('status')}, {e.get('result')}"
         rows.append(f"| {name} | {said} |")
-    from .review import Ledger, load_doc
+    from .review import Ledger, load_doc, needs_review
     ledger = Ledger(t.events, load_doc(t.review_text, t.id))
+    changed = project.changed_files(t.ref)
+    reviewed = needs_review(project, tier, changed)
+    if not reviewed:
+        # The table says what didn't run, and why: a reader must not take a missing row for a review.
+        why = "every changed file is in [review] skip_paths" if changed else "no product file changed"
+        rows.append(f"| review | not needed: {why} |")
     for role in ("review", "security"):
         if ledger.runs(role):
             own = [fid for fid, x in ledger.findings.items() if x.get("role") == role]
@@ -309,7 +314,6 @@ def describe(project, t, ticket, tier):
             models = sorted({r["model"] for r in ledger.runs(role) if r.get("model")})
             by = f" by {', '.join(models)}" if models else ""
             rows.append(f"| {role} | ran, {len(ledger.runs(role))} runs{by}, {said} |")
-    changed = project.changed_files(t.ref)
     lockfiles = [p for p in changed if os.path.basename(p) in rules.LOCKFILES]
     migrations = "No migrations." if not ticket.get("reversibility") else (
         f"Migrations: {ticket.get('reversibility')}; rollback: {ticket.get('rollback')}.")
@@ -321,7 +325,9 @@ def describe(project, t, ticket, tier):
         "## Look at", ticket.sections.get("Look at") or "(not written)", "",
         "## Evidence", "| Step | Status |", "|---|---|", *rows, "",
         "## Risk", risk, "",
+        # Trailers. The sweep reads Review: to find what merged with no reviewer.
         f"Ticket: {t.id}", f"Tier: {tier}",
+        "Review: " + (("reviewer, security seat" if tier == "PERSON" else "reviewer") if reviewed else "none"),
     ]
     if external.startswith("github#"):
         body.append(f"Closes #{external.split('#', 1)[1]}")

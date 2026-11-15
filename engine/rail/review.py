@@ -10,8 +10,7 @@ import re
 
 from . import areas, gitx
 from .project import event, review_path, ticket_path
-from .ticket import rank
-from .util import could_not_run, now_iso, run_shell, tail
+from .util import could_not_run, match_any, now_iso, run_shell, tail
 
 SECURITY = """Security. This list is a checklist, not a ceiling. Report only what someone could exploit in this application:
 1. authorization: checked at object level and on every path;
@@ -94,8 +93,8 @@ class Ledger:
         return any(e.get("by") == "refuter" for _, e in self.findings[fid]["history"])
 
     def disputed(self):
-        """Blocking findings a fresh refuter decides: those the author disputes, and each new one from the HIGH
-        security seat."""
+        """Blocking findings a fresh refuter decides: those the author disputes, and each new one from the PERSON
+        tier's security seat."""
         found = []
         for fid, f in self.findings.items():
             if self.outcome(fid) != "open":
@@ -126,7 +125,7 @@ class Ledger:
 
     def needed_run(self, patch_id, tier):
         """The role whose run the patch still needs, or None."""
-        roles = ["review"] + (["security"] if tier == "HIGH" else [])
+        roles = ["review"] + (["security"] if tier == "PERSON" else [])
         for role in roles:
             if not self.runs(role, patch_id):
                 return role
@@ -177,8 +176,8 @@ def brief(project, f, role, ledger, disputed=None):
     found = areas.context(project, ref, f.ticket.scope)
     rows = "\n".join(f"| {a['area']} | {', '.join(a['paths'])} | {a['holds']} |" for a in found["areas"]) or "(none match)"
     if role == "review":
-        look_for = REVIEW_LOOK_FOR + ("\n- " + SECURITY if f.tier == "MEDIUM" else
-                                      "\n(Security is the security seat's job on this HIGH ticket.)")
+        look_for = REVIEW_LOOK_FOR + ("\n- " + SECURITY if f.tier == "AUTO" else
+                                      "\n(Security is the security seat's job on this PERSON ticket.)")
         job = "Review this change."
     elif role == "security":
         look_for = SECURITY_LOOK_FOR + "\n" + SECURITY
@@ -360,5 +359,8 @@ def model_env(model):
     return {"ANTHROPIC_MODEL": model, "RAIL_MODEL": model} if model else {}
 
 
-def needs_review(tier):
-    return rank(tier) >= rank("MEDIUM")
+def needs_review(project, tier, changed):
+    """Whether a change gets the reviewer before it merges: a PERSON ticket always, and an AUTO ticket unless every
+    file it changes is in [review] skip_paths. The paths decide, not the author. A change to no product file has
+    nothing to review. The sweep reviews afterwards what merged without one."""
+    return tier == "PERSON" or not all(match_any(project.config["review"]["skip_paths"], path) for path in changed)

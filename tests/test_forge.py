@@ -15,14 +15,14 @@ def events(fx, nn="1", branch="origin/1-fix-add"):
     return [json.loads(line) for line in fx.git("show", f"{branch}:.rail/journal/{nn}-events.jsonl").splitlines()]
 
 
-def bare_log(github, branch="main"):
+def bare_log(github, branch="main", count=1):
     bare = github.read()["bare"]
-    return subprocess.run(["git", "--git-dir", bare, "log", "-1", "--format=%s%n%b", branch], capture_output=True,
+    return subprocess.run(["git", "--git-dir", bare, "log", f"-{count}", "--format=%s%n%b", branch], capture_output=True,
                           text=True).stdout
 
 
 class Lifecycle(RailTest):
-    def test_a_low_ticket_runs_through_its_pull_request_to_a_merge(self):
+    def test_a_ticket_runs_through_its_pull_request_to_a_merge(self):
         a, b, github = self.github_pair()
         a.add(ticket())
         claimed = a.rail("next")
@@ -34,7 +34,7 @@ class Lifecycle(RailTest):
         shipped = a.rail("advance", "1")
         self.assertEqual((shipped["state"], shipped["reason"]["code"]), ("in-ci", "CI_WAIT"))
         self.assertEqual(github.pr(1)["title"], "1: fix add")
-        self.assertIn("Ticket: 1\nTier: LOW", github.pr(1)["body"])
+        self.assertIn("Ticket: 1\nTier: AUTO\nReview: reviewer", github.pr(1)["body"])
 
         github.ci("1-fix-add", "success")
         ready = a.rail("next")
@@ -57,7 +57,7 @@ class Lifecycle(RailTest):
         github.ci("1-fix-add", "success")
         self.assertEqual(a.rail("advance", "1")["state"], "merged")  # GitHub's merge: a's own main stays behind
         a.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
-        self.assertIn("size 0/300", a.rail("next")["action"]["brief"])
+        self.assertIn("size 0/600", a.rail("next")["action"]["brief"])
 
     def test_a_red_required_check_returns_the_ticket_with_its_output(self):
         a, b, github = self.github_pair()
@@ -101,19 +101,21 @@ class Lifecycle(RailTest):
 
 
 class Approvals(RailTest):
-    def test_a_backlog_merges_low_and_medium_while_high_waits_on_its_pull_request(self):
-        """One session runs a LOW, a MEDIUM and a HIGH ticket."""
-        a, b, github = self.github_pair()
+    def test_a_backlog_merges_auto_tickets_while_a_person_ticket_waits_on_its_pull_request(self):
+        """One session runs an AUTO ticket inside skip_paths, an AUTO ticket the reviewer checks, and a PERSON ticket."""
+        a, b, github = self.github_pair(config=CONFIG.replace("[review]", '[review]\nskip_paths = ["src/calc.py"]'))
         a.add(ticket(title="Fix add"))
-        a.add(ticket(title="Add a status code", tier="MEDIUM", scope=("api/**",), check="grep -q 201 api/handlers.py"))
-        a.add(ticket(title="Change the config", tier="HIGH", scope=("src/config/**",), check="test -f src/config/app.toml"))
+        a.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
+        a.add(ticket(title="Change the config", tier="PERSON", scope=("src/config/**",), check="test -f src/config/app.toml"))
         contract = github.pr(1)
         self.assertEqual(contract["title"], "3: [contract] Change the config")
 
         first = a.rail("next")
         self.assertEqual(first["ticket"], "1")
         a.fix_calc("1")
-        a.rail("advance", "1")
+        unreviewed = a.rail("advance", "1")
+        self.assertNotIn("review", [s["step"] for s in unreviewed["steps"]])  # its one changed file needs no reviewer
+        self.assertIn("| review | not needed: every changed file is in [review] skip_paths |", github.pr(2)["body"])
         github.ci("1-fix-add", "success")
         self.assertEqual(a.rail("advance", "1")["state"], "merged")
 
@@ -121,7 +123,7 @@ class Approvals(RailTest):
         self.assertEqual(second["ticket"], "2")
         a.write("api/handlers.py", "def handle():\n    return 201\n", base=a.worktree("2"))
         reviewed = a.rail("advance", "2")
-        self.assertEqual(reviewed["state"], "in-ci")
+        self.assertEqual((reviewed["state"], reviewed["steps"][-1]["step"]), ("in-ci", "review"))
         github.ci("2-add-a-status-code", "success")
         self.assertEqual(a.rail("advance", "2")["state"], "merged")
 
@@ -148,7 +150,10 @@ class Approvals(RailTest):
         github.person_merges(1)
         self.assertEqual(a.rail("next")["reason"]["code"], "NO_WORK")
         self.assertEqual([t["state"] for t in a.rail("status")["tickets"]], ["merged", "merged", "merged"])
-        self.assertIn("Ticket: 3\nTier: HIGH", bare_log(github))
+        log = bare_log(github, count=3)
+        for trailers in ("Ticket: 1\nTier: AUTO\nReview: none", "Ticket: 2\nTier: AUTO\nReview: reviewer\n",
+                         "Ticket: 3\nTier: PERSON\nReview: reviewer, security seat"):
+            self.assertIn(trailers, log)
 
     def test_a_person_holds_a_ticket_with_a_label_and_continues_it_with_rail_go(self):
         a, b, github = self.github_pair()
@@ -367,21 +372,21 @@ class Resume(RailTest):
 
     def test_the_pull_request_names_the_cloud_session_and_the_reviewers_model(self):
         a, b, github = self.github_pair(config=CONFIG.replace("[review]", '[review]\nmodel = "claude-haiku-5-5"'))
-        a.add(ticket(tier="MEDIUM"))
+        a.add(ticket())
         a.rail("next", env_extra={"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_01abc"})
         a.fix_calc("1")
         a.rail("advance", "1")
         self.assertEqual(a.briefs()[-1]["model"], "claude-haiku-5-5")  # the reviewer command ran on the model named
         body = github.pr(1)["body"]
         self.assertIn("| review | ran, 1 runs by claude-haiku-5-5, no findings |", body)
-        self.assertTrue(body.endswith("Tier: MEDIUM\nClaude-Session: https://claude.ai/code/session_01abc"), body)
+        self.assertTrue(body.endswith("Tier: AUTO\nReview: reviewer\nClaude-Session: https://claude.ai/code/session_01abc"), body)
 
 
 class Desk(RailTest):
     def test_a_wait_is_labelled_at_once_and_its_brief_says_what_to_do_on_github(self):
         # The contract's wait gets rail:needs-you even while the agent has other work.
         a, b, github = self.github_pair()
-        a.add(ticket(title="Change the config", tier="HIGH", scope=("src/config/**",), check="test -f src/config/app.toml"))
+        a.add(ticket(title="Change the config", tier="PERSON", scope=("src/config/**",), check="test -f src/config/app.toml"))
         a.add(ticket(title="Fix add"))
         working = a.rail("next")
         self.assertEqual((working["ticket"], working["reason"]["code"]), ("2", "IMPLEMENT"))
@@ -397,18 +402,18 @@ class Desk(RailTest):
 
     def test_a_contract_changed_before_approval_shows_on_its_pull_request(self):
         a, b, github = self.github_pair()
-        a.add(ticket(title="Change the config", tier="HIGH", scope=("src/config/**",), check="test -f src/config/app.toml"))
+        a.add(ticket(title="Change the config", tier="PERSON", scope=("src/config/**",), check="test -f src/config/app.toml"))
         self.assertIn("test -f src/config/app.toml", github.pr(1)["body"])
         self.assertIn("Don't merge it", github.pr(1)["body"])  # the page has a merge button; the label approves
         changed = os.path.join(self.tmp, "1.md")
         with open(changed, "w") as f:
-            f.write(ticket(title="Change the config and its docs", tier="HIGH", scope=("src/config/**", "docs/**"),
+            f.write(ticket(title="Change the config and its docs", tier="PERSON", scope=("src/config/**", "docs/**"),
                            check="test -f src/config/app.toml && test -f docs/config.md"))
         a.rail("amend", "1", "--file", changed)
         self.assertEqual(github.pr(1)["title"], "1: [contract] Change the config and its docs")
         self.assertIn("test -f docs/config.md", github.pr(1)["body"])
 
-    def test_a_high_ticket_from_an_issue_gets_its_contract_pull_request_once_the_contract_is_written(self):
+    def test_a_person_ticket_from_an_issue_gets_its_contract_pull_request_once_the_contract_is_written(self):
         a, b, github = self.github_pair()
         github.update(lambda s: s["issues"].append({"number": 12, "title": "Rework the config", "body": "It is a mess.",
                                                     "labels": ["rail"], "state": "open"}))
@@ -416,7 +421,7 @@ class Desk(RailTest):
         self.assertEqual(github.read()["pulls"], [])  # no contract yet, so nothing to approve
         written = os.path.join(self.tmp, "1.md")
         with open(written, "w") as f:
-            f.write(ticket(title="Rework the config", tier="HIGH", scope=("src/config/**",),
+            f.write(ticket(title="Rework the config", tier="PERSON", scope=("src/config/**",),
                            check="test -f src/config/app.toml", front=('external_id = "github#12"',)))
         waiting = a.rail("amend", "1", "--file", written)
         self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("human", "APPROVE_CONTRACT"))

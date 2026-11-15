@@ -40,7 +40,7 @@ ARCHITECTURE = """\
 CHECK_ADD = "python3 -c \"import sys; sys.path.insert(0, 'src'); import calc; assert calc.add(2, 3) == 5\""
 
 
-def ticket(title="Fix add", tier="LOW", scope=("src/**",), check=CHECK_ADD, front=(), body=""):
+def ticket(title="Fix add", tier="AUTO", scope=("src/**",), check=CHECK_ADD, front=(), body=""):
     """A ticket file, in the format rail add reads."""
     scope_list = ", ".join(f'"{s}"' for s in scope)
     lines = ["+++", f'title = "{title}"', f'tier = "{tier}"', f"scope_paths = [{scope_list}]", *front, "+++", "",

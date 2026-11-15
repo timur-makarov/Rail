@@ -5,7 +5,8 @@ import hashlib
 import re
 import tomllib
 
-TIERS = ("LOW", "MEDIUM", "HIGH")
+# AUTO: the engine accepts the contract and merges. PERSON: a person approves the contract and merges.
+TIERS = ("AUTO", "PERSON")
 FIELDS = {
     "id": str, "title": str, "tier": str, "scope_paths": list, "after": list,
     "caused_by": str, "external_id": str, "reversibility": str, "rollback": str,

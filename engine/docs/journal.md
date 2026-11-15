@@ -21,13 +21,13 @@ stores state. Never edit it by hand: the guard denies it.
 
 | Event | Written when | Fields | Read by |
 |---|---|---|---|
-| `accepted` | Ticket lint first passes on an auto tier; a person approves; an amend takes effect | `by` (`engine`, `person`), `via` (`lint`, `label`, `accept`, `amend`, `merge`), `tier`, `contract`, `done`, `scope_paths`, `note` | The `accepted` state. Ship and CI compare `contract` and `tier` with the ticket: that is the freeze. `via: merge` is a contract pull request that a person merged |
+| `accepted` | Ticket lint first passes on an AUTO ticket; a person approves; an amend takes effect | `by` (`engine`, `person`), `via` (`lint`, `label`, `accept`, `amend`, `merge`), `tier`, `contract`, `done`, `scope_paths`, `note` | The `accepted` state. Ship and CI compare `contract` and `tier` with the ticket: that is the freeze. `via: merge` is a contract pull request that a person merged |
 | `amended` | `rail amend NN` | `contract` (the new hash), `changed` (any of `done_contract`, `scope`, `tier`), `added_paths`, `needs_approval` | When `needs_approval` is true, the ticket waits until a later `accepted` |
 | `claimed` | A claim or a takeover inside `next` | `session`, `takeover`, and in a cloud session `session_url` | The `implementing` state. `next` finds this session's ticket by it, and the pull request ends with the last `session_url` |
 | `saved` | `rail save`, the save hooks, and `advance` before a long command | `via` (`save`, `stop`, `pulse`, `advance`), `files` | Shows the ticket is alive: its `at` is what `[claim] stale_minutes` is measured from |
 | `step` | Every step the engine runs (below) | `step`, `status` (`ran`, or `could_not_run` when the shell couldn't start the command: exit 127 or 126), `result` (`pass`, `fail`; always `fail` when it couldn't run), `patch_id`, `counted`, `detail`, `duration_ms`, `cost_usd` | The retry budget and the pull request's Evidence table |
 | `shipped` | Every ship step passed for the current patch | `patch_id`, `head`, `tier`, `size` | CI's "not shipped yet" test, and the `reviewing` and `in-ci` states |
-| `tier_raised` | Ship raises the tier | `from`, `to`, `reason` (`size`, `risk_paths`, `migration_paths`), `detail` | The ticket's tier from then on |
+| `tier_raised` | Ship makes an AUTO ticket PERSON | `from`, `to`, `reason` (`size`, `person_paths`, `migration_paths`), `detail` | The ticket's tier from then on |
 | `finding` | A review run reports or repeats a finding; `rail answer`; a refuter or the owner decides one | `id`, `outcome` (`open`, `fixed`, `declined`, `parked`), `by` (`reviewer`, `author`, `refuter`, `owner`), `reason`, `disputed`. The first event for an id also has `severity`, `claim` and `check` | `advance` and CI: no finding may be open. The sweep reads the parked ones and the `check` of fixed ones |
 | `consulted` | Consult ran | `trigger` (`retry_cap`, `request`), `step`, `verdict` (`proceed`, `change`, `stop`), `same_model` | The retry rule below, and the limit of three per ticket |
 | `continued` | A person continued a wait with `rail:go` or `rail accept` | `via` (`label`, `accept`), `note` | A fresh retry budget, and the agent's next brief |
@@ -40,12 +40,12 @@ rise and may not fall.
 A sample:
 
 ```jsonl
-{"v":1,"at":"2026-01-11T13:58:02Z","ticket":"14","event":"accepted","by":"engine","via":"lint","tier":"MEDIUM","contract":"9c1f04e2a7b3"}
+{"v":1,"at":"2026-01-11T13:58:02Z","ticket":"14","event":"accepted","by":"engine","via":"lint","tier":"AUTO","contract":"9c1f04e2a7b3"}
 {"v":1,"at":"2026-01-11T14:00:10Z","ticket":"14","event":"claimed","session":"0f3a9d1c","takeover":false}
 {"v":1,"at":"2026-01-11T14:10:12Z","ticket":"14","event":"saved","via":"pulse","files":3}
 {"v":1,"at":"2026-01-11T14:21:40Z","ticket":"14","event":"step","step":"verify","status":"ran","result":"fail","patch_id":"3f9c6e0d","detail":"exit 1","duration_ms":41200}
 {"v":1,"at":"2026-01-11T14:30:02Z","ticket":"14","event":"step","step":"verify","status":"ran","result":"pass","patch_id":"77aa0b12","duration_ms":39800}
-{"v":1,"at":"2026-01-11T14:30:05Z","ticket":"14","event":"shipped","patch_id":"77aa0b12","head":"a1b2c3d","tier":"MEDIUM","size":212}
+{"v":1,"at":"2026-01-11T14:30:05Z","ticket":"14","event":"shipped","patch_id":"77aa0b12","head":"a1b2c3d","tier":"AUTO","size":212}
 {"v":1,"at":"2026-01-11T14:34:51Z","ticket":"14","event":"step","step":"review","status":"ran","result":"fail","patch_id":"77aa0b12","detail":"run 1: 1 blocking, 1 findings","cost_usd":0.41}
 {"v":1,"at":"2026-01-11T14:34:51Z","ticket":"14","event":"finding","id":"F1","outcome":"open","by":"reviewer","severity":"blocking","claim":"A long-lived token is returned without retiring the old one."}
 {"v":1,"at":"2026-01-11T14:41:13Z","ticket":"14","event":"finding","id":"F1","outcome":"fixed","by":"author","reason":"Both paths now revoke the old token."}
@@ -62,11 +62,11 @@ A sample:
 | `scope` | Ship, CI | A changed product file is outside `scope_paths` |
 | `rules` | Ship, CI | A structure rule matches an added line or file |
 | `migration` | Ship, CI | A ticket on `migration_paths` lacks `reversibility` or `rollback` |
-| `size` | Ship, CI | Never. A count over the cap writes `tier_raised` |
+| `size` | Ship, CI | Never. On an AUTO ticket, a count over `[size] cap` writes `tier_raised` |
 | `doc-lint` | Ship, CI | `ARCHITECTURE.md` no longer matches the tree |
 | `verify` | Ship, CI | The command fails. When it fails on the base branch too, the event has `counted: false` |
 | `checks` | Ship, CI | A `Check:` line fails; `detail` names it |
-| `review`, `security` | `advance` | The run leaves a blocking finding open, or its output is invalid. A run past `timeout_secs` fails with `detail: "timeout"` and `counted: false` |
+| `review`, `security` | `advance` | The run leaves a blocking finding open, or its output is invalid. A run past `timeout_secs` fails with `detail: "timeout"` and `counted: false`. No run and no step when the change needs no review |
 | `refuter` | `advance` | The refuter upholds the finding. A pass means it dismissed it |
 | `sweep` | `rail sweep` | Never |
 | `merge` | `advance`, with no remote | The base branch moved during the merge |
@@ -91,7 +91,7 @@ One file per ticket. The engine appends one entry per run.
       "role": "review",
       "patch_id": "77aa0b12",
       "head": "a1b2c3d",
-      "tier": "MEDIUM",
+      "tier": "AUTO",
       "at": "2026-01-11T14:34:51Z",
       "model": "claude-opus-5-5",
       "cost_usd": 0.41,
@@ -123,7 +123,9 @@ One file per ticket. The engine appends one entry per run.
 
 **A review is complete for a patch** when all three hold. The `reviewing` state and CI use the same test:
 
-1. A `review` run exists with this `patch_id`. On HIGH, a `security` run exists too.
+1. A `review` run exists with this `patch_id`. On a PERSON ticket, a `security` run exists too. An AUTO
+   ticket whose every changed product file is in `[review] skip_paths`, or that changes no product file,
+   needs no run.
 2. No finding is open: the last `finding` event for every id has another outcome.
 3. A blocking finding marked `fixed` counts only once a later run of the same role didn't repeat it. Marking
    it fixed and changing nothing doesn't pass.
@@ -152,6 +154,11 @@ run that fails one of these has invalid output, and its step fails. The engine t
 
 The engine assigns the ids, `F1`, `F2` and so on, per ticket and across all runs. An id is never reused,
 and the reviewer never writes one except in `repeats`.
+
+## What reads it afterwards
+
+`rail stats` counts over the journals of merged tickets: tickets by tier, the steps that failed, and the
+review runs with their cost and how each finding ended (`rail docs stats`).
 
 ## What is not in the journal
 

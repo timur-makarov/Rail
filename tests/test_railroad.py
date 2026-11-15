@@ -29,7 +29,7 @@ def failed_step(answer):
 class AddToMerge(RailTest):
     """A ticket runs from add to a local merge."""
 
-    def test_low_ticket_runs_from_add_to_local_merge(self):
+    def test_a_ticket_runs_from_add_to_local_merge(self):
         p = self.fixture()
         added = p.add(ticket())
         self.assertEqual((added["ticket"], added["state"], added["owner"]), ("1", "accepted", "agent"))
@@ -53,20 +53,22 @@ class AddToMerge(RailTest):
         shipped = p.rail("advance", cwd=p.worktree("1"))
         self.assertEqual((shipped["state"], shipped["cwd"]), ("merge-ready", "."))
         self.assertEqual(shipped["action"], {"kind": "script", "brief": "rail advance 1", "command": "rail advance 1"})
-        self.assertEqual([s["step"] for s in shipped["steps"]], ["ticket-lint", "assumptions", "scope", "rules", "size", "doc-lint", "verify", "checks"])
+        # An AUTO ticket: the engine accepted its contract, the reviewer checks the change, and the engine merges it.
+        self.assertEqual([s["step"] for s in shipped["steps"]],
+                         ["ticket-lint", "assumptions", "scope", "rules", "size", "doc-lint", "verify", "checks", "review"])
 
         merged = p.rail("advance", "1")
         self.assertEqual((merged["state"], merged["owner"], merged["reason"]["code"]), ("merged", "none", "MERGED"))
 
         subject, body = p.git("log", "-1", "--format=%s%x00%b", "main").split("\x00")
         self.assertEqual(subject, "1: fix add")
-        self.assertIn("Ticket: 1\nTier: LOW", body)
+        self.assertIn("Ticket: 1\nTier: AUTO\nReview: reviewer", body)
         self.assertIn("| check: python3 -c", body)
         self.assertEqual(p.git("show", "main:src/calc.py"), "def add(a, b):\n    return a + b\n")
         self.assertEqual(read(p.path("src", "calc.py")), "def add(a, b):\n    return a + b\n")
         events = [json.loads(l)["event"] for l in p.git("show", "main:.rail/journal/1-events.jsonl").splitlines()]
         self.assertEqual(events[:2], ["accepted", "claimed"])
-        self.assertEqual(events[-1], "shipped")
+        self.assertEqual(events[-2:], ["shipped", "step"])  # the ship, then the review run on what shipped
         self.assertFalse(os.path.exists(p.worktree("1")))
         self.assertNotIn("1-fix-add", p.git("branch"))
 
@@ -106,7 +108,7 @@ class Ship(RailTest):
         p.rail("next")
         p.fix_calc("1")
         tree = p.worktree("1")
-        p.write(".rail/tickets/99.md", ticket(title="Change the engine", tier="HIGH", scope=(".rail/engine/**",)), base=tree)
+        p.write(".rail/tickets/99.md", ticket(title="Change the engine", tier="PERSON", scope=(".rail/engine/**",)), base=tree)
         failed = p.rail("advance", "1", expect=3)
         self.assertEqual(failed_step(failed)[0], "scope")
         self.assertIn(".rail/tickets/99.md", failed_step(failed)[1])
@@ -148,24 +150,51 @@ class Ship(RailTest):
         self.assertEqual(p.rail("next")["reason"]["code"], "IMPLEMENT")
         self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")
 
-    def test_risk_path_change_raises_the_tier_at_ship(self):
-        p = self.fixture(config=CONFIG + '\n[risk_paths]\nHIGH = []\nMEDIUM = ["**/*.sql"]\n')
-        self.assertEqual(p.add(ticket())["tier"], "LOW")
+    def test_a_change_to_a_person_path_makes_the_ticket_person_at_ship(self):
+        p = self.fixture(config='person_paths = ["**/*.sql"]\n' + CONFIG)
+        self.assertEqual(p.add(ticket())["tier"], "AUTO")
         p.rail("next")
         p.fix_calc("1")
         p.write("src/report.sql", "select 1;\n", base=p.worktree("1"))
         shipped = p.rail("advance", "1")
-        self.assertEqual((shipped["state"], shipped["tier"]), ("merge-ready", "MEDIUM"))
-        self.assertEqual([s["step"] for s in shipped["steps"]][-1], "review")
-        raised = [json.loads(l) for l in p.git("show", "1-fix-add:.rail/journal/1-events.jsonl").splitlines()
-                  if json.loads(l)["event"] == "tier_raised"]
-        self.assertEqual((raised[0]["from"], raised[0]["to"], raised[0]["reason"]), ("LOW", "MEDIUM", "risk_paths"))
+        # The engine accepted the contract as AUTO. The change it shipped is a person's to merge, with both reviews.
+        self.assertEqual((shipped["state"], shipped["tier"], shipped["reason"]["code"]),
+                         ("merge-ready", "PERSON", "MERGE_BY_PERSON"))
+        self.assertEqual([s["step"] for s in shipped["steps"]][-2:], ["review", "security"])
+        raised = [e for e in journal(p) if e["event"] == "tier_raised"]
+        self.assertEqual((raised[0]["from"], raised[0]["to"], raised[0]["reason"], raised[0]["detail"]),
+                         ("AUTO", "PERSON", "person_paths", "src/report.sql"))
+
+    def test_a_change_inside_skip_paths_merges_with_no_reviewer(self):
+        # The paths decide whether a change is reviewed, never the ticket's author. One file outside them is enough
+        # for the reviewer to read the whole change.
+        p = self.fixture(config=CONFIG.replace("[review]", '[review]\nskip_paths = ["docs/**"]'),
+                         files={"docs/guide.md": "# Guide\n",
+                                "ARCHITECTURE.md": ARCHITECTURE + "| docs | docs/** | the guide |\n"})
+        p.add(ticket(title="Say what add does", scope=("docs/**", "src/**"), check="grep -q sum docs/guide.md"))
+        p.rail("next")
+        p.write("docs/guide.md", "# Guide\n\nadd returns the sum.\n", base=p.worktree("1"))
+        shipped = p.rail("advance", "1")
+        self.assertEqual((shipped["state"], shipped["steps"][-1]["step"]), ("merge-ready", "checks"))
+        self.assertEqual(p.briefs(), [])  # no reviewer ran
+        p.rail("advance", "1")
+        body = p.git("log", "-1", "--format=%b", "main")
+        self.assertIn("| review | not needed: every changed file is in [review] skip_paths |", body)
+        self.assertIn("Ticket: 1\nTier: AUTO\nReview: none", body)
+
+        p.add(ticket(title="Fix add and say so", scope=("docs/**", "src/**")))
+        p.rail("next")
+        p.fix_calc("2")
+        p.write("docs/guide.md", "# Guide\n\nadd returns the sum, now for real.\n", base=p.worktree("2"))
+        shipped = p.rail("advance", "2")
+        self.assertEqual((shipped["state"], shipped["steps"][-1]["step"]), ("merge-ready", "review"))
+        self.assertIn("docs/guide.md", p.briefs()[-1]["brief"])
 
     def test_migration_needs_reversibility_and_rollback(self):
         p = self.fixture(files={"db/migrations/001.sql": "create table t (id int);\n",
                                 "ARCHITECTURE.md": ARCHITECTURE + "| db | db/** | schema and migrations |\n"})
         added = p.add(ticket(title="Add a column", scope=("db/**", "src/**")))
-        self.assertEqual((added["tier"], added["state"], added["owner"]), ("HIGH", "new", "human"))
+        self.assertEqual((added["tier"], added["state"], added["owner"]), ("PERSON", "new", "human"))
         p.rail("accept", "1")
         p.rail("next")
         p.fix_calc("1")
@@ -173,7 +202,7 @@ class Ship(RailTest):
         failed = p.rail("advance", "1", expect=3)
         self.assertEqual(failed_step(failed), ("migration", "missing reversibility, rollback"))
         path = os.path.join(p.worktree("1"), ".rail", "tickets", "1.md")
-        text = read(path).replace('tier = "HIGH"', 'tier = "HIGH"\nreversibility = "expand-contract"\nrollback = "drop column c"')
+        text = read(path).replace('tier = "PERSON"', 'tier = "PERSON"\nreversibility = "expand-contract"\nrollback = "drop column c"')
         p.write(".rail/tickets/1.md", text, base=p.worktree("1"))
         ready = p.rail("advance", "1")
         self.assertEqual((ready["state"], ready["owner"], ready["reason"]["code"]), ("merge-ready", "human", "MERGE_BY_PERSON"))
@@ -272,7 +301,7 @@ class Commands(RailTest):
 
     def test_a_reviewer_that_cannot_start_reviewed_nothing(self):
         p = self.fixture(config=CONFIG.replace(f"python3 {FAKE}\"\n\n[consult]", "no-such-reviewer\"\n\n[consult]"))
-        p.add(ticket(tier="MEDIUM"))
+        p.add(ticket(tier="AUTO"))
         p.rail("next")
         p.fix_calc("1")
         failed = p.rail("advance", "1", expect=3)
@@ -330,9 +359,9 @@ class TicketLint(RailTest):
 
 
 class Approval(RailTest):
-    def test_high_contract_waits_for_a_person_then_runs(self):
+    def test_a_person_tickets_contract_waits_for_a_person_then_runs(self):
         p = self.fixture()
-        added = p.add(ticket(tier="HIGH"))
+        added = p.add(ticket(tier="PERSON"))
         self.assertEqual((added["state"], added["owner"], added["action"]["kind"]), ("new", "human", "human_wait"))
         self.assertIn("rail accept 1", added["action"]["brief"])
         waiting = p.rail("next")
@@ -346,10 +375,11 @@ class Approval(RailTest):
         self.assertEqual(p.rail("accept", "1", expect=2)["reason"]["code"], "NOTHING_TO_ACCEPT")
         self.assertEqual(p.rail("next")["state"], "implementing")
 
-    def test_risk_paths_raise_the_tier_at_add(self):
+    def test_a_scope_that_reaches_a_person_path_makes_the_ticket_person_at_add(self):
         p = self.fixture()
         added = p.add(ticket(scope=(".github/workflows/**",)))
-        self.assertEqual((added["tier"], added["state"]), ("HIGH", "new"))
+        self.assertEqual((added["tier"], added["state"], added["reason"]["code"]), ("PERSON", "new", "APPROVE_CONTRACT"))
+        self.assertIn('tier = "PERSON"', p.git("show", "1-fix-add:.rail/tickets/1.md"))  # the ticket says so
 
 
 class Parallel(RailTest):

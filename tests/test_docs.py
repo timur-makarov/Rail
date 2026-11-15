@@ -25,7 +25,7 @@ class Reference(RailTest):
         p = self.fixture()
         page = p.rail("docs", "cli")["text"]
         for verb in ("init", "add", "accept", "amend", "answer", "next", "advance", "status", "context", "drop",
-                     "doctor", "ci", "consult", "docs"):
+                     "doctor", "ci", "consult", "docs", "stats"):
             self.assertIn(f"## rail {verb}", page)
         self.assertNotIn("## rail hook", page)
 
@@ -57,7 +57,8 @@ class Review(RailTest):
     def test_the_review_contract_and_retry_pages_cover_the_answers_an_agent_gives(self):
         p = self.fixture()
         review = p.rail("docs", "review")["text"]
-        for text in ("rail answer NN F1 fixed", "declined", "parked", "refuter", "--owner", "security seat"):
+        for text in ("rail answer NN F1 fixed", "declined", "parked", "refuter", "--owner", "security seat",
+                     "skip_paths", "PERSON"):
             self.assertIn(text, review)
         self.assertIn("rail amend NN", p.rail("docs", "contract")["text"])
         retries = p.rail("docs", "retries")["text"]
@@ -88,4 +89,9 @@ class Operations(RailTest):
             self.assertIn(text, cloud)
         self.assertIn("required check", p.rail("docs", "github")["text"])
         self.assertIn("GITHUB_TOKEN", p.rail("docs", "github-runner")["text"])
-        self.assertIn("Sweep:", p.rail("docs", "sweep")["text"])
+        sweep = p.rail("docs", "sweep")["text"]
+        for text in ("Sweep:", "Review:", "skip_paths"):
+            self.assertIn(text, sweep)
+        stats = p.rail("docs", "stats")["text"]
+        for text in ("rail stats --since", "Hit rate", "merged with no review", "BY MODEL"):
+            self.assertIn(text, stats)

@@ -99,10 +99,5 @@ def size(project, ref=None, cwd=None):
 
 
 def size_tier(project, tier, count):
-    """The tier a count needs: a LOW over its cap becomes MEDIUM, a MEDIUM over its cap becomes HIGH."""
-    caps = project.config["size"]
-    if tier == "LOW" and count > caps["LOW"]:
-        tier = "MEDIUM"
-    if tier == "MEDIUM" and count > caps["MEDIUM"]:
-        tier = "HIGH"
-    return tier
+    """The tier a count needs: an AUTO change over [size] cap becomes PERSON."""
+    return "PERSON" if tier == "AUTO" and count > project.config["size"]["cap"] else tier

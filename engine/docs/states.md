@@ -8,12 +8,12 @@ new -> accepted -> implementing -> reviewing -> in-ci -> merge-ready -> merged
 
 | State | Means |
 |---|---|
-| `new` | The ticket has no `accepted` event. Outside `auto_tiers`, a person approves it: `rail accept NN` |
+| `new` | The ticket has no `accepted` event. The engine accepts an AUTO ticket once its lint passes; a person approves a PERSON ticket: `rail accept NN` |
 | `accepted` | Accepted, not claimed yet |
 | `implementing` | Claimed, and the current patch hasn't passed the ship steps, or the worktree has uncommitted changes |
-| `reviewing` | Shipped, the tier needs a review, and no complete review is bound to this patch |
+| `reviewing` | Shipped, the change needs a review, and no complete review is bound to this patch |
 | `in-ci` | Shipped and reviewed, with a remote: waiting for the required checks on the pull request |
-| `merge-ready` | Ready to merge. `auto_tiers` merge with `rail advance NN`; other tiers wait for a person |
+| `merge-ready` | Ready to merge. An AUTO ticket merges with `rail advance NN`; a PERSON ticket waits for a person |
 | `merged` | A squash commit with `Ticket: NN` is on the base branch |
 | `dropped` | `rail drop NN` ended it, or its pull request was closed without a merge |
 

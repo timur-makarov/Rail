@@ -96,7 +96,7 @@ class RedBase(RailTest):
 class Notify(RailTest):
     def test_each_new_wait_is_announced_once(self):
         p = self.fixture()
-        p.add(ticket(tier="HIGH"))
+        p.add(ticket(tier="PERSON"))
 
         def hook(term_program):
             env = dict(os.environ, TERM_PROGRAM=term_program)
@@ -109,7 +109,7 @@ class Notify(RailTest):
         self.assertEqual(hook("iTerm.app"), "")
         p.rail("accept", "1")
         self.assertEqual(hook("iTerm.app"), "")
-        p.add(ticket(title="Another", tier="HIGH", scope=("api/**",)))
+        p.add(ticket(title="Another", tier="PERSON", scope=("api/**",)))
         self.assertEqual(json.loads(hook("ghostty"))["terminalSequence"],
                          "\x1b]777;notify;Rail;Rail: 2: approve the contract\x07")
 
@@ -152,8 +152,21 @@ class Sweep(RailTest):
         p.rail("sweep")
         self.assertIn("hotfix 3", p.briefs()[-1]["brief"])  # the merge's whole change is in the sweep's brief
 
+    def test_a_change_the_reviewer_checked_is_not_swept(self):
+        p = self.fixture(config=CONFIG + "\n[sweep]\nafter = 1\n")
+        p.add(ticket())
+        p.rail("next")
+        p.fix_calc("1")
+        p.rail("advance", "1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
+        self.assertIn("Review: reviewer", p.git("log", "-1", "--format=%b", "main"))
+        self.assertEqual(p.rail("next")["reason"]["code"], "NO_WORK")
+        self.assertIn("Nothing merged without a review", p.rail("sweep")["action"]["brief"])
+
     def test_after_enough_unreviewed_work_a_sweep_turns_findings_into_tickets(self):
-        p = self.fixture(config=CONFIG + "\n[sweep]\nafter = 2\n")
+        # Both tickets change only paths in skip_paths, so they merge with no reviewer: the sweep reads them afterwards.
+        skip = CONFIG.replace("[review]", '[review]\nskip_paths = ["src/**", "api/**"]')
+        p = self.fixture(config=skip + "\n[sweep]\nafter = 2\n")
         for title, scope, check, path, text in (
                 ("Fix add", ("src/**",), None, None, None),
                 ("Add a status code", ("api/**",), "grep -q 201 api/handlers.py", "api/handlers.py",
@@ -171,7 +184,7 @@ class Sweep(RailTest):
 
         dup = {"severity": "advisory", "file": "src/calc.py", "claim": "add and handle both lack tests.",
                "check": "a test per public function"}
-        p.queue_reviews({"summary": "Swept two LOW tickets.", "findings": [dup]})
+        p.queue_reviews({"summary": "Swept two unreviewed tickets.", "findings": [dup]})
         swept = p.rail("sweep")
         self.assertEqual((swept["ticket"], swept["reason"]["code"]), ("3", "SWEEP_TICKETS"))
         summary = read(os.path.join(p.worktree("3"), ".rail", "journal", "3-summary.md"))
@@ -180,7 +193,11 @@ class Sweep(RailTest):
         self.assertIn("Sweep brief", p.briefs()[-1]["brief"])
         self.assertIn("return 201", p.briefs()[-1]["brief"])
 
+        # The sweep's own ticket changes no product file, so it merges with no reviewer of its own.
         self.assertEqual(p.rail("advance", "3")["state"], "merge-ready")
+        self.assertEqual(len(p.briefs()), 1)
         self.assertEqual(p.rail("advance", "3")["state"], "merged")
-        self.assertIn("Sweep: since", p.git("log", "-1", "--format=%b", "main"))
+        body = p.git("log", "-1", "--format=%b", "main")
+        self.assertIn("Sweep: since", body)
+        self.assertIn("| review | not needed: no product file changed |", body)
         self.assertEqual(p.rail("next")["reason"]["code"], "NO_WORK")

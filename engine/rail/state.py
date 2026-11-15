@@ -4,7 +4,7 @@ import os
 
 from . import gitx
 from .project import NON_PRODUCT, ticket_path
-from .ticket import TIERS, Ticket, highest, lint, rank
+from .ticket import TIERS, Ticket, highest, lint
 from .util import globs_overlap, match_any, minutes_since
 
 OPEN = ("implementing", "reviewing", "in-ci", "merge-ready")  # claimed and not finished
@@ -12,7 +12,7 @@ SHIP_STEPS = ("rebase", "ticket-lint", "assumptions", "scope", "rules", "migrati
 
 
 def floor(project, scope):
-    """The tier the risk and migration paths set for a scope, and why. Matched at add."""
+    """The tier the person and migration paths set for a scope, and why. Matched at add."""
     cfg = project.config
     if not hasattr(project, "_tracked"):
         listing = gitx.git(["ls-tree", "-r", "--name-only", project.base_ref], project.root, check=False)
@@ -23,25 +23,18 @@ def floor(project, scope):
             return True
         return any(match_any(scope, f) and match_any(globs, f) for f in project._tracked)
 
-    if hits(cfg["migration_paths"]):
-        return "HIGH", "migration_paths"
-    if hits(cfg["risk_paths"]["HIGH"]):
-        return "HIGH", "risk_paths"
-    if hits(cfg["risk_paths"]["MEDIUM"]):
-        return "MEDIUM", "risk_paths"
-    return "LOW", None
+    for key in ("migration_paths", "person_paths"):
+        if hits(cfg[key]):
+            return "PERSON", key
+    return "AUTO", None
 
 
 def raised_tier(project, files):
     """The tier the changed files need, and why. Used at ship."""
-    cfg = project.config
-    if any(match_any(cfg["migration_paths"], f) for f in files):
-        return "HIGH", "migration_paths"
-    if any(match_any(cfg["risk_paths"]["HIGH"], f) for f in files):
-        return "HIGH", "risk_paths"
-    if any(match_any(cfg["risk_paths"]["MEDIUM"], f) for f in files):
-        return "MEDIUM", "risk_paths"
-    return "LOW", None
+    for key in ("migration_paths", "person_paths"):
+        if any(match_any(project.config[key], f) for f in files):
+            return "PERSON", key
+    return "AUTO", None
 
 
 class Facts:
@@ -86,7 +79,7 @@ class Facts:
         self.sweep = bool(self.ticket) and (self.ticket.get("external_id") or "").startswith("sweep#")
         self.sweep_done = any(r.get("role") == "sweep" for r in self.ledger.doc["runs"])
 
-        author = self.ticket.tier if self.ticket and self.ticket.tier in TIERS else "LOW"
+        author = self.ticket.tier if self.ticket and self.ticket.tier in TIERS else "AUTO"
         if self.accepted:
             raises = [e.get("to") for e in t.events if e.get("event") == "tier_raised"]
             self.tier = highest(self.accepted.get("tier"), author, *raises)
@@ -94,7 +87,8 @@ class Facts:
             self.tier = highest(author, floor(project, self.ticket.scope)[0])
         else:
             self.tier = author
-        self.auto = self.tier in project.config["auto_tiers"]
+        self.auto = self.tier == "AUTO"  # the engine accepts its contract and merges it; a person does both for PERSON
+        self._needs_review = None
         self.state = self._state()
 
     def _budgets(self, project, events):
@@ -192,7 +186,10 @@ class Facts:
 
     @property
     def needs_review(self):
-        return rank(self.tier) >= rank("MEDIUM")
+        from .review import needs_review
+        if self._needs_review is None:
+            self._needs_review = needs_review(self.project, self.tier, self.project.changed_files(self.t.ref))
+        return self._needs_review
 
     @property
     def pr_open(self):

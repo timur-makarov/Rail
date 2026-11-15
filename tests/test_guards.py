@@ -588,7 +588,7 @@ class Wiring(RailTest):
         self.assertEqual(decide(p, "sudo true"), "ask")
         # The agent's verbs run without asking; the person's have no allow rule, and --owner always asks.
         allow = settings["permissions"]["allow"]
-        for verb in ("next", "advance", "add", "answer", "amend", "status", "intake", "sweep", "consult"):
+        for verb in ("next", "advance", "add", "answer", "amend", "status", "stats", "intake", "sweep", "consult"):
             self.assertIn(f"Bash(rail {verb} *)", allow)
         for verb in ("accept", "drop", "init"):
             self.assertFalse([rule for rule in allow if f"rail {verb}" in rule], verb)

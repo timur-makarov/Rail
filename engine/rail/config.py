@@ -16,15 +16,11 @@ REVIEW_COMMAND = (
 
 DEFAULTS = {
     "base_branch": "main",
-    "auto_tiers": ["LOW", "MEDIUM"],
+    "person_paths": [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".claude/**", ".github/workflows/**"],
     "migration_paths": ["**/migrations/**"],
     "commands": {"setup": "", "verify": "", "provision": "", "timeout_secs": 900},
-    "risk_paths": {
-        "HIGH": [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".claude/**", ".github/workflows/**"],
-        "MEDIUM": [],
-    },
-    "size": {"LOW": 300, "MEDIUM": 600, "exclude": []},
-    "review": {"command": REVIEW_COMMAND, "model": ""},
+    "size": {"cap": 600, "exclude": []},
+    "review": {"command": REVIEW_COMMAND, "model": "", "skip_paths": []},
     "retry": {"budget": 2},
     "consult": {"command": "claude -p --safe-mode --tools Read,Grep,Glob", "model": ""},
     "claim": {"stale_minutes": 30, "save_minutes": 10},
@@ -34,7 +30,6 @@ DEFAULTS = {
 }
 
 RULE_KEYS = {"id": str, "files": str, "forbid": list, "only_in": str, "allow": list, "fix": str, "why": str}
-TIERS = ("LOW", "MEDIUM", "HIGH")
 
 
 def _suggest(key, known):
@@ -95,7 +90,4 @@ def load(root):
             config[key] = value  # a pack's own section; the pack reads it
         else:
             raise RailError(f"config: unknown key '{key}'{_suggest(key, DEFAULTS)}")
-    for tier in config["auto_tiers"]:
-        if tier not in TIERS:
-            raise RailError(f"config: auto_tiers holds '{tier}', which is not one of {', '.join(TIERS)}")
     return config

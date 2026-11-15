@@ -8,7 +8,7 @@ optional sections.
 ```markdown
 +++
 title = "Rotate refresh tokens on use"
-tier = "MEDIUM"                    # LOW, MEDIUM or HIGH; the engine may only raise it
+tier = "AUTO"                      # AUTO or PERSON; the engine may only raise it
 scope_paths = ["auth/**", "tests/auth/**"]
 after = ["12"]                     # waits for 12 to merge
 caused_by = ""                     # on a fix ticket
@@ -34,9 +34,12 @@ external_id = "github#123"
 - The ticket file and the journal are outside `scope_paths` on purpose: editing the ticket (VERIFIED rows,
   Look at) never fails the scope check. That holds for the ticket's own file only. Another ticket's file on
   its branch fails the scope check: a new ticket comes in through `rail add`, on its own branch.
-- **The tier** is the highest of the author's choice, the floors that `risk_paths` and `migration_paths`
-  set from `scope_paths` at add, and the size cap at ship. Tickets touching `migration_paths` must set
-  `reversibility` and `rollback`.
+- **The tier** says who accepts the contract and who merges. On `AUTO` the engine does both, after the
+  checks and the review. On `PERSON` a person approves the contract and merges. Write `PERSON` when a person
+  should see this change. The engine makes a ticket PERSON by itself in three cases: its `scope_paths` reach
+  `person_paths` or `migration_paths` (at add), it changes a file on those paths (at ship), or it changes
+  more lines than `[size] cap` (at ship). A tier never goes down. Tickets touching `migration_paths` must
+  set `reversibility` and `rollback`.
 - **The contract** (Done Contract, scope and tier) freezes at acceptance. `rail amend NN` changes it.
 
 ## A ticket is its branch

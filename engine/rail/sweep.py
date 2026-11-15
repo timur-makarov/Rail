@@ -1,6 +1,7 @@
 """The sweep: it reviews what shipped without a review, and its output is tickets, never edits.
 
-A sweep is itself a LOW ticket. Its squash commit carries a `Sweep:` trailer, which marks where the next one starts.
+A sweep is itself an AUTO ticket that changes no product file, so it merges with no reviewer of its own. Its squash
+commit carries a `Sweep:` trailer, which marks where the next one starts.
 """
 
 import json
@@ -22,7 +23,8 @@ reviewers proposed are below: report a parked one again when it is real, and gro
 
 
 def unreviewed(project):
-    """(start, commits): the commits on base since the last Sweep: commit that had no review: Tier: LOW, or no ticket."""
+    """(start, commits): the commits on base since the last Sweep: commit that had no review: a ticket whose
+    trailer says `Review: none` (every file it changed is in [review] skip_paths), or a commit with no ticket."""
     base = project.base_ref
     # --first-parent: what landed on the base branch, one entry each. A merge commit counts once, as the change it
     # brought, and the commits inside it are not counted again.
@@ -35,9 +37,8 @@ def unreviewed(project):
         if re.search(r"^Sweep: ", body, re.M):
             start = sha
             break
-        tier = re.search(r"^Tier: (\w+)", body, re.M)
         ticket = re.search(r"^Ticket: (\d+)", body, re.M)
-        if not ticket or (tier and tier.group(1) == "LOW"):
+        if not ticket or not re.search(r"^Review: (?!none\b)\S", body, re.M):
             found.append((sha, ticket.group(1) if ticket else None))
     if start is None:
         # The first sweep starts where Rail was set up: work from before then was never on the rail.
@@ -56,9 +57,10 @@ def due(project):
 
 def ticket_text(start, count):
     return "\n".join([
-        "+++", f'title = "Sweep the unreviewed work since {start[:12]}"', 'tier = "LOW"',
+        "+++", f'title = "Sweep the unreviewed work since {start[:12]}"', 'tier = "AUTO"',
         'scope_paths = [".rail/journal/**"]', f'external_id = "sweep#{start[:12]}"', "+++", "",
-        "## Why", f"{count} LOW tickets and ticketless commits merged without a review since the last sweep.", "",
+        "## Why", f"{count} changes merged without a review since the last sweep: tickets whose every changed file"
+                  " is in [review] skip_paths, and commits with no ticket.", "",
         "## Done Contract", "- Check: `test -s .rail/journal/$RAIL_TICKET-summary.md`", ""])
 
 

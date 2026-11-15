@@ -10,11 +10,12 @@ and `rail doctor` reports when they are missing.
 - ask before `rail answer ... --owner`, which records a person's decision on a finding.
 
 **The loop runs without asking.** Allow rules cover the agent's own verbs (`rail next`, `advance`, `add`,
-`answer`, `amend`, `status`, `context`, `docs`, `doctor`, `intake`, `sweep`, `consult`, `provision`) and
+`answer`, `amend`, `status`, `stats`, `context`, `docs`, `doctor`, `intake`, `sweep`, `consult`, `save`,
+`provision`) and
 `gh run watch`.
 A matching allow rule is decided before any prompt and before auto mode's classifier, so the loop isn't
-stopped by either. `rail advance` is one of them, and it merges `auto_tiers` with no person: that is the
-policy you set in `.rail/config.toml`. The person's verbs have no allow rule: `rail accept`, `rail drop` and
+stopped by either. `rail advance` is one of them, and it merges an AUTO ticket with no person: that is the
+policy you set with `person_paths` in `.rail/config.toml`. The person's verbs have no allow rule: `rail accept`, `rail drop` and
 `rail init` are judged like any other command, and `rail answer ... --owner` always asks, in every mode.
 
 Auto mode's own rule lists (the `autoMode` setting) can't be set here: Claude Code reads them from user or

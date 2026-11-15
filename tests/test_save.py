@@ -318,7 +318,7 @@ class Save(RailTest):
     def test_a_sign_of_life_before_a_review_keeps_the_branch_in_step_with_the_remote(self):
         # The event is committed and pushed before the reviewer starts, and the worktree is reset to the head after it.
         a, b = self.remote_pair(config=CONFIG + "\n[claim]\nsave_minutes = 0\n")
-        a.add(ticket(tier="MEDIUM"))
+        a.add(ticket(tier="AUTO"))
         a.rail("next")
         a.fix_calc("1")
         a.rail("advance", "1")
@@ -334,7 +334,7 @@ class Save(RailTest):
     def test_a_save_stays_out_while_advance_is_inside_a_review(self):
         # The reviewer writes scratch files into the worktree. A save hook that fired then would push them.
         a, b = self.remote_pair()
-        a.add(ticket(tier="MEDIUM"))
+        a.add(ticket(tier="AUTO"))
         a.rail("next")
         a.fix_calc("1")
         a.queue_reviews({"touch": "src/scratch.py", "sleep": 4, "summary": "Tried an idea.", "findings": []})
@@ -369,11 +369,11 @@ class Save(RailTest):
 
 
 class MergedContract(RailTest):
-    HIGH = dict(title="Change the config", tier="HIGH", scope=("src/config/**",), check="test -f src/config/app.toml")
+    PERSON = dict(title="Change the config", tier="PERSON", scope=("src/config/**",), check="test -f src/config/app.toml")
 
     def test_a_merged_contract_counts_as_its_approval_and_the_ticket_goes_on(self):
         a, b, github = self.github_pair()
-        a.add(ticket(**self.HIGH))
+        a.add(ticket(**self.PERSON))
         github.person_merges(1)  # the contract's pull request has a merge button, and a person pressed it
         on = a.rail("next")
         self.assertEqual((on["ticket"], on["reason"]["code"]), ("1", "IMPLEMENT"))
@@ -393,7 +393,7 @@ class MergedContract(RailTest):
     def test_it_goes_on_in_a_fresh_clone_after_github_deleted_the_merged_branch(self):
         a, b, github = self.github_pair()
         github.update(lambda s: s.__setitem__("delete_branch_on_merge", True))
-        a.add(ticket(**self.HIGH))
+        a.add(ticket(**self.PERSON))
         github.person_merges(1)
         on = b.rail("next")
         self.assertEqual((on["ticket"], on["reason"]["code"]), ("1", "IMPLEMENT"))
@@ -401,13 +401,13 @@ class MergedContract(RailTest):
         self.assertTrue(os.path.exists(os.path.join(b.worktree("1"), ".rail", "tickets", "1.md")))
 
     def test_a_ticket_file_that_came_in_with_another_merge_is_nobodys_approval(self):
-        # Only the ticket's own merged pull request shows a person merged its contract. A HIGH ticket's file that
+        # Only the ticket's own merged pull request shows a person merged its contract. A PERSON ticket's file that
         # reaches the base branch inside another ticket's merge has no pull request of its own.
         a, b, github = self.github_pair()
-        smuggled = ticket(**self.HIGH).replace("+++\n", '+++\nid = "99"\n', 1)
+        smuggled = ticket(**self.PERSON).replace("+++\n", '+++\nid = "99"\n', 1)
         a.write(".rail/tickets/99.md", smuggled)
         a.git("add", ".rail/tickets/99.md")
-        a.git("commit", "--quiet", "-m", "1: Fix add (#7)\n\nTicket: 1\nTier: LOW")
+        a.git("commit", "--quiet", "-m", "1: Fix add (#7)\n\nTicket: 1\nTier: AUTO")
         a.git("push", "--quiet", "origin", "main")
         for fx in (a, b):
             told = fx.rail("next")
@@ -420,7 +420,7 @@ class MergedContract(RailTest):
         # look approved again: the drop is also marked in the counter branch.
         a, b, github = self.github_pair()
         github.update(lambda s: s.__setitem__("delete_branch_on_merge", True))
-        a.add(ticket(**self.HIGH))
+        a.add(ticket(**self.PERSON))
         github.person_merges(1)
         self.assertEqual(b.rail("status")["tickets"][0]["state"], "new")  # the merge reads as an approval to take up
         self.assertEqual(b.rail("drop", "1", "--reason", "another ticket does this work")["state"], "dropped")

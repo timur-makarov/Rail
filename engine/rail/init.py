@@ -40,8 +40,10 @@ Read the repository to learn its stack, then propose each of these to the person
 2. ARCHITECTURE.md with a `## Areas` table: | Area | Paths | Holds |, one row per area. Paths are globs, separated
    by commas; Holds says what lives there in a bug reporter's words. Cover every directory at depth {depth}; hidden
    directories such as .rail and .claude need no row, and neither do files at the root. At most 150 lines.
-3. [risk_paths] in .rail/config.toml: keep the defaults, and add the paths a person should see changed
-   (auth, payments, infrastructure) to HIGH or MEDIUM.
+3. person_paths in .rail/config.toml: keep the defaults, and add the paths a person should see changed (auth,
+   payments, infrastructure): a ticket that touches one is PERSON, so a person approves its contract and merges
+   it. Every other ticket is AUTO and gets the reviewer before the engine merges it. [review] skip_paths lists
+   paths whose changes need no reviewer, such as docs; leave it empty when unsure.
 4. The [[rules]] in .rail/config.toml: keep, drop or add structure rules for this project.
 5. .worktreeinclude at the root: one glob per line for local files a ticket worktree needs that git doesn't
    track, such as .env. Leave it out when there are none.
@@ -69,8 +71,10 @@ once by reading and merging one pull request. Read the repository to learn its s
 2. ARCHITECTURE.md with a `## Areas` table: | Area | Paths | Holds |, one row per area. Paths are globs, separated
    by commas; Holds says what lives there in a bug reporter's words. Cover every directory at depth {depth}; hidden
    directories such as .rail and .claude need no row, and neither do files at the root. At most 150 lines.
-3. [risk_paths] in .rail/config.toml: keep the defaults, and add the paths a person should see changed
-   (auth, payments, infrastructure) to HIGH or MEDIUM.
+3. person_paths in .rail/config.toml: keep the defaults, and add the paths a person should see changed (auth,
+   payments, infrastructure): a ticket that touches one is PERSON, so a person approves its contract and merges
+   it. Every other ticket is AUTO and gets the reviewer before the engine merges it. [review] skip_paths lists
+   paths whose changes need no reviewer, such as docs; leave it empty when unsure.
 4. The [[rules]] in .rail/config.toml: keep, drop or add structure rules for this project.
 If the project already has its own agent workflow, hooks, guards, CI gates or repo map, leave them running and list
 them in the pull request for the person to decide: keep, merge or retire.

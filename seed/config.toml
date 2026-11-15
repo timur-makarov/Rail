@@ -2,8 +2,11 @@
 # Top-level keys come first: in TOML, a key below a [table] header belongs to that table.
 
 base_branch = "main"                      # reader: claim, ship, CI, merge
-auto_tiers = ["LOW", "MEDIUM"]            # accepted and merged with no person; a person approves other tiers' contracts and merges them
-migration_paths = ["**/migrations/**"]    # a HIGH floor; tickets touching them need reversibility and rollback
+# A ticket is AUTO or PERSON. AUTO: the engine accepts its contract, the reviewer checks the change, and the engine
+# merges it. PERSON: a person approves the contract and merges; a security seat reviews as well.
+# reader: add (matched against scope_paths) and ship (changed files). A ticket that touches one of these is PERSON
+person_paths = [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".claude/**", ".github/workflows/**"]
+migration_paths = ["**/migrations/**"]    # PERSON as well; tickets touching them need reversibility and rollback
 
 [commands]
 setup = ""                                # reader: claim (after each worktree is made) and CI
@@ -15,20 +18,16 @@ timeout_secs = 900                        # reader: every command run: setup, ve
                                           # fails it, so `pytest | tail -20` fails with pytest. A tool the shell can't
                                           # find (exit 127) is recorded as could not run, not as a failure
 
-[risk_paths]                              # reader: add (floors matched against scope_paths) and ship (changed files)
-HIGH = [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".claude/**", ".github/workflows/**"]
-MEDIUM = []
-
 [size]                                    # reader: ship and CI; changed lines, generated files and lockfiles excluded
-LOW = 300
-MEDIUM = 600
+cap = 600                                 # an AUTO change over this becomes PERSON: a person has to merge it
 exclude = []
 
 [retry]
 budget = 2                                # reader: next and advance; attempts per step, then consult, then a person
 
 [sweep]
-after = 20                                # reader: next; LOW tickets and ticketless commits since the last sweep
+after = 20                                # reader: next; changes merged with no review since the last sweep:
+                                          # tickets inside [review] skip_paths, and commits with no ticket
 
 [map]
 depth = 1                                 # reader: doc-lint; the directory depth ## Areas must cover
@@ -40,6 +39,8 @@ ignore = []
 command = '''claude -p --safe-mode --system-prompt-file .rail/engine/reviewer.md --tools Read,Grep,Glob,Bash,Edit,Write --allowedTools Bash,Edit,Write --disallowedTools 'Bash(git push *)' --output-format json --json-schema "$(cat .rail/engine/review-v1.json)"'''
 
 model = ""                                # the model the reviewer runs on, such as "claude-opus-5-5"; empty is the CLI's default
+skip_paths = []                           # an AUTO change gets no reviewer when every file it changes matches one of
+                                          # these, such as ["docs/**"]. The paths decide, not the ticket's author
 
 [claim]
 stale_minutes = 30                        # reader: next; another session's work with no journal event for this long is

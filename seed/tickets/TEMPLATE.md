@@ -1,6 +1,7 @@
 +++
 title = "Say what changes, as an imperative"
-tier = "LOW"                       # LOW, MEDIUM or HIGH: the author's choice; the engine may only raise it
+tier = "AUTO"                      # AUTO: the reviewer checks it, the engine merges. PERSON: a person approves this
+                                   # contract and merges. Paths and size can raise AUTO to PERSON; nothing lowers it
 scope_paths = ["src/feature/**"]   # globs; a change outside them fails at ship
 after = []                         # ticket IDs that must merge first
 caused_by = ""                     # on a fix ticket: the ticket that caused the defect

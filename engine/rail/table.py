@@ -1,6 +1,6 @@
 """The first-match table: for one ticket's facts, the first matching row names the next legal move.
 
-Rows whose code is in TRANSITIONS are moves `next` makes itself (accepting an auto tier, claiming, resuming, asking
+Rows whose code is in TRANSITIONS are moves `next` makes itself (accepting an AUTO ticket, claiming, resuming, asking
 consult); `next` makes the move, derives the facts again, and reads the table once more.
 """
 
@@ -43,14 +43,14 @@ def _findings(f, intro):
 
 def _size(f):
     from . import rules
-    cap = f.project.config["size"].get(f.tier)
-    if not cap or not f.worktree:
+    if not f.auto or not f.worktree:
         return ""
+    cap = f.project.config["size"]["cap"]
     count, _ = rules.size(f.project, None, f.worktree)
     line = f"size {count}/{cap}"
     if count >= 0.8 * cap:
-        line += (": past 80% of the cap. Split what is left into a new ticket (rail add); over the cap, the tier rises"
-                 " and the change gets a reviewer")
+        line += (": past 80% of the cap. Split what is left into a new ticket (rail add); over the cap, the ticket"
+                 " becomes PERSON, and a person has to merge it")
     return line
 
 

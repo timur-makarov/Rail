@@ -153,7 +153,7 @@ class Hooks(RailTest):
         env_file = os.path.join(self.tmp, "env")
         mine = self.hook(p, "a", env_file)
         self.assertEqual(mine.returncode, 0, mine.stderr)
-        self.assertIn("Your ticket 1: Fix add (LOW, implementing), in .claude/worktrees/1.", mine.stdout)
+        self.assertIn("Your ticket 1: Fix add (AUTO, implementing), in .claude/worktrees/1.", mine.stdout)
         self.assertIn("- Check: `python3 -c", mine.stdout)
         self.assertIn("scope_paths: src/**", mine.stdout)
         self.assertEqual(read(env_file), f'export PATH="{p.path(".rail", "bin")}:$PATH"\n')
@@ -212,8 +212,10 @@ class CI(RailTest):
         p.rail("advance", "1")
         passed = self.ci(self.checkout(p, "1-fix-add"), "1-fix-add", expect=0)
         self.assertEqual(passed["reason"]["code"], "CI_PASS")
+        # CI also checks that the change has its review: the reviewer's run for this patch is in the journal.
         self.assertEqual([s["step"] for s in passed["steps"]],
-                         ["shipped", "ticket-lint", "assumptions", "scope", "rules", "size", "doc-lint", "verify", "checks"])
+                         ["shipped", "ticket-lint", "assumptions", "scope", "rules", "size", "doc-lint", "verify", "checks",
+                          "review"])
 
     def test_a_pr_with_no_ticket_gets_verify_and_its_tier(self):
         p = self.fixture()
@@ -221,5 +223,5 @@ class CI(RailTest):
         p.write(".claude/settings.json", "{}\n")
         p.git("commit", "--quiet", "-am", "bump")
         result = self.ci(self.checkout(p, "dependabot/bump"), "dependabot/bump", expect=0)
-        self.assertEqual((result["reason"]["code"], result["tier"]), ("CI_NO_TICKET", "HIGH"))
+        self.assertEqual((result["reason"]["code"], result["tier"]), ("CI_NO_TICKET", "PERSON"))
         self.assertEqual(result["steps"][0]["step"], "verify")

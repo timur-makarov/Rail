@@ -1,12 +1,15 @@
 # The sweep
 
-LOW tickets merge with no reviewer. The sweep reviews them afterwards. Once `[sweep] after` LOW tickets and
-ticketless commits (20 by default) have merged since the last sweep, `rail next` offers `rail sweep` when no
-ticket work is waiting. A person can run `rail sweep` at any time.
+Some changes merge with no reviewer: a ticket whose every changed file is in `[review] skip_paths`, and a
+commit a person made with no ticket. The sweep reviews them afterwards. It counts the commits on the base
+branch since the last sweep that have no `Ticket:` trailer, or whose `Review:` trailer says `none`. Once
+there are `[sweep] after` of them (20 by default), `rail next` offers `rail sweep` when no ticket work is
+waiting. A person can run `rail sweep` at any time. A merge commit counts once, however many commits it
+holds.
 
-A sweep is itself a LOW ticket that changes only its journal summary, so it merges on its own. Its squash
-commit carries a `Sweep:` trailer, which marks where the next sweep starts. The first sweep starts where
-Rail was set up.
+A sweep is itself an AUTO ticket that changes only its journal summary. It changes no product file, so it
+needs no review and merges on its own. Its squash commit carries a `Sweep:` trailer, which marks where the
+next sweep starts. The first sweep starts where Rail was set up.
 
 - **Free part:** doc-lint on the base branch, and each structure rule counted over the whole tree.
 - **Review part:** one pass of the reviewer over the combined changes, looking for duplication across

@@ -37,7 +37,7 @@ def read(path):
 
 class Review(RailTest):
     def medium(self, p, **kw):
-        p.add(ticket(tier="MEDIUM", **kw))
+        p.add(ticket(tier="AUTO", **kw))
         p.rail("next")
         p.fix_calc("1")
 
@@ -53,7 +53,7 @@ class Review(RailTest):
         self.assertIn("Prefer small functions.", brief)
         self.assertNotIn("rail next --json", brief)  # the ## Rail section stays out of the brief
         self.assertIn("This run's job: Review this change.", brief)
-        self.assertIn("Security. This list is a checklist", brief)  # MEDIUM: the security section is in the review
+        self.assertIn("Security. This list is a checklist", brief)  # AUTO: the security section is in the one review
 
         p.write("src/calc.py", "def add(a, b):\n    return b + a\n", base=p.worktree("1"))
         p.rail("answer", "1", "F1", "fixed", "Order no longer matters.")
@@ -153,9 +153,9 @@ class Review(RailTest):
         owner = p.rail("answer", "1", "F1", "declined", "Negative inputs never happen here.", "--owner")
         self.assertEqual(owner["state"], "merge-ready")
 
-    def test_high_runs_the_security_seat_with_a_refuter_and_a_person_approves_the_merge(self):
+    def test_a_person_ticket_runs_the_security_seat_with_a_refuter_and_a_person_approves_the_merge(self):
         p = self.fixture()
-        p.add(ticket(tier="HIGH"))
+        p.add(ticket(tier="PERSON"))
         p.rail("accept", "1")
         p.rail("next")
         p.fix_calc("1")
@@ -228,7 +228,7 @@ class Retry(RailTest):
     def test_approving_an_amend_gives_a_fresh_budget(self):
         p = self.fixture(config=CONFIG.replace("[commands]", "[commands]").replace("timeout_secs = 60", "timeout_secs = 60")
                          .replace("[consult]", "[retry]\nbudget = 1\n\n[consult]"))
-        p.add(ticket(tier="HIGH"))
+        p.add(ticket(tier="PERSON"))
         p.rail("accept", "1")
         p.rail("next")
         p.rail("advance", "1", expect=3)  # the check fails: the budget of 1 is used, consult advises
@@ -267,18 +267,19 @@ class Contract(RailTest):
 
     def test_lowering_the_tier_after_claim_fails(self):
         p = self.fixture()
-        p.add(ticket(tier="MEDIUM"))
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")
         p.rail("next")
         p.fix_calc("1")
         path = os.path.join(p.worktree("1"), ".rail", "tickets", "1.md")
-        p.write(".rail/tickets/1.md", read(path).replace('tier = "MEDIUM"', 'tier = "LOW"'), base=p.worktree("1"))
+        p.write(".rail/tickets/1.md", read(path).replace('tier = "PERSON"', 'tier = "AUTO"'), base=p.worktree("1"))
         failed = p.rail("advance", "1", expect=3)
-        self.assertIn("below the accepted MEDIUM", failed["steps"][0]["detail"])
-        self.assertEqual(p.rail("amend", "1", expect=2)["reason"]["message"], "the tier can't go below the accepted MEDIUM")
+        self.assertIn("below the accepted PERSON", failed["steps"][0]["detail"])
+        self.assertEqual(p.rail("amend", "1", expect=2)["reason"]["message"], "the tier can't go below the accepted PERSON")
 
-    def test_a_high_done_contract_change_needs_approval_and_a_wider_scope_does_not(self):
+    def test_a_person_tickets_done_contract_change_needs_approval_and_a_wider_scope_does_not(self):
         p = self.fixture()
-        p.add(ticket(tier="HIGH"))
+        p.add(ticket(tier="PERSON"))
         p.rail("accept", "1")
         p.rail("next")
         path = os.path.join(p.worktree("1"), ".rail", "tickets", "1.md")
@@ -296,7 +297,7 @@ class Contract(RailTest):
 class Bugs(RailTest):
     def test_a_hand_written_review_file_is_ignored_and_the_reviewer_runs(self):
         p = self.fixture()
-        p.add(ticket(tier="MEDIUM"))
+        p.add(ticket(tier="AUTO"))
         p.rail("next")
         p.fix_calc("1")
         fake = {"schema": "review/v1", "ticket": "1", "runs": [{"run": 1, "role": "review", "patch_id": "x", "findings": []}]}
@@ -308,7 +309,7 @@ class Bugs(RailTest):
 
     def test_a_commit_after_the_review_is_reviewed_again(self):
         p = self.fixture()
-        p.add(ticket(tier="MEDIUM"))
+        p.add(ticket(tier="AUTO"))
         p.rail("next")
         p.fix_calc("1")
         self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")
@@ -337,7 +338,7 @@ class Bugs(RailTest):
 class Shape(RailTest):
     def test_only_in_keeps_new_files_in_their_home(self):
         rule = '\n[[rules]]\nid = "migrations-home"\nfiles = "**/*.sql"\nonly_in = "db/migrations/**"\nfix = "Use make migration."\n'
-        p = self.fixture(config=CONFIG + rule + '\n[risk_paths]\nHIGH = []\nMEDIUM = []\n')
+        p = self.fixture(config=CONFIG + rule)
         p.add(ticket(scope=("src/**",)))
         p.rail("next")
         p.fix_calc("1")
@@ -345,8 +346,8 @@ class Shape(RailTest):
         failed = p.rail("advance", "1", expect=3)
         self.assertIn("is a new file outside db/migrations/**", failed["action"]["brief"])
 
-    def test_over_the_size_cap_the_tier_rises_and_lockfiles_do_not_count(self):
-        p = self.fixture(config=CONFIG + "\n[size]\nLOW = 10\nMEDIUM = 600\n")
+    def test_over_the_size_cap_an_auto_ticket_becomes_person_and_lockfiles_do_not_count(self):
+        p = self.fixture(config=CONFIG + "\n[size]\ncap = 10\n")
         p.add(ticket())
         p.rail("next")
         p.fix_calc("1")
@@ -359,9 +360,10 @@ class Shape(RailTest):
         self.assertIn("size", brief)
         p.write("src/more.py", "".join(f"x{i} = {i}\n" for i in range(12)), base=p.worktree("1"))
         shipped = p.rail("advance", "1")
-        self.assertEqual(shipped["tier"], "MEDIUM")
+        self.assertEqual((shipped["tier"], shipped["reason"]["code"]), ("PERSON", "MERGE_BY_PERSON"))  # too much to merge unread
         raised = events(p, "1-fix-add", "tier_raised")[0]
-        self.assertEqual((raised["reason"], raised["to"]), ("size", "MEDIUM"))
+        self.assertEqual((raised["reason"], raised["to"], raised["detail"]),
+                         ("size", "PERSON", "14 changed lines, over the cap of 10"))
         size = [s for s in shipped["steps"] if s["step"] == "size"][0]
         self.assertEqual(size["detail"], "size 14/10")
 
@@ -375,7 +377,7 @@ class Shape(RailTest):
 class CIReview(RailTest):
     def test_ci_needs_a_complete_review_for_the_patch(self):
         p = self.fixture()
-        p.add(ticket(tier="MEDIUM"))
+        p.add(ticket(tier="AUTO"))
         p.rail("next")
         p.fix_calc("1")
         p.queue_reviews(found(BLOCKING))
@@ -392,7 +394,7 @@ class CIReview(RailTest):
 class Answer(RailTest):
     def test_a_decline_needs_a_reason_and_a_finding_must_exist(self):
         p = self.fixture()
-        p.add(ticket(tier="MEDIUM"))
+        p.add(ticket(tier="AUTO"))
         p.rail("next")
         p.fix_calc("1")
         p.queue_reviews(found(ADVISORY))

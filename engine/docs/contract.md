@@ -9,7 +9,7 @@ To change it, edit the ticket in its worktree and run:
 rail amend NN
 ```
 
-- A wider or narrower scope, or a higher tier, is accepted again at once. The added paths are recorded.
-- A changed Done Contract is accepted at once on a tier in `auto_tiers`. On other tiers the ticket waits
-  until a person runs `rail accept NN`.
-- A tier never goes down.
+- A wider or narrower scope, or a change from AUTO to PERSON, is accepted again at once. The added paths are recorded.
+- A changed Done Contract is accepted at once on an AUTO ticket. A PERSON ticket waits until a person runs
+  `rail accept NN`.
+- A tier never goes down: a PERSON ticket stays PERSON.

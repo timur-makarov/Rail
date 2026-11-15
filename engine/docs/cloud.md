@@ -14,7 +14,7 @@ of the two it is on.
 ## Set up, once
 
 1. **Start a cloud session on the repository** and ask Claude to set Rail up from the framework's
-   repository. It runs `rail init`, writes the project's commands, map and risk paths, installs what the
+   repository. It runs `rail init`, writes the project's commands, map and `person_paths`, installs what the
    checks need, and opens one pull request.
 2. **Merge that pull request.**
 3. **Make three settings on GitHub.** A cloud session can't change a repository's settings, so these are
@@ -88,7 +88,7 @@ lists the tickets whose owner is `agent`.
   the agent as your note. Don't merge a contract pull request: it holds only the contract. If you do, Rail
   takes it as your approval and opens a new pull request for the work.
 - **Change a contract:** comment on its pull request. **Reject it:** close the pull request.
-- **Merge a HIGH ticket:** the merge button.
+- **Merge a PERSON ticket:** the merge button.
 - Each pull request ends with `Claude-Session:` and a link to the session that worked the ticket.
 
 ## Session shapes

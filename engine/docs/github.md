@@ -25,20 +25,22 @@ each page.
 
 ## How tickets use pull requests
 
-- A ticket outside `auto_tiers` opens a contract pull request at `add`, titled `NN: [contract] ...`. Approve
+- A PERSON ticket opens a contract pull request at `add`, titled `NN: [contract] ...`. Approve
   it with the label `rail:go`, change it by commenting, reject it by closing it. Don't merge it: it holds
   only the contract, and with the ruleset GitHub refuses, because its `rail` check is red. Without the
   ruleset a merge goes through, and Rail takes it as the approval: the work gets a new pull request. Only
   the merge of the ticket's own pull request counts. A ticket file that reaches the base branch any other
   way, such as inside another ticket's merge, approves nothing.
-- A ticket in `auto_tiers` opens its pull request at claim.
+- An AUTO ticket opens its pull request at claim.
 - No pull request is a draft. The `rail` check stays red with `not shipped yet` until the ticket ships, so
   nothing merges early by mistake.
-- At ship the engine writes the title and description: Why, Look at, Evidence, Risk, and the trailers.
+- At ship the engine writes the title and description: Why, Look at, Evidence, Risk, and the trailers
+  `Ticket:`, `Tier:` and `Review:` (`reviewer`, `reviewer, security seat`, or `none` when the change needed no
+  review). The squash commit carries the same text.
 - A red required check, or a conflict with the base, returns the ticket to the agent. A pull request that is
   behind its base, when the base requires up-to-date branches, is rebased with no agent work.
-- `auto_tiers` merge through the async merge endpoint once the required checks are green. A person merges
-  HIGH by pressing the button.
+- An AUTO ticket merges through the async merge endpoint once the required checks are green. A person
+  merges a PERSON ticket by pressing the button.
 
 ## Testing every merge on the latest base
 

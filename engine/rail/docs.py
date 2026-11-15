@@ -14,21 +14,21 @@ DOCS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 # Every config field names its reader. A test checks this covers config.DEFAULTS.
 READERS = {
     "base_branch": "claim, ship, CI and the merge: the branch tickets start from and merge into",
-    "auto_tiers": "acceptance and the merge: these tiers are accepted and merged with no person",
-    "migration_paths": "add and ship: a HIGH floor; tickets touching them need reversibility and rollback",
+    "person_paths": "add (matched against scope_paths) and ship (changed files): a ticket that touches one is"
+                    " PERSON, so a person approves its contract and merges it",
+    "migration_paths": "add and ship: PERSON as well; tickets touching them need reversibility and rollback",
     "commands.setup": "the claim: runs in each new ticket worktree, with RAIL_TICKET set",
     "commands.verify": "ship and CI: the whole project's checks, scanners included",
     "commands.provision": "rail provision, next in a cloud session, and CI: installs what the machine lacks, once"
                           " per machine, as root. Never run on a person's own machine",
     "commands.timeout_secs": "every command: setup, verify, provision, each check, each review run",
-    "risk_paths.HIGH": "add (matched against scope_paths) and ship (changed files): a HIGH floor",
-    "risk_paths.MEDIUM": "add and ship: a MEDIUM floor",
-    "size.LOW": "ship and CI: changed lines over this raise a LOW ticket to MEDIUM",
-    "size.MEDIUM": "ship and CI: changed lines over this raise a MEDIUM ticket to HIGH",
+    "size.cap": "ship and CI: an AUTO change with more changed lines than this becomes PERSON",
     "size.exclude": "ship and CI: globs left out of the size count, besides generated files and lockfiles",
     "review.command": "advance: the reviewer, run in the ticket's worktree with the brief on stdin",
     "review.model": "advance and sweep: the model the reviewer runs on (ANTHROPIC_MODEL and RAIL_MODEL for the"
                     " command); empty leaves the command's default",
+    "review.skip_paths": "advance and CI: an AUTO change gets no reviewer when every file it changes matches one of"
+                         " these globs. The sweep reviews such changes afterwards",
     "retry.budget": "next and advance: failed attempts per step before consult, then a person",
     "consult.command": "the consult pack: a read-only model, with the brief on stdin",
     "consult.model": "the consult pack: the model consult runs on, set the same way as review.model",
@@ -36,7 +36,8 @@ READERS = {
                            " taken to be abandoned and resumed. Keep it above your longest command",
     "claim.save_minutes": "the save hooks and advance: work in flight is saved, and shows it is alive, at least this"
                           " often while a session works",
-    "sweep.after": "next: LOW tickets and ticketless commits since the last sweep before one is offered",
+    "sweep.after": "next: changes merged with no review (tickets inside review.skip_paths, and commits with no"
+                   " ticket) since the last sweep before one is offered",
     "map.depth": "doc-lint: the directory depth ## Areas must cover",
     "map.ignore": "doc-lint: directories that need no ## Areas row",
     "rules": "ship and CI: structure rules on added lines and files (rail docs rules)",

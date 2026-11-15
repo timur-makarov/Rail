@@ -19,7 +19,7 @@ from .forge import ENGINE_MARK, TRUSTED
 from .util import RailError, age, cloud, could_not_run, disposable, match_any, session_url, shell
 
 VERBS = ("init", "add", "accept", "amend", "answer", "next", "advance", "status", "context", "drop", "doctor", "ci",
-         "consult", "docs", "intake", "sweep", "provision", "save")
+         "consult", "docs", "intake", "sweep", "provision", "save", "stats")
 STALE_DAYS = 3
 
 
@@ -170,8 +170,8 @@ def restart_on_base(project, f, run):
 
 
 def ensure_pr(project, f, receipts):
-    """Every wait after add has a PR to label: a contract PR at add for tiers outside auto_tiers,
-    and a PR at claim for the rest."""
+    """Every wait after add has a PR to label: a contract PR at add for a PERSON ticket, and a PR at claim for
+    an AUTO one."""
     from .forge import ForgeError
 
     forge, t = project.forge, f.t
@@ -366,8 +366,8 @@ def cleanup(project, tickets, facts):
 
 
 def create_ticket(project, text):
-    """Take the next ID and make the ticket's branch with the ticket file, without touching any checkout. A ticket
-    that passes lint on an auto tier is accepted at once. Returns (id, branch, push result)."""
+    """Take the next ID and make the ticket's branch with the ticket file, without touching any checkout. An AUTO
+    ticket that passes lint is accepted at once. Returns (id, branch, push result)."""
     base_tip = gitx.rev(project.base_ref, project.root)
     if not base_tip:
         raise RailError(f"the base branch '{project.base}' has no commits yet")
@@ -379,11 +379,11 @@ def create_ticket(project, text):
         files = {ticket_path(nn): body}
         if not lint(ticket):
             tier = highest(ticket.tier, floor(project, ticket.scope)[0])
-            if tier != ticket.tier:  # a risk or migration path raised it: the ticket says so, and that tier freezes
+            if tier != ticket.tier:  # a person or migration path raised it: the ticket says so, and that tier freezes
                 body = with_tier(body, tier)
                 ticket = Ticket(body)
                 files[ticket_path(nn)] = body
-            if tier in project.config["auto_tiers"]:
+            if tier == "AUTO":
                 accepted = accepted_event(nn, ticket, tier, "engine", "lint")
                 files[events_path(nn)] = json.dumps(accepted, separators=(",", ":")) + "\n"
         return gitx.commit_files(project.root, base_tip, files, f"{nn}: add ticket: {ticket.title}")
@@ -582,7 +582,7 @@ def cmd_amend(project, args):
         if tier != new.tier:
             text = with_tier(text, tier)
             new = Ticket(text)
-        needs = "done_contract" in changed and tier not in project.config["auto_tiers"]
+        needs = "done_contract" in changed and tier != "AUTO"  # a person approved the old one, so approves the new
         added_paths = [p for p in new.scope if p not in (last.get("scope_paths") or [])]
         events.append(event(t.id, "amended", contract=new.contract_hash(), changed=changed, added_paths=added_paths,
                             needs_approval=needs))
@@ -881,7 +881,7 @@ def merge_stage(project, f, run):
 
 
 def forge_merge(project, f, receipts):
-    """auto_tiers, once CI is green: the async merge endpoint, the head pinned with sha. The request
+    """An AUTO ticket, once CI is green: the async merge endpoint, the head pinned with sha. The request
     is noted in the local cache, not the journal, because a journal commit would move the head CI just passed."""
     import time
 
@@ -1029,6 +1029,15 @@ def cmd_status(project, args):
     return answer(code="STATUS", tickets=rows, leftovers=leftovers)
 
 
+def cmd_stats(project, args):
+    """What the journals of merged tickets say: tickets by tier, failed steps, and the reviewer's cost and hit rate."""
+    from . import stats
+
+    project.sync()
+    found = stats.collect(project, project.tickets(), args.since)
+    return answer(code="STATS", stats=found, text=stats.render(found))
+
+
 def cmd_context(project, args):
     key = args.ticket or requested(project, args)
     if key:
@@ -1100,7 +1109,7 @@ def cmd_init(args):
             except forge.ForgeError as e:
                 receipts.append({"step": "labels", "status": "unavailable", "detail": str(e)})
     brief = ("Rail is installed. Next: rail next, which returns the init task: the project's commands, ## Areas,"
-             " risk_paths and rules. " + ("In this cloud session you set them up and the person confirms by merging one"
+             " person_paths and rules. " + ("In this cloud session you set them up and the person confirms by merging one"
                                           " pull request." if cloud() else "You propose each and the person confirms."))
     return answer(code="INITIALISED", owner="agent", action={"kind": "script", "brief": brief, "command": "rail next"},
                   steps_=receipts, root=root)
@@ -1370,7 +1379,7 @@ def cmd_provision(project, args):
     passed = run_provision(project, run)
     brief = ("Provisioned. Next: rail next" if passed else
              f"Provisioning failed at '{run.failure[0]}':\n{run.failure[1]}\n\nFix [commands] provision in"
-             " .rail/config.toml (a HIGH ticket), or the machine, then run: rail provision")
+             " .rail/config.toml (a PERSON ticket), or the machine, then run: rail provision")
     return answer(owner="agent", code="PROVISIONED" if passed else "PROVISION_FAILED", steps_=run.steps, cwd=".",
                   action={"kind": "script" if passed else "agent_task", "brief": brief,
                           **({"command": "rail next"} if passed else {})})
@@ -1435,15 +1444,15 @@ def cmd_ci(project, args):
         return answer(nn, code="CI_FAIL", action={"kind": "rest", "brief": "not shipped yet"}, steps_=run.steps)
     if project.config["commands"]["setup"]:
         steps.run_command(project, project.root, nn, "setup", project.config["commands"]["setup"], run)
-    tier = shipped[-1].get("tier", "LOW")
+    tier = shipped[-1].get("tier", "AUTO")
     accepted = [e for e in events if e.get("event") == "accepted"]
     if run.ok:
         needed = steps.check(project, nn, Ticket(text), head, project.root, tier, run, patch_id,
                              accepted=accepted[-1] if accepted else None)
         if needed is not None and rank(needed) > rank(tier):
             run.record("tier", False, patch_id, f"the change needs {needed}, and it shipped as {tier}")
-    if run.ok and rank(tier) >= rank("MEDIUM"):
-        from .review import Ledger, load_doc
+    from .review import Ledger, load_doc, needs_review
+    if run.ok and needs_review(project, tier, changed):
         from .project import review_path
         doc = load_doc(gitx.read_blobs([f"{head}:{review_path(nn)}"], project.root).get(f"{head}:{review_path(nn)}"), nn)
         complete = Ledger(events, doc).complete(patch_id, tier)
@@ -1540,6 +1549,9 @@ def parser():
     intake.add_argument("--brief", help="a file with the request, verbatim")
     verb("sweep", "review what merged without a review, and turn its findings into tickets", ticket=False)
     verb("save", "commit and push the work in flight as it is, with no checks")
+    stats_ = verb("stats", "what the merged tickets' journals say: tickets by tier, failed steps, and the reviewer's"
+                           " cost and hit rate", ticket=False)
+    stats_.add_argument("--since", help="count only tickets merged on or after this date, as YYYY-MM-DD")
     provision = verb("provision", "install what the checks need on this machine (cloud sessions and CI only)",
                      ticket=False)
     provision.add_argument("--force", action="store_true", help="run it again on a machine that has it")
