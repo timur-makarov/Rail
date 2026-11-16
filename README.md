@@ -72,6 +72,12 @@ merges with the code. So any session on any machine can take up any ticket, two 
 same one (a claim is a push to the remote), and a machine that goes away costs minutes: hooks save the work
 in flight at the end of each turn and every ten minutes.
 
+**Work starts from a conversation.** Before a ticket exists, an agent questions the person who wants the
+work: it reads the code first, then asks only what changes the contract, each question with its own
+recommendation. That can happen in a Claude Code session or in any chat bot, such as Slack or Telegram, that
+can clone the repository: the bot files the confirmed ticket as a GitHub issue labelled `rail`, and Rail takes
+it in as it is. The ticket keeps a record of the questions and how each recommendation was taken.
+
 **Your part is small, and it is on GitHub.** A ticket that needs you carries the label `rail:needs-you`.
 You answer with the label `rail:go`, a comment, or the merge button. The agent never waits for you: it takes
 the next ticket.
@@ -79,7 +85,7 @@ the next ticket.
 **Afterwards you can check what happened.** Each merge is one squash commit with the ticket, the tier, a
 table of every step that ran, and a `Review:` trailer that says who reviewed it. `rail status` lists every
 ticket and what it waits for. `rail stats` counts, over the merged tickets, how many needed a person, which
-steps failed, and what the reviewer cost and how often its findings ended in a fix. Once 20 changes have
+steps failed, what the reviewer cost and how often its findings ended in a fix, and how the grilling went. Once 20 changes have
 merged with no review, a sweep reads them together and turns what it finds into tickets.
 
 **What Rail leaves to others.** It starts no agents: a session or a scheduled task does. It doesn't say how
@@ -135,6 +141,7 @@ the pages, which are also in [`engine/docs/`](engine/docs):
 |---|---|
 | The loop, and what `next` and `advance` do | [`loop`](engine/docs/loop.md) |
 | How to write a ticket, and the tiers | [`tickets`](engine/docs/tickets.md), [`contract`](engine/docs/contract.md) |
+| Questioning a request into a ticket, from a session or a chat bot | [`grill`](engine/docs/grill.md), [`bots`](engine/docs/bots.md) |
 | The review, findings and the refuter | [`review`](engine/docs/review.md) |
 | States, retries and waits | [`states`](engine/docs/states.md), [`retries`](engine/docs/retries.md) |
 | Cloud sessions, and running with no session open | [`cloud`](engine/docs/cloud.md), [`away`](engine/docs/away.md) |

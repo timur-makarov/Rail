@@ -41,6 +41,15 @@ def _findings(f, intro):
     ])
 
 
+def _not_taken(f):
+    """An issue that held a whole ticket, taken as a request only: say why, so whoever runs the bot can fix it."""
+    req = next((e for e in f.t.events if e.get("event") == "requested"), None)
+    if not req or not req.get("not_taken"):
+        return ""
+    return (f"\nThe issue held a whole ticket, and Rail took it only as a request: {req['not_taken']}. Write the"
+            f" contract from it, keeping what it says.")
+
+
 def _size(f):
     from . import rules
     if not f.auto or not f.worktree:
@@ -199,7 +208,7 @@ ROWS = [
     ("TICKET_LINT",        "agent", "agent_task",  lambda f: f.state == "new" and f.lint_errors,
      lambda f: f"Ticket {f.id} isn't complete: {'; '.join(f.lint_errors)}. Read it ({ticket_path(f.id)} on branch"
                f" {f.t.name}), write the whole ticket to a file with its Done Contract, tier and scope_paths, and run:"
-               f" rail amend {f.id} --file FILE"),
+               f" rail amend {f.id} --file FILE" + _not_taken(f)),
     ("GO",                 "agent", "script",      lambda f: "rail:go" in f.labels and f.state not in ("merged", "dropped")
                                                    and not (f.state == "new" and f.lint_errors),
      lambda f: f"rail next --ticket {f.id}"),

@@ -67,7 +67,7 @@ class AddToMerge(RailTest):
         self.assertEqual(p.git("show", "main:src/calc.py"), "def add(a, b):\n    return a + b\n")
         self.assertEqual(read(p.path("src", "calc.py")), "def add(a, b):\n    return a + b\n")
         events = [json.loads(l)["event"] for l in p.git("show", "main:.rail/journal/1-events.jsonl").splitlines()]
-        self.assertEqual(events[:2], ["accepted", "claimed"])
+        self.assertEqual(events[:3], ["requested", "accepted", "claimed"])
         self.assertEqual(events[-2:], ["shipped", "step"])  # the ship, then the review run on what shipped
         self.assertFalse(os.path.exists(p.worktree("1")))
         self.assertNotIn("1-fix-add", p.git("branch"))

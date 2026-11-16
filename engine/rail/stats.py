@@ -44,8 +44,73 @@ def _ended(severity, last):
     return last.get("outcome")
 
 
-def collect(project, tickets, since=None):
-    """The numbers, for tickets merged on or after `since` (YYYY-MM-DD), or for every merged ticket."""
+def _first_try(t, ships):
+    """No counted ship step failed before the ticket first shipped."""
+    before = t.events[:t.events.index(ships[0])] if ships else t.events
+    return not any(e.get("event") == "step" and e.get("result") == "fail" and e.get("counted", True)
+                   and e.get("step") in SHIP_STEPS for e in before)
+
+
+def _amended_after_acceptance(t):
+    """The Done Contract or the scope changed after the ticket was first accepted: what it meant wasn't settled."""
+    accepted = False
+    for e in t.events:
+        if e.get("event") == "accepted":
+            accepted = True
+        elif accepted and e.get("event") == "amended" and {"done_contract", "scope"} & set(e.get("changed") or []):
+            return True
+    return False
+
+
+TAKEN = ("accepted", "edited", "rejected", "answered")
+
+
+def _grill_row():
+    return {"tickets": 0, "questions": 0, **{taken: 0 for taken in TAKEN}, "merged": 0, "dropped": 0, "open": 0,
+            "amended": 0, "first_try": 0, "caused_fix": 0, "minutes": []}
+
+
+def grilling(tickets, states, merged_at, start):
+    """Where tickets came from, how the grilling went, and what happened to them afterwards. A ticket counts when it
+    was requested on or after `start`."""
+    caused = {str(t.ticket.get("caused_by")) for t in tickets.values() if t.ticket and t.ticket.get("caused_by")}
+    groups = {"grilled": _grill_row(), "not grilled": _grill_row()}
+    channels, agents = {}, {}
+    for nn, t in tickets.items():
+        req = next((e for e in t.events if e.get("event") == "requested"), None) or t.dropped_request
+        if not req or (start is not None and parse_iso(req["at"]).timestamp() < start):
+            continue
+        state = states.get(nn) or ("merged" if nn in merged_at else "dropped" if t.last("dropped") else "open")
+        state = state if state in ("merged", "dropped") else "open"
+        rows = [groups["grilled" if req.get("grilled") else "not grilled"],
+                channels.setdefault(req.get("channel") or "?", _grill_row())]
+        if req.get("grilled"):
+            rows.append(agents.setdefault(req.get("agent") or NO_MODEL, _grill_row()))
+        ships = [e for e in t.events if e.get("event") == "shipped"]
+        for row in rows:
+            row["tickets"] += 1
+            row["questions"] += len(req.get("questions") or [])
+            for q in req.get("questions") or []:
+                if q.get("taken") in TAKEN:
+                    row[q["taken"]] += 1
+            row[state] += 1
+            row["amended"] += _amended_after_acceptance(t)
+            row["caused_fix"] += nn in caused
+            if state == "merged":
+                row["first_try"] += _first_try(t, ships)
+                row["minutes"].append(max(0.0, (merged_at[nn] - parse_iso(req["at"]).timestamp()) / 60))
+    for row in [*groups.values(), *channels.values(), *agents.values()]:
+        minutes = row.pop("minutes")
+        row["median_minutes"] = round(statistics.median(minutes), 1) if minutes else None
+        offered = row["accepted"] + row["edited"] + row["rejected"]
+        row["acceptance"] = round(row["accepted"] / offered, 3) if offered else None
+    return {"groups": groups, "channels": dict(sorted(channels.items())), "agents": dict(sorted(agents.items()))}
+
+
+def collect(project, tickets, since=None, states=None):
+    """The numbers, for tickets merged on or after `since` (YYYY-MM-DD), or for every merged ticket. The grilling
+    numbers count the tickets requested on or after `since`, whatever became of them; `states` says which were
+    dropped."""
     start = _since(since) if since else None
     merged_at = _merge_times(project, tickets)
     tiers = {tier: {"merged": 0, "reviewed": 0, "no_person": 0, "first_try": 0, "minutes": []} for tier in TIERS}
@@ -64,9 +129,7 @@ def collect(project, tickets, since=None):
         person = any(e.get("event") == "continued" or (e.get("event") == "accepted" and e.get("by") == "person")
                      or (e.get("event") == "finding" and e.get("by") == "owner") for e in t.events)
         row["no_person"] += tier == "AUTO" and not person
-        before_ship = t.events[:t.events.index(ships[0])] if ships else t.events
-        row["first_try"] += not any(e.get("event") == "step" and e.get("result") == "fail" and e.get("counted", True)
-                                    and e.get("step") in SHIP_STEPS for e in before_ship)
+        row["first_try"] += _first_try(t, ships)
         claims = [e["at"] for e in t.events if e.get("event") == "claimed" and e.get("at")]
         if claims:
             row["minutes"].append(max(0.0, (merged_at[nn] - parse_iso(claims[0]).timestamp()) / 60))
@@ -115,6 +178,7 @@ def collect(project, tickets, since=None):
     merged = sum(row["merged"] for row in tiers.values())
     return {
         "since": since, "merged": merged, "left_out": len(tickets) - merged, "tiers": tiers, "raised": dict(raised),
+        "grilling": grilling(tickets, states or {}, merged_at, start),
         "consults": consults, "steps": {name: steps[name] for name in sorted(steps, key=_step_rank)},
         "review": {
             "roles": {name: _rounded(roles[name]) for name in REVIEW_STEPS if name in roles},
@@ -161,9 +225,44 @@ def _listed(counts, names):
     return (", ".join(parts)[:1].upper() + ", ".join(parts)[1:] + ".") if parts else ""
 
 
+def _pct(value):
+    return "-" if value is None else f"{value:.0%}"
+
+
+def render_grilling(data):
+    groups = data["grilling"]["groups"]
+    if not any(row["tickets"] for row in groups.values()):
+        return []
+    cols = list(groups.values())
+    lines = ["", *_table(["GRILLING", *groups], [
+        ["tickets requested", *[r["tickets"] for r in cols]],
+        ["questions asked", *[r["questions"] for r in cols]],
+        ["recommendation accepted", *[r["accepted"] for r in cols]],
+        ["recommendation edited", *[r["edited"] for r in cols]],
+        ["recommendation rejected", *[r["rejected"] for r in cols]],
+        ["acceptance rate", *[_pct(r["acceptance"]) for r in cols]],
+        ["merged", *[r["merged"] for r in cols]],
+        ["dropped", *[r["dropped"] for r in cols]],
+        ["still open", *[r["open"] for r in cols]],
+        ["contract amended after acceptance", *[r["amended"] for r in cols]],
+        ["shipped on the first try", *[r["first_try"] for r in cols]],
+        ["caused a fix ticket", *[r["caused_fix"] for r in cols]],
+        ["median request to merge", *[_span(r["median_minutes"]) for r in cols]]])]
+    lines.append("Acceptance rate: recommendations taken as they were, of those accepted, edited or rejected. Read it"
+                 " with the amends: many acceptances and many amends mean the person said yes without deciding.")
+    head = ["tickets", "questions", "accepted", "edited", "rejected", "amended", "dropped"]
+    for title, rows in (("BY CHANNEL", data["grilling"]["channels"]), ("GRILLED BY", data["grilling"]["agents"])):
+        if rows:
+            lines += ["", *_table([title, *head], [[name, *[r[k] for k in head]] for name, r in rows.items()])]
+    return lines
+
+
 def render(data):
     when = f" since {data['since']}" if data["since"] else ""
     if not data["merged"]:
+        grill = render_grilling(data)
+        if grill:
+            return "\n".join([f"Rail stats: no ticket has merged{when} yet.", *grill])
         return f"No ticket has merged{when}, so there is nothing to count yet."
     tiers, review = data["tiers"], data["review"]
     head = f"Rail stats: {data['merged']} merged ticket{'' if data['merged'] == 1 else 's'}{when}."
@@ -190,7 +289,7 @@ def render(data):
     if data["consults"]:
         lines.append(f"Consult ran {data['consults']} times.")
     if not review["roles"]:
-        return "\n".join(lines + ["", "No review ran."])
+        return "\n".join(lines + ["", "No review ran.", *render_grilling(data)])
     roles = review["roles"]
     total = ["total", sum(r["runs"] for r in roles.values()), f"${review['cost_usd']:.2f}",
              _span(sum(r["minutes"] for r in roles.values()))]
@@ -215,4 +314,5 @@ def render(data):
     if review["disputes"]:
         lines.append(f"Disputes: {sum(review['disputes'].values())}. " + _listed(review["disputes"], (
             ("dismissed", "the refuter dismissed"), ("parked", "parked"), ("upheld", "upheld"))))
+    lines += render_grilling(data)
     return "\n".join(line.rstrip() for line in lines)

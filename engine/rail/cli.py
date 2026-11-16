@@ -14,7 +14,7 @@ from . import areas, gitx, guard, hooks, steps
 from .project import Project, event, events_path, ticket_path
 from .state import OPEN, derive, floor
 from .table import TRANSITIONS, first_match
-from .ticket import Ticket, branch_name, highest, lint, rank, with_id, with_tier
+from .ticket import Ticket, branch_name, highest, lint, rank, with_field, with_id, with_tier
 from .forge import ENGINE_MARK, TRUSTED
 from .util import RailError, age, cloud, could_not_run, disposable, match_any, session_url, shell
 
@@ -365,9 +365,21 @@ def cleanup(project, tickets, facts):
 # --- verbs ---------------------------------------------------------------------------
 
 
-def create_ticket(project, text):
-    """Take the next ID and make the ticket's branch with the ticket file, without touching any checkout. An AUTO
-    ticket that passes lint is accepted at once. Returns (id, branch, push result)."""
+def requested_event(nn, ticket, via, channel, **extra):
+    """Where the ticket came from, and the `## Grilling` record when someone questioned the person who asked for
+    it. rail stats reads it."""
+    record, _ = ticket.grilling()
+    fields = {"via": via, "channel": (record or {}).get("channel") or channel, "grilled": record is not None,
+              "assumed": len(ticket.open_assumptions())}
+    fields.update({k: v for k, v in (record or {}).items() if k != "channel" and v not in (None, "")})
+    fields.update({k: v for k, v in extra.items() if v})
+    return event(nn, "requested", **fields)
+
+
+def create_ticket(project, text, via="add", channel="session", **extra):
+    """Take the next ID and make the ticket's branch with the ticket file, without touching any checkout. The
+    journal starts with a `requested` event; an AUTO ticket that passes lint is accepted at once. Returns (id,
+    branch, push result)."""
     base_tip = gitx.rev(project.base_ref, project.root)
     if not base_tip:
         raise RailError(f"the base branch '{project.base}' has no commits yet")
@@ -377,6 +389,7 @@ def create_ticket(project, text):
         body = with_id(text, nn)
         ticket = Ticket(body)
         files = {ticket_path(nn): body}
+        events = []
         if not lint(ticket):
             tier = highest(ticket.tier, floor(project, ticket.scope)[0])
             if tier != ticket.tier:  # a person or migration path raised it: the ticket says so, and that tier freezes
@@ -384,8 +397,9 @@ def create_ticket(project, text):
                 ticket = Ticket(body)
                 files[ticket_path(nn)] = body
             if tier == "AUTO":
-                accepted = accepted_event(nn, ticket, tier, "engine", "lint")
-                files[events_path(nn)] = json.dumps(accepted, separators=(",", ":")) + "\n"
+                events.append(accepted_event(nn, ticket, tier, "engine", "lint"))
+        events.insert(0, requested_event(nn, ticket, via, channel, **extra))
+        files[events_path(nn)] = "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events)
         return gitx.commit_files(project.root, base_tip, files, f"{nn}: add ticket: {ticket.title}")
 
     nn, commit = project.take_id(project.max_id(tickets) + 1, build, label=Ticket(text).title or "")
@@ -425,9 +439,11 @@ def cmd_add(project, args):
 
 def stub(title, request, external_id, caused_by=""):
     """An intake ticket: the request verbatim, with the contract and tier for the agent to write."""
+    # The request is quoted: a heading in it ("## Done Contract") must not become a section of the ticket.
+    quoted = "\n".join(("> " + line).rstrip() for line in request.strip().splitlines())
     return "\n".join(["+++", f"title = {json.dumps(title)}", 'tier = ""', "scope_paths = []",
                       f"external_id = {json.dumps(external_id)}", f"caused_by = {json.dumps(caused_by)}", "+++", "",
-                      "## Request", request.strip(), "", "## Why", "", "## Done Contract", ""])
+                      "## Request", quoted, "", "## Why", "", "## Done Contract", ""])
 
 
 def caused_by(project, request):
@@ -440,13 +456,39 @@ def caused_by(project, request):
     return ticket.group(1) if ticket else ""
 
 
-def intake_one(project, facts, title, request, external_id):
-    """Make a stub ticket unless a ticket for this external id is open or merged. Returns its id, or None."""
+def intake_one(project, facts, title, request, external_id, channel, trusted=False, filed_by=None):
+    """Make a ticket unless a ticket for this external id is open or merged. Returns its id, or None.
+
+    A request that is a whole ticket (it starts with the `+++` front matter, as a grilling bot files it) becomes the
+    ticket as it is, when it passes lint and comes from someone who can push to the repository: its checks run on
+    the machine, so a stranger's ticket is only ever a request. Anything else becomes a stub whose contract the
+    agent writes."""
     for f in facts.values():
         if f.ticket and f.ticket.get("external_id") == external_id and f.state != "dropped":
             return None
-    nn, _, _ = create_ticket(project, stub(title, request, external_id, caused_by(project, request)))
+    if request.lstrip().startswith("+++"):
+        text = request.lstrip()
+        try:
+            text = with_field(text, "external_id", external_id)
+            errors = lint(Ticket(text)) if trusted else ["the issue's author can't push to the repository"]
+        except StopIteration:
+            errors = ["the front matter has no closing '+++' line"]
+        if not errors:
+            nn, _, _ = create_ticket(project, text, via="intake", channel=channel, filed_by=filed_by)
+            return nn
+        extra = {"filed_by": filed_by, "not_taken": "; ".join(errors)}  # why the ticket became a request
+    else:
+        extra = {"filed_by": filed_by}
+    nn, _, _ = create_ticket(project, stub(title, request, external_id, caused_by(project, request)), via="intake",
+                             channel=channel, **extra)
     return nn
+
+
+def intake_issue(project, facts, issue):
+    from .forge import TRUSTED
+
+    return intake_one(project, facts, issue["title"], issue.get("body") or "", f"github#{issue['number']}", "github",
+                      trusted=issue.get("author_association") in TRUSTED, filed_by=(issue.get("user") or {}).get("login"))
 
 
 def cmd_intake(project, args):
@@ -460,7 +502,7 @@ def cmd_intake(project, args):
             raise RailError("the forge can't be reached: rail intake github needs a GitHub remote and gh", code="UNAVAILABLE")
         for issue in project.forge.issues("rail"):
             key = f"github#{issue['number']}"
-            nn = intake_one(project, facts, issue["title"], issue.get("body") or "", key)
+            nn = intake_issue(project, facts, issue)
             (created if nn else skipped).append(nn or key)
             tickets, facts = load(project)
     elif args.source:
@@ -470,7 +512,7 @@ def cmd_intake(project, args):
             raise RailError("rail intake needs github, or --external-id, --title and --brief")
         with open(args.brief) as f:
             request = f.read()
-        nn = intake_one(project, facts, args.title, request, args.external_id)
+        nn = intake_one(project, facts, args.title, request, args.external_id, "tracker", trusted=True)
         (created if nn else skipped).append(nn or args.external_id)
     brief = (f"New tickets from intake: {', '.join(created)}. rail next asks for each one's contract."
              if created else "Nothing new to take in.")
@@ -637,7 +679,7 @@ def cmd_sweep(project, args):
         if not commits:
             return answer(code="NO_WORK", action={"kind": "rest", "brief": "Nothing merged without a review since the"
                                                                            " last sweep."})
-        nn, _, _ = create_ticket(project, sweep.ticket_text(start, len(commits)))
+        nn, _, _ = create_ticket(project, sweep.ticket_text(start, len(commits)), via="sweep", channel="engine")
     else:
         nn = existing.id
     f, receipts = settle(project, nn, explicit=True)
@@ -679,7 +721,8 @@ def red_base_ticket(project, facts):
         return None
     output = project.cache_read("red-base", "output") or ""
     request = f"verify fails on {project.base} at {red[:12]}:\n\n```\n{output}\n```"
-    return intake_one(project, facts, f"Make verify pass on {project.base} again", request, f"red-base#{red[:12]}")
+    return intake_one(project, facts, f"Make verify pass on {project.base} again", request, f"red-base#{red[:12]}",
+                      "engine")
 
 
 def auto_intake(project, facts):
@@ -696,7 +739,7 @@ def auto_intake(project, facts):
     receipts = []
     for issue in issues:
         key = f"github#{issue['number']}"
-        nn = intake_one(project, facts, issue["title"], issue.get("body") or "", key)
+        nn = intake_issue(project, facts, issue)
         if nn:
             receipts.append({"step": "intake", "status": "ran", "result": "pass", "detail": f"ticket {nn} from {key}"})
             _, facts = load(project)
@@ -1034,7 +1077,8 @@ def cmd_stats(project, args):
     from . import stats
 
     project.sync()
-    found = stats.collect(project, project.tickets(), args.since)
+    tickets, facts = load(project)
+    found = stats.collect(project, tickets, args.since, states={nn: f.state for nn, f in facts.items()})
     return answer(code="STATS", stats=found, text=stats.render(found))
 
 
@@ -1059,7 +1103,8 @@ def cmd_drop(project, args):
         if f.t.name:
             ensure_local(project, f.t)
             project.append_events(f.t, [event(f.id, "dropped", by=args.by, reason=args.reason or "")], "drop")
-        project.mark_dropped(f.id)
+        kept = next((e for e in f.t.events if e.get("event") == "requested"), None)
+        project.mark_dropped(f.id, json.dumps(kept, separators=(",", ":")) if kept else "")
     if f.pr_open:
         project.forge.update_pr(f.pr["number"], state="closed")
         receipts.append({"step": "close-pr", "status": "ran", "result": "pass", "detail": f"closed #{f.pr['number']}"})

@@ -78,7 +78,7 @@ class Operations(RailTest):
         self.assertIn("/loop", p.rail("docs", "away")["text"])
         self.assertIn("takes in issues labelled `rail`", p.rail("docs", "away")["text"])
         journal = p.rail("docs", "journal")["text"]
-        for name in ("accepted", "amended", "claimed", "saved", "step", "shipped", "tier_raised", "finding",
+        for name in ("requested", "accepted", "amended", "claimed", "saved", "step", "shipped", "tier_raised", "finding",
                      "consulted", "continued", "dropped"):
             self.assertIn(f"| `{name}` |", journal)  # every event the engine writes has its row
         for text in ("NN-review.json", "review/v1", "A review is complete for a patch", "rail/ids"):
@@ -92,6 +92,8 @@ class Operations(RailTest):
         sweep = p.rail("docs", "sweep")["text"]
         for text in ("Sweep:", "Review:", "skip_paths"):
             self.assertIn(text, sweep)
+        self.assertIn("a stranger's ticket is only ever a request", p.rail("docs", "bots")["text"])
+        self.assertIn("| Q1 | scope |", p.rail("docs", "grill")["text"])
         stats = p.rail("docs", "stats")["text"]
         for text in ("rail stats --since", "Hit rate", "merged with no review", "BY MODEL"):
             self.assertIn(text, stats)

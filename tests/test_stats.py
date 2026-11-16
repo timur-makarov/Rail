@@ -114,9 +114,13 @@ class Stats(RailTest):
         self.assertIn("Became PERSON at ship: 1 (size 1).", stats["text"])
         self.assertIn("No step failed.", stats["text"])
 
-    def test_with_nothing_merged_there_is_nothing_to_count(self):
+    def test_with_nothing_merged_only_where_the_tickets_came_from_is_counted(self):
         p = self.fixture()
+        self.assertEqual(p.rail("stats")["text"], "No ticket has merged, so there is nothing to count yet.")
         p.add(ticket())
         answer = p.rail("stats")
         self.assertEqual(answer["stats"]["merged"], 0)
-        self.assertEqual(answer["text"], "No ticket has merged, so there is nothing to count yet.")
+        self.assertTrue(answer["text"].startswith("Rail stats: no ticket has merged yet."))
+        self.assertEqual(answer["stats"]["grilling"]["groups"]["not grilled"]["open"], 1)
+        self.assertEqual(list(answer["stats"]["grilling"]["channels"]), ["session"])
+        self.assertIn("GRILLING", answer["text"])

@@ -41,14 +41,18 @@ external_id = "github#123"
   more lines than `[size] cap` (at ship). A tier never goes down. Tickets touching `migration_paths` must
   set `reversibility` and `rollback`.
 - **The contract** (Done Contract, scope and tier) freezes at acceptance. `rail amend NN` changes it.
+- **`## Grilling`** is optional: the record of questioning the person who asked for the ticket, written by the
+  agent that did it (`rail docs grill`). Ticket lint checks its shape, and `rail stats` counts it.
 
 ## A ticket is its branch
 
 Issues labelled `rail` come in with every `rail next` when GitHub can be reached (`rail intake github` does
 the same on request), and work from any other tracker with
-`rail intake --external-id KEY --title T --brief FILE`. Each makes a ticket with the request and an empty
-contract; `rail next` asks the agent to write it, and `rail amend NN --file FILE` saves it. Intake is
-idempotent by `external_id`.
+`rail intake --external-id KEY --title T --brief FILE`. An issue whose body is a whole ticket, starting with
+the `+++` line, becomes that ticket as it is, when it passes lint and its author can push to the repository:
+that is how a chat bot files what it grilled out of a person (`rail docs bots`). Anything else makes a ticket
+with the request, quoted, and an empty contract; `rail next` asks the agent to write it, and
+`rail amend NN --file FILE` saves it. Intake is idempotent by `external_id`.
 
 `add` takes the next ID, makes the branch `NN-slug`, and commits the ticket there without touching your
 checkout. With a remote, the ID is taken by moving one counter branch, `rail/ids`, a commit forward: if

@@ -64,6 +64,6 @@ lost.
 - `rail status`: every ticket, its state and owner, LAST (the age of its last journal event) and NOTE (what it
   waits for, a stale warning, or its pull request), then leftovers to clean up.
 - `rail context NN`: the `## Areas` rows a ticket touches, and a directory digest.
-- `rail stats`: what the merged tickets' journals say: tickets by tier, failed steps, and the reviewer's
-  cost and hit rate.
+- `rail stats`: what the tickets' journals say: tickets by tier, failed steps, the reviewer's cost and hit
+  rate, and how the grilling went.
 - `rail docs TOPIC`: these pages. `rail docs cli` and `rail docs config` are the references.

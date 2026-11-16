@@ -2,6 +2,7 @@
 
 import difflib
 import hashlib
+import json
 import re
 import tomllib
 
@@ -11,6 +12,12 @@ FIELDS = {
     "id": str, "title": str, "tier": str, "scope_paths": list, "after": list,
     "caused_by": str, "external_id": str, "reversibility": str, "rollback": str,
 }
+# The `## Grilling` record a bot or a session writes when it questioned the person who asked for the ticket.
+TOPICS = ("scope", "done", "behaviour", "tier", "out-of-scope", "other")
+TAKEN = ("accepted", "edited", "rejected", "answered")  # answered: there was no recommendation to take
+NO_RECOMMENDATION = {"", "-", "(none)", "none"}
+GRILL_KEYS = {"channel": "channel", "agent": "agent", "person": "person", "started": "started",
+              "confirmed": "confirmed", "drafts shown": "drafts"}
 VACUOUS = {"", "true", ":", "exit 0", "/bin/true", "/usr/bin/true", "pass", "ok", "works"}
 _CHECK = re.compile(r"^\s*[-*]\s+Check:\s*(.*)$")
 _ASSUMED = re.compile(r"^\s*[-*]\s+ASSUMED:\s*(.*)$")
@@ -89,6 +96,58 @@ class Ticket:
         lines = self.sections.get("Assumptions", "").splitlines()
         return [m.group(1).strip() for m in map(_ASSUMED.match, lines) if m]
 
+    def grilling(self):
+        """The `## Grilling` record as (record, errors); (None, []) when the ticket has none."""
+        if "Grilling" not in self.sections:
+            return None, []
+        record, questions, errors = {}, [], []
+        for line in self.sections["Grilling"].splitlines():
+            bullet = re.match(r"^\s*[-*]\s+([A-Za-z ]+):\s*(.*?)\s*$", line)
+            if bullet:
+                key = GRILL_KEYS.get(bullet.group(1).strip().lower())
+                if key is None:
+                    errors.append(f"Grilling: unknown line '{bullet.group(1).strip()}'; the lines are "
+                                  + ", ".join(k.capitalize() for k in GRILL_KEYS))
+                else:
+                    record[key] = bullet.group(2)
+                continue
+            if not line.strip().startswith("|"):
+                continue
+            cells = [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", line.strip())[1:-1]]
+            if not cells or set(cells[0]) <= set("-: ") or cells[0] in ("#", "Q"):
+                continue  # the heading row and the line under it
+            if len(cells) != 5:
+                errors.append(f"Grilling: a question row needs 5 cells (#, Topic, Recommended, Answer, Taken), got"
+                              f" {len(cells)}: {line.strip()}")
+                continue
+            qid, topic, recommended, answer, taken = cells
+            topic, taken = topic.lower(), taken.lower()
+            has = recommended.lower() not in NO_RECOMMENDATION
+            if topic not in TOPICS:
+                errors.append(f"Grilling {qid}: topic must be one of {', '.join(TOPICS)}, not '{topic}'")
+            if taken not in TAKEN:
+                errors.append(f"Grilling {qid}: Taken must be one of {', '.join(TAKEN)}, not '{taken}'")
+            elif has == (taken == "answered"):
+                errors.append(f"Grilling {qid}: " + ("a question with a recommendation was accepted, edited or rejected"
+                                                     if has else "a question with no recommendation was answered"))
+            if not answer:
+                errors.append(f"Grilling {qid}: the Answer is empty")
+            questions.append({"id": qid, "topic": topic, "recommended": has, "taken": taken})
+        if not record.get("channel"):
+            errors.append("Grilling: '- Channel:' is missing (slack, telegram, session, ...)")
+        elif not re.fullmatch(r"[a-z0-9][a-z0-9-]*", record["channel"]):
+            errors.append(f"Grilling: Channel is one lowercase word, such as slack, not '{record['channel']}'")
+        for key in ("started", "confirmed"):
+            if record.get(key) and not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d)?Z", record[key]):
+                errors.append(f"Grilling: {key.capitalize()} is a UTC time like 2026-11-16T09:12:00Z")
+        if record.get("drafts") is not None:
+            if record["drafts"].isdigit():
+                record["drafts"] = int(record["drafts"])
+            else:
+                errors.append("Grilling: Drafts shown is a number")
+        record["questions"] = questions
+        return record, errors
+
     def done_hash(self):
         """The Done Contract alone, so `amend` can tell what changed."""
         return hashlib.sha256(" ".join(self.sections.get("Done Contract", "").split()).encode()).hexdigest()[:12]
@@ -143,6 +202,7 @@ def lint(ticket, expect_id=None):
         errors.append("'## Done Contract' is missing")
     elif not ticket.check_lines():
         errors.append("the Done Contract needs at least one '- Check: `command`' line")
+    errors += ticket.grilling()[1]
     for payload in ticket.check_lines():
         if not _ticked(payload):
             errors.append(f"Check: put the command in backticks (got '{payload}')")
@@ -157,6 +217,14 @@ def with_id(text, ticket_id):
     end = next(i for i in range(1, len(lines)) if lines[i].strip() == "+++")
     front = [l for l in lines[1:end] if not re.match(r"^\s*id\s*=", l)]
     return "\n".join(["+++", f'id = "{ticket_id}"', *front, *lines[end:]])
+
+
+def with_field(text, key, value):
+    """The ticket text with the front matter string `key` set to `value`."""
+    lines = text.split("\n")
+    end = next(i for i in range(1, len(lines)) if lines[i].strip() == "+++")
+    front = [l for l in lines[1:end] if not re.match(rf"^\s*{key}\s*=", l)]
+    return "\n".join(["+++", *front, f"{key} = {json.dumps(value)}", *lines[end:]])
 
 
 def with_tier(text, tier):

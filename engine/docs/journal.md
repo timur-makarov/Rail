@@ -21,6 +21,7 @@ stores state. Never edit it by hand: the guard denies it.
 
 | Event | Written when | Fields | Read by |
 |---|---|---|---|
+| `requested` | The ticket is made: `rail add`, intake, a sweep | `via` (`add`, `intake`, `sweep`), `channel` (`session`, `github`, `tracker`, `engine`, or the `## Grilling` record's channel), `grilled`, `assumed` (open ASSUMED rows at the start), `filed_by` (the issue's author), `not_taken` (why an issue's whole ticket became a request). When grilled: `agent`, `person`, `started`, `confirmed`, `drafts`, and `questions` with each one's `id`, `topic`, `recommended` and `taken` | `rail stats`. A drop mark on the counter branch keeps a copy, since the journal goes with the branch |
 | `accepted` | Ticket lint first passes on an AUTO ticket; a person approves; an amend takes effect | `by` (`engine`, `person`), `via` (`lint`, `label`, `accept`, `amend`, `merge`), `tier`, `contract`, `done`, `scope_paths`, `note` | The `accepted` state. Ship and CI compare `contract` and `tier` with the ticket: that is the freeze. `via: merge` is a contract pull request that a person merged |
 | `amended` | `rail amend NN` | `contract` (the new hash), `changed` (any of `done_contract`, `scope`, `tier`), `added_paths`, `needs_approval` | When `needs_approval` is true, the ticket waits until a later `accepted` |
 | `claimed` | A claim or a takeover inside `next` | `session`, `takeover`, and in a cloud session `session_url` | The `implementing` state. `next` finds this session's ticket by it, and the pull request ends with the last `session_url` |
@@ -167,7 +168,7 @@ review runs with their cost and how each finding ended (`rail docs stats`).
   which records that a person ended a wait.
 - **Ticket IDs.** They are taken from the counter branch `rail/ids` on the remote (`rail docs tickets`).
 - **A dropped ticket's journal** goes with its branch. Its ID, the title it was added with and the drop
-  itself (a `rail drop NN` commit) stay in the counter branch, so a dropped ticket stays dropped when its
+  itself (a `rail drop NN` commit, which keeps the `requested` event) stay in the counter branch, so a dropped ticket stays dropped when its
   branch is deleted.
 - **The local cache** in the git directory (`rail/cache/`): a requested merge, the waits already announced,
   when the save hook last ran. Nothing else needs it, and a fresh clone works without it.

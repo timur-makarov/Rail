@@ -65,6 +65,30 @@ Disputes: 1. The refuter dismissed 1.
 | `Parked by the reviewer` | Findings the reviewer itself reported as parked |
 | `Disputes` | Refuter runs, by what the refuter decided: dismissed, parked or upheld |
 
+## Grilling
+
+Every ticket's journal starts with a `requested` event: where it came from, and the `## Grilling` record when
+someone questioned the person who asked (`rail docs grill`). The GRILLING table counts every ticket requested
+in the period, whatever became of it, with grilled tickets beside the rest:
+
+| Line | Counts |
+|---|---|
+| `questions asked` | Rows in the Grilling tables |
+| `recommendation accepted`, `edited`, `rejected` | How the person took the agent's recommendation |
+| `acceptance rate` | Accepted, divided by accepted, edited and rejected. A question asked with no recommendation isn't in it |
+| `merged`, `dropped`, `still open` | What became of the tickets. A dropped ticket counts through its drop mark |
+| `contract amended after acceptance` | The Done Contract or the scope changed after the ticket was accepted |
+| `caused a fix ticket` | A later ticket names it in `caused_by` |
+| `median request to merge` | From the `requested` event to the squash commit |
+
+`BY CHANNEL` and `GRILLED BY` split the same counts by where the request came from and by the model that
+grilled.
+
+**Read the acceptance rate with the amends.** Many acceptances with many amends mean people said yes without
+deciding, and the recommendations steered them. Many acceptances with few amends mean the agent recommends
+well. A low rate means it doesn't know the project or the person yet. The grilling agent grades the answers
+itself; the ticket keeps the recommendation and the answer word for word, so the grade can be checked.
+
 ## What to read from it
 
 - **A low hit rate with many dismissals** means the reviewer reports what isn't wrong. Try another

@@ -68,6 +68,7 @@ class TicketInfo:
         self.rebasing = False      # the worktree is stopped in the middle of a rebase
         self.on_base = False       # the ticket file is on the base branch
         self.dropped_mark = False  # the counter branch says the ticket was dropped: it outlives the ticket's branch
+        self.dropped_request = None  # the `requested` event the drop mark keeps, so stats still sees where it came from
         self.remote_events = []    # the remote branch's journal, when it differs from the local branch's
 
     @property
@@ -141,9 +142,14 @@ class Project:
             for nn in os.listdir(self.ids_dir):
                 if nn.isdigit():
                     info(nn).id_taken = True
-        for nn in self.dropped_marks():
+        for nn, note in self.dropped_marks().items():
             if nn in found:
                 found[nn].dropped_mark = True
+                try:
+                    kept = json.loads(note) if note.strip() else None
+                except ValueError:
+                    kept = None
+                found[nn].dropped_request = kept if isinstance(kept, dict) and kept.get("event") == "requested" else None
 
         base = self.base_ref
         if gitx.rev(base, self.root):
@@ -344,24 +350,29 @@ class Project:
 
     def dropped_marks(self):
         """The IDs the counter branch marks as dropped (`rail drop NN` commits), or, with no remote, the marks in
-        the git directory. A ticket's journal goes with its branch; this stays."""
-        marks = set()
+        the git directory. A ticket's journal goes with its branch; this stays. Returns {id: the note the mark keeps}."""
+        marks = {}
         tip = gitx.rev(f"refs/remotes/{self.remote}/{IDS_BRANCH}", self.root) if self.remote else None
         if tip:
-            for subject in gitx.out(["log", "--first-parent", "--format=%s", tip], self.root).splitlines():
+            for entry in gitx.out(["log", "--first-parent", "--format=%s%x1f%b%x1e", tip], self.root).split("\x1e"):
+                subject, _, body = entry.strip().partition("\x1f")
                 if m := re.match(r"rail drop (\d+)$", subject):
-                    marks.add(m.group(1))
+                    marks.setdefault(m.group(1), body.strip())
         if os.path.isdir(self.ids_dir):
-            marks |= {name[:-len(".dropped")] for name in os.listdir(self.ids_dir) if name.endswith(".dropped")}
+            for name in os.listdir(self.ids_dir):
+                if name.endswith(".dropped"):
+                    with open(os.path.join(self.ids_dir, name)) as f:
+                        marks.setdefault(name[:-len(".dropped")], f.read())
         return marks
 
-    def mark_dropped(self, nn):
+    def mark_dropped(self, nn, note=""):
         """Record a drop where it outlives the ticket's branch: one more commit on the counter branch. A ticket
-        whose file reached the base branch would otherwise look approved again once its branch is deleted."""
+        whose file reached the base branch would otherwise look approved again once its branch is deleted. `note`
+        (the ticket's `requested` event) goes with the mark, so rail stats can count a dropped ticket."""
         if not self.remote:
             os.makedirs(self.ids_dir, exist_ok=True)
             with open(os.path.join(self.ids_dir, f"{nn}.dropped"), "w") as f:
-                f.write("")
+                f.write(note)
             return True
         if not self.online:
             return False
@@ -370,7 +381,8 @@ class Project:
             tip = self.counter(fetch=True)[0]
             if str(nn) in self.dropped_marks():
                 return True
-            marker = gitx.out(["commit-tree", empty, *(["-p", tip] if tip else []), "-m", f"rail drop {nn}"], self.root)
+            message = ["-m", f"rail drop {nn}"] + (["-m", note] if note else [])
+            marker = gitx.out(["commit-tree", empty, *(["-p", tip] if tip else []), *message], self.root)
             result = gitx.push(self.root, self.remote, f"{marker}:refs/heads/{IDS_BRANCH}")
             if result == "ok":
                 gitx.git(["update-ref", f"refs/remotes/{self.remote}/{IDS_BRANCH}", marker], self.root, check=False)
