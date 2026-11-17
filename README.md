@@ -84,8 +84,8 @@ the next ticket.
 
 **Afterwards you can check what happened.** Each merge is one squash commit with the ticket, the tier, a
 table of every step that ran, and a `Review:` trailer that says who reviewed it. `rail status` lists every
-ticket and what it waits for. `rail stats` counts, over the merged tickets, how many needed a person, which
-steps failed, what the reviewer cost and how often its findings ended in a fix, and how the grilling went. Once 20 changes have
+ticket and what it waits for. `rail stats` counts, over the merged tickets, how many needed a person, how
+many were reverted, which steps failed, what the reviewer cost and how often its findings ended in a fix, and how the grilling went. Once 20 changes have
 merged with no review, a sweep reads them together and turns what it finds into tickets.
 
 **What Rail leaves to others.** It starts no agents: a session or a scheduled task does. It doesn't say how
@@ -95,7 +95,7 @@ to write, test or debug code: that is the agent's craft. It doesn't deploy: a ti
 
 A cloud session is Rail's standard place to work. Open one on your repository and say:
 
-> Set this repository up for Rail, from https://github.com/timur-makarov/agentic-framework
+> Set this repository up for Rail, from https://github.com/timur-makarov/Rail
 
 Claude clones the framework, runs `rail init`, writes the project's checks, map and `person_paths`, installs what
 the checks need, and opens one pull request. Then three things are yours:
@@ -115,7 +115,7 @@ running with no session open.
 ## Start on your own machine
 
 ```bash
-git clone https://github.com/timur-makarov/agentic-framework ~/rail && ~/rail/install
+git clone https://github.com/timur-makarov/Rail ~/rail && ~/rail/install
 ```
 
 ```bash

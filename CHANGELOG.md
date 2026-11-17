@@ -134,3 +134,4 @@ One line for each change, saying why.
 - Add a GRILLING section to `rail stats`: questions asked, recommendations accepted, edited or rejected, and what became of grilled tickets beside the rest (dropped, contract amended after acceptance, first-try ship, a fix ticket that followed), by channel and by model. Whether grilling pays off could not be seen anywhere.
 - Run each `Check:` line once on the untouched base at a ticket's first claim and record red or green in a `base_checks` event, and count in `rail stats` how often every check was already green: a check that passes before the work can't show the work was done. It is a recorded fact, never a gate, and `[commands] base_checks = false` switches it off.
 - Count reverted tickets in `rail stats`, by tier: a guardrail on merging with nobody, since a merge that is reverted later only moved a person's time.
+- Point the README at the repository's new name, `timur-makarov/Rail`.
