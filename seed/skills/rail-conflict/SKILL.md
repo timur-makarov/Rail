@@ -9,7 +9,7 @@ description: Resolve a rebase or merge conflict by deciding the final behaviour 
 - **Produces:** a finished rebase in which both the base's change and yours still do what they were meant
   to do.
 - **Done means:** `git diff --check` reports no conflict markers, the ticket's checks pass, and the rebase
-  is finished. Then run `rail next`.
+  is finished. Then run the command the brief names, `rail advance NN`.
 
 While the rebase is open, `rail next`, `rail advance` and `rail save` only tell you how to end it. That is
 on purpose: a commit made in the middle would be lost.
@@ -35,7 +35,7 @@ Say what the file should do once both changes are in. Write code that does that.
 ## 3. Finish
 
 Run `git diff --check`, then the ticket's `Check:` lines and `verify`. Continue with
-`git rebase --continue`, and run `rail next`.
+`git rebase --continue`, and run `rail advance NN`.
 
 If you end up with a result you don't trust, `git rebase --abort` returns the worktree to where it was, and
 you can start again.

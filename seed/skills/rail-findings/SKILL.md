@@ -28,7 +28,9 @@ Run the command in the finding's `evidence`, or follow the named lines yourself.
   line that handles the case. If the finding is blocking, your answer starts a dispute. A fresh refuter
   decides it from the claim and the evidence and does not read your argument. So make the code show it:
   add a test that demonstrates the behaviour.
-- **The problem is real and your change didn't cause it.** Answer `parked`.
+- **The problem is real and your change didn't cause it.** Answer `parked`, with what shows the problem
+  was there before your change. On a blocking finding this starts a dispute too: the refuter decides
+  whether your change caused it.
 
 An answer states what is true or what changed. It needs no thanks and no agreement.
 

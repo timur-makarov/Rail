@@ -48,3 +48,6 @@ Read `.rail/config.toml` for `person_paths`, `migration_paths` and `[size] cap`.
 Lead with the size (small, medium, large) and the one item that drives it. Then the table above, filled in.
 Then one recommended next step: draft the ticket (`rail-grill`), split first (`rail-slice`), or add tests
 for the untested neighbours first.
+
+When the ticket exists already and the brief asked you to write its contract, there is no next skill: put
+the scope, the tier and the checks into that ticket with the command the brief names, and file nothing new.
