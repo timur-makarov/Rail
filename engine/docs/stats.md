@@ -104,7 +104,9 @@ itself; the ticket keeps the recommendation and the answer word for word, so the
 - **Many tickets under `Became PERSON at ship`** by `size` means tickets are too big: split them at add. By
   `person_paths`, the scope at add missed a path a person wants to see.
 - **A step with many failures** is where retries go. A `could not run` count means a tool is missing on the
-  machine: `[commands] provision` or `setup` should install it.
+  machine: `[commands] provision` or `setup` should install it. `rail stats` doesn't read the failures'
+  `signature`s; to see whether a step failed the same way again and again or differently each time, compare
+  them in the ticket's journal (`rail docs journal`).
 - **`reverted afterwards`** is the guardrail on merging with nobody. When it rises on AUTO tickets, the time a
   person saved at the merge was spent later, on the revert.
 - **Every check already green on the base** means those checks couldn't show that the work was done: the

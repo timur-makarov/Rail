@@ -31,7 +31,10 @@ READERS = {
                     " command); empty leaves the command's default",
     "review.skip_paths": "advance and CI: an AUTO change gets no reviewer when every file it changes matches one of"
                          " these globs. The sweep reviews such changes afterwards",
-    "retry.budget": "next and advance: failed attempts per step before consult, then a person",
+    "retry.budget": "next and advance: failures in a row at one step with the same signature before consult advises"
+                    " once; the attempt after that failing too waits for a person",
+    "retry.cap": "next and advance: failed attempts at one step, whatever their signatures, after which the ticket"
+                 " waits for a person",
     "consult.command": "the consult pack: a read-only model, with the brief on stdin",
     "consult.model": "the consult pack: the model consult runs on, set the same way as review.model",
     "claim.stale_minutes": "next: minutes without a journal event after which another session's work in flight is"

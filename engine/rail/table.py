@@ -130,12 +130,18 @@ def _answer(f):
             f" reviews it again." + _findings(f, "Findings:") + _note(f))
 
 
+def _stuck(f, step):
+    """Why a step waits for a person: the same failure at the budget, or the cap on failures of any kind."""
+    if f.capped_why[step] == "cap":
+        return f"'{step}' failed {f.attempts[step]} times since it last passed, whatever the output ([retry] cap)"
+    after = ", then once more after consult" if f.capped_why[step] == "consulted" else ""
+    return f"'{step}' failed the same way {f.project.config['retry']['budget']} times in a row{after} ([retry] budget)"
+
+
 def _capped(f):
-    steps = _join(f.capped)
-    return (f"Ticket {f.id} used its retry budget at '{steps}' ({f.project.config['retry']['budget']} attempts, then the"
-            f" attempt after consult).{_could_not_run(f, f.capped)} A person looks at the journal and the branch"
-            f" {f.t.name}, then continues it: rail accept {f.id} \"what to do differently\". That gives a fresh"
-            f" budget." + _go(f))
+    return (f"Ticket {f.id} is stuck: {'; '.join(_stuck(f, s) for s in f.capped)}.{_could_not_run(f, f.capped)} A person"
+            f" looks at the journal and the branch {f.t.name}, then continues it: rail accept {f.id} \"what to do"
+            f" differently\". That gives a fresh budget and a fresh cap." + _go(f))
 
 
 def _pr(f):

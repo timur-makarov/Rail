@@ -21,7 +21,7 @@ DEFAULTS = {
     "commands": {"setup": "", "verify": "", "provision": "", "timeout_secs": 900, "base_checks": True},
     "size": {"cap": 600, "exclude": []},
     "review": {"command": REVIEW_COMMAND, "model": "", "skip_paths": []},
-    "retry": {"budget": 2},
+    "retry": {"budget": 2, "cap": 5},
     "consult": {"command": "claude -p --safe-mode --tools Read,Grep,Glob", "model": ""},
     "claim": {"stale_minutes": 30, "save_minutes": 10},
     "worker": {"ladder": ["claude-sonnet-5-5:medium", "claude-sonnet-5-5:high", "claude-opus-5-5:medium"],

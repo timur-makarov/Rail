@@ -1,6 +1,8 @@
 """The steps the engine runs: claim and setup, ship, the local merge and the PR description."""
 
+import hashlib
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -13,6 +15,20 @@ from .util import MISSING_HELP, could_not_run, match_any, minutes_since, run_she
 # A step's status: it ran and passed or failed, or the shell could not start its command (could_not_run, a failure
 # that checked nothing). Both are attempts, and both count toward the step's retry budget.
 TRIED = ("ran", "could_not_run")
+REVIEW_STEPS = ("review", "security", "refuter")  # every failed run at one of these is the same failure: plain count
+
+
+def signature(step, output):
+    """The step and a hash of its failure's output, normalised so that the same failure gives the same signature
+    across runs: what changes from run to run (numbers, hashes, paths, temp folders) and spacing are left out."""
+    text = "" if step in REVIEW_STEPS else tail(output).lower()
+    text = re.sub(r"(?<![\w.~-])/[^\s:'\"(),]+", "<path>", text)  # absolute paths, temp folders among them
+    text = re.sub(r"\btmp[\w.-]*", "<tmp>", text)                   # temp names: tmpab12_cd, tmp.x8Q2
+    text = re.sub(r"\b(?:0x[0-9a-f]+|(?=[a-f]*\d)[0-9a-f]{7,})\b", "<hex>", text)  # commits, ids, addresses
+    text = re.sub(r"\d+", "<n>", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return f"{step}:{hashlib.sha256(text.encode()).hexdigest()[:12]}"
+
 
 class Run:
     """The receipt of one command: the steps it ran, their events, and the first failure."""
@@ -41,6 +57,8 @@ class Run:
                 fields["duration_ms"] = duration_ms
             if cost_usd is not None:
                 fields["cost_usd"] = cost_usd
+            if not passed:
+                fields["signature"] = signature(step, output or detail or "")
             self.events.append(event(self.t.id, "step", **fields))
         if detail:
             receipt["detail"] = detail

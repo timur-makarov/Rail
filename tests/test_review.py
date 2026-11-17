@@ -240,6 +240,51 @@ class Retry(RailTest):
         approved = p.rail("accept", "1")
         self.assertNotEqual(approved["owner"], "human", approved["reason"]["code"] + " " + approved["action"]["brief"][:300])
 
+    def calc(self, p, body):
+        p.write("src/calc.py", f"def add(a, b):\n    {body}\n", base=p.worktree("1"))
+
+    def test_the_same_failure_twice_makes_consult_due_and_two_different_ones_do_not(self):
+        p = self.fixture()
+        p.add(ticket())
+        p.rail("next")
+        p.rail("advance", "1", expect=3)  # AssertionError
+        self.calc(p, "return a + c")      # NameError: a new failure is progress
+        second = p.rail("advance", "1", expect=3)
+        self.assertEqual((second["owner"], second["reason"]["code"]), ("agent", "STEP_FAILED"))
+        self.assertNotIn("consult says", second["action"]["brief"])
+        self.assertEqual(events(p, "1-fix-add", "consulted"), [])
+        third = p.rail("advance", "1", expect=3)  # the NameError again, with nothing changed
+        self.assertIn("consult says change", third["action"]["brief"])
+        fails = [e for e in events(p, "1-fix-add", "step") if e["step"] == "checks"]
+        self.assertTrue(all(e["signature"].startswith("checks:") for e in fails))
+        self.assertNotEqual(fails[0]["signature"], fails[1]["signature"])
+        self.assertEqual(fails[1]["signature"], fails[2]["signature"])
+
+    def test_the_cap_sends_new_failures_to_a_person_and_a_person_resets_budget_and_cap(self):
+        p = self.fixture()
+        p.add(ticket())
+        p.rail("next")
+        p.rail("advance", "1", expect=3)  # 1: AssertionError
+        for n, body in enumerate(["return a + c", "return a - b", "return a + c"], 2):
+            self.calc(p, body)
+            self.assertEqual(p.rail("advance", "1", expect=3)["reason"]["code"], "STEP_FAILED", n)
+        self.calc(p, "return a - b")
+        capped = p.rail("advance", "1", expect=3)  # 5: never the same twice in a row, and still a person looks
+        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertIn("'checks' failed 5 times since it last passed, whatever the output ([retry] cap)",
+                      capped["action"]["brief"])
+        self.assertEqual(events(p, "1-fix-add", "consulted"), [])
+        p.rail("accept", "1", "read the check")
+        after = p.rail("advance", "1", expect=3)  # the same failure as the fifth: a fresh budget counts it once
+        self.assertEqual((after["owner"], after["reason"]["code"]), ("agent", "STEP_FAILED"))
+        self.assertNotIn("consult says", after["action"]["brief"])
+        again = p.rail("advance", "1", expect=3)
+        self.assertIn("consult says change", again["action"]["brief"])
+        stuck = p.rail("advance", "1", expect=3)
+        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertIn("'checks' failed the same way 2 times in a row, then once more after consult ([retry] budget)",
+                      stuck["action"]["brief"])
+
     def test_consult_on_request(self):
         p = self.fixture()
         p.add(ticket())

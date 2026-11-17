@@ -38,8 +38,10 @@ person.
 **The engine decides what "done" means.** `rail advance` commits the change and runs the ship checks in
 order: a rebase onto the base branch, ticket lint, open assumptions, scope, structure rules, migration
 fields, size, the architecture map, the project's own `verify` command (tests, lint, scans), and each
-`Check:` line. A failure sends the ticket back with the output. A step may fail twice; then a second
-opinion (`rail consult`) advises once, and after one more failure the ticket waits for a person.
+`Check:` line. A failure sends the ticket back with the output. A failure counts as stuck only when it
+repeats: when a step fails the same way twice in a row, a second opinion (`rail consult`) advises once, and
+after one more failure the ticket waits for a person. Five failures at one step wait for a person whatever
+they were.
 
 **A fresh agent reviews every change, and the author can't steer it.** The engine starts the reviewer
 itself, in the ticket's worktree, with a brief built from the ticket and the diff, and binds the result to
