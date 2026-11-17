@@ -1506,7 +1506,7 @@ def cmd_ci(project, args):
         steps.run_command(project, project.root, nn, "setup", project.config["commands"]["setup"], run)
     # A reviewer may have raised the tier after this ship.
     tier = highest(shipped[-1].get("tier", "AUTO"), *[e.get("to") for e in events if e.get("event") == "tier_raised"])
-    accepted =[e for e in events if e.get("event") == "accepted"]
+    accepted = [e for e in events if e.get("event") == "accepted"]
     if run.ok:
         needed = steps.check(project, nn, Ticket(text), head, project.root, tier, run, patch_id,
                              accepted=accepted[-1] if accepted else None)
