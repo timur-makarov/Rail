@@ -263,6 +263,10 @@ ROWS = [
      lambda f: f"rail next --ticket {f.id}"),
     ("SWEEP_RUN",          "agent", "script",      lambda f: f.state == "implementing" and f.sweep and not f.sweep_done,
      lambda f: "rail sweep"),
+    # A sweep that found nothing has no task for the agent: it ships and merges, which moves the Sweep: marker.
+    ("SWEEP_EMPTY",        "agent", "script",      lambda f: f.state == "implementing" and f.sweep and f.sweep_empty
+                                                   and not f.dirty and not f.last_fail,
+     lambda f: f"rail advance {f.id}"),
     ("SWEEP_TICKETS",      "agent", "agent_task",  lambda f: f.state == "implementing" and f.sweep and not f.dirty
                                                    and not f.last_fail,
      lambda f: f"The sweep ran: read .rail/journal/{f.id}-summary.md in {f.cwd}. Open a ticket with rail add for each"

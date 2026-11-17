@@ -681,20 +681,21 @@ def cmd_amend(project, args):
 
 
 def cmd_sweep(project, args):
-    """A sweep ticket over what merged without a review: the free part and one review pass."""
+    """A sweep ticket over what merged since the last sweep: the free part, the parked findings and proposed checks,
+    and one review pass over what merged without a review."""
     from . import sweep
 
     project.sync()
     tickets, facts = load(project)
-    start, commits = sweep.unreviewed(project)
+    start, commits, merged = sweep.since_last(project)
     key = f"sweep#{start[:12]}"
     existing = next((f for f in facts.values() if f.ticket and f.ticket.get("external_id") == key
                      and f.state not in ("merged", "dropped")), None)
     if not existing:
-        if not commits:
-            return answer(code="NO_WORK", action={"kind": "rest", "brief": "Nothing merged without a review since the"
-                                                                           " last sweep."})
-        nn, _, _ = create_ticket(project, sweep.ticket_text(start, len(commits)), via="sweep", channel="engine")
+        if not commits and not merged:
+            return answer(code="NO_WORK", action={"kind": "rest", "brief": "Nothing merged since the last sweep."})
+        nn, _, _ = create_ticket(project, sweep.ticket_text(start, len(commits), len(merged)), via="sweep",
+                                 channel="engine")
     else:
         nn = existing.id
     f, receipts = settle(project, nn, explicit=True)
@@ -829,10 +830,10 @@ def cmd_next(project, args):
         return answer(owner="human", code="WAITING_HUMAN", action={"kind": "human_wait", "brief": brief},
                       steps_=took_in, **extra)
     from . import sweep
-    is_due, _, commits = sweep.due(project)
+    is_due, _, commits, merged = sweep.due(project)
     if is_due and not held:
         return answer(owner="agent", code="SWEEP", action={"kind": "script", "brief": "rail sweep", "command": "rail sweep"},
-                      steps_=took_in, **extra, unreviewed=len(commits))
+                      steps_=took_in, **extra, unreviewed=len(commits), merged=len(merged))
     if ci:
         # CI is running and there is no run to watch (another CI system, or the run hasn't started yet).
         return answer(ci[0].id, ci[0].state, "none", first_match(ci[0])[2], "CI_WAIT", took_in, **extra)
@@ -1610,7 +1611,8 @@ def parser():
     intake.add_argument("--external-id")
     intake.add_argument("--title")
     intake.add_argument("--brief", help="a file with the request, verbatim")
-    verb("sweep", "review what merged without a review, and turn its findings into tickets", ticket=False)
+    verb("sweep", "review what merged without a review, gather the findings reviewers parked and the checks they"
+                  " proposed, and turn them into tickets", ticket=False)
     verb("save", "commit and push the work in flight as it is, with no checks")
     stats_ = verb("stats", "what the merged tickets' journals say: tickets by tier, failed steps, and the reviewer's"
                            " cost and hit rate", ticket=False)

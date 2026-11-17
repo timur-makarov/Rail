@@ -77,7 +77,11 @@ class Facts:
         self.merge_note = project.cache_read("merge", t.id)
         self.red_base = None
         self.sweep = bool(self.ticket) and (self.ticket.get("external_id") or "").startswith("sweep#")
-        self.sweep_done = any(r.get("role") == "sweep" for r in self.ledger.doc["runs"])
+        # A sweep is done once its review run is stored, or once its harvest step passed when nothing needed one.
+        harvest = [e for e in t.events if e.get("event") == "step" and e.get("step") == "harvest"
+                   and e.get("result") == "pass"]
+        self.sweep_done = bool(harvest) or any(r.get("role") == "sweep" for r in self.ledger.doc["runs"])
+        self.sweep_empty = bool(harvest) and harvest[-1].get("detail") == "nothing to file"
 
         author = self.ticket.tier if self.ticket and self.ticket.tier in TIERS else "AUTO"
         if self.accepted:

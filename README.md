@@ -92,8 +92,9 @@ the next ticket.
 **Afterwards you can check what happened.** Each merge is one squash commit with the ticket, the tier, a
 table of every step that ran, and a `Review:` trailer that says who reviewed it. `rail status` lists every
 ticket and what it waits for. `rail stats` counts, over the merged tickets, how many needed a person, how
-many were reverted, which steps failed, what the reviewer cost and how often its findings ended in a fix, and how the grilling went. Once 20 changes have
-merged with no review, a sweep reads them together and turns what it finds into tickets.
+many were reverted, which steps failed, what the reviewer cost and how often its findings ended in a fix, and how the grilling went. Every 20
+merged tickets, a sweep gathers the findings reviewers parked and the checks they proposed, reads any changes
+that merged with no review, and turns what it finds into tickets.
 
 **What Rail leaves to others.** It starts no agents: a session or a scheduled task does. It doesn't say how
 to write, test or debug code: that is the agent's craft. It doesn't deploy: a ticket ends at its merge.

@@ -46,6 +46,8 @@ READERS = {
     "worker.person_ladder": "next and advance: the same ladder for a PERSON ticket, which starts higher",
     "sweep.after": "next: changes merged with no review (tickets inside review.skip_paths, and commits with no"
                    " ticket) since the last sweep before one is offered",
+    "sweep.every": "next: tickets merged since the last sweep, reviewed or not, before one is offered; it then"
+                   " gathers the findings reviewers parked and the checks they proposed. 0 switches this off",
     "map.depth": "doc-lint: the directory depth ## Areas must cover",
     "map.ignore": "doc-lint: directories that need no ## Areas row",
     "rules": "ship and CI: structure rules on added lines and files (rail docs rules)",
