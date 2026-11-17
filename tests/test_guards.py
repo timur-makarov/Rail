@@ -370,11 +370,16 @@ class Deny(RailTest):
         self.assertEqual(ran_and_passed, [])
         self.assertGreater(ran, 200)  # the lines are real: bash runs the command in most of them
         # GH_REPO as gh really gets it: where it is unset again on the way, the merge is this checkout's.
+        # env --unset=NAME is GNU's spelling: macOS's env has only -u, so the line can't run there.
+        gnu_env = subprocess.run(["env", "--unset=X", "true"], capture_output=True).returncode == 0
         for line in ("GH_REPO=someone/else env --unset=GH_REPO gh pr merge 5", "GH_REPO=someone/else env -uGH_REPO gh pr merge 5",
                      'GH_REPO=someone/else env -i PATH="$PATH" gh pr merge 5', "GH_REPO=someone/else GH_REPO= gh pr merge 5",
                      "export GH_REPO=someone/else; unset GH_REPO; gh pr merge 5", "export GH_REPO=someone/else | cat; gh pr merge 5"):
             if os.path.exists(log + ".repo"):
                 os.remove(log + ".repo")
+            self.assertTrue(self.judge(line), line)
+            if "--unset=" in line and not gnu_env:
+                continue
             subprocess.run([bash, "-c", line], cwd=work, env=env, capture_output=True, text=True, timeout=20)
             with open(log + ".repo") as f:
                 self.assertEqual(f.read().strip(), "[] pr merge 5", line)  # gh ran with no GH_REPO

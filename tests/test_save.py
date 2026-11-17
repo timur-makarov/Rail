@@ -337,11 +337,15 @@ class Save(RailTest):
         a.add(ticket(tier="AUTO"))
         a.rail("next")
         a.fix_calc("1")
-        a.queue_reviews({"touch": "src/scratch.py", "sleep": 4, "summary": "Tried an idea.", "findings": []})
+        a.queue_reviews({"touch": "src/scratch.py", "sleep": 8, "summary": "Tried an idea.", "findings": []})
         worker = threading.Thread(target=lambda: a.rail("advance", "1"))
         worker.start()
-        time.sleep(2.5)  # the review is running, and its scratch file is in the worktree
-        self.assertTrue(os.path.exists(os.path.join(a.worktree("1"), "src", "scratch.py")))
+        scratch = os.path.join(a.worktree("1"), "src", "scratch.py")
+        for _ in range(300):  # wait for the review to start, however busy the machine is: a fixed sleep was flaky
+            if os.path.exists(scratch):
+                break
+            time.sleep(0.1)
+        self.assertTrue(os.path.exists(scratch))  # the review is running, and its scratch file is in the worktree
         self.assertIn("another rail command is at work", a.rail("save", "1")["action"]["brief"])
         self.assertEqual(hook(a, "stop").returncode, 0)
         worker.join()

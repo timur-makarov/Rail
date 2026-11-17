@@ -237,7 +237,9 @@ class GitHub:
 
 class RailTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="rail-test-")
+        # realpath: on macOS the temp folder is behind a symlink (/var -> /private/var), and git and the engine
+        # report the resolved path
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="rail-test-"))
         home = os.path.join(self.tmp, "home")
         os.makedirs(home)
         gitconfig = os.path.join(home, ".gitconfig")

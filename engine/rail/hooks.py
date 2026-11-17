@@ -74,7 +74,7 @@ def session_start():
                 project.cache_write("hooks", project.session, "1")  # doctor reads it: Rail's hooks run in this session
             lines = ["This repository runs on Rail. The loop: rail next --json, do action.brief, then rail advance --json."]
         else:
-            where = os.path.relpath(project.root, cwd)
+            where = os.path.relpath(project.root, os.path.realpath(cwd))  # the root is resolved, so cwd must be
             lines = [f"The repository {where}/ runs on Rail. Run rail from inside it. The loop: rail next --json, do"
                      " action.brief, then rail advance --json."]
         tickets, facts = load(project)
