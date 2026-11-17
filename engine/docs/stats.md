@@ -1,7 +1,7 @@
 # Stats
 
 `rail stats` counts over the journals of merged tickets: how the tickets went, which steps failed, and what
-the reviewer cost and found. It only reads. Nothing is stored, so every number can be checked against the
+the reviewer cost and found. It also reads the base branch's history for reverts. It only reads. Nothing is stored, so every number can be checked against the
 events and review runs it comes from (`rail docs journal`).
 
 ```text
@@ -11,7 +11,8 @@ rail stats --json               the same numbers, under "stats"
 ```
 
 A ticket counts once its squash commit is on the base branch. It counts under the tier it merged with, so
-a ticket that became PERSON at ship is a PERSON ticket.
+a ticket that became PERSON at ship is a PERSON ticket. A revert takes a ticket's journal off the base branch
+with its code, so for a reverted ticket the journal is read from its squash commit.
 
 ```text
 Rail stats: 3 merged tickets. Not counted: 1 not merged.
@@ -22,7 +23,9 @@ the reviewer read it         1       1
 merged with no review        1       0
 no person acted              2       0
 shipped on the first try     1       1
+reverted afterwards          0       0
 median claim to merge      41m   3h10m
+Every check already green on the base: 1 of 3 tickets whose checks ran there before the work.
 
 STEPS THAT FAILED  runs  failed  could not run
 checks                5       1              0
@@ -53,7 +56,9 @@ Disputes: 1. The refuter dismissed 1.
 | `merged with no review` | The rest: every changed file was in `[review] skip_paths`, or no product file changed. The sweep reads these afterwards |
 | `no person acted` | AUTO tickets with no approval by a person, no continued wait, and no finding a person decided |
 | `shipped on the first try` | Tickets where no ship step failed before the first ship. A red base doesn't count against a ticket |
+| `reverted afterwards` | Tickets whose squash commit a later commit on the base branch reverts: one whose message says `This reverts commit <sha>.` (what `git revert` writes), or `Reverts owner/repo#N` (what GitHub's Revert button writes), where N is the ticket's pull request |
 | `median claim to merge` | From the first claim to the squash commit |
+| `Every check already green on the base` | Of the tickets with a `base_checks` event, those where every `Check:` line passed on the base before any work (`rail docs loop`) |
 | `Became PERSON at ship` | `tier_raised` events, by reason: `person_paths`, `migration_paths`, `size` |
 | `STEPS THAT FAILED` | For each step that failed at least once: its runs, the failed ones, and the ones the shell couldn't start |
 | `Consult ran` | `consulted` events |
@@ -100,5 +105,9 @@ itself; the ticket keeps the recommendation and the answer word for word, so the
   `person_paths`, the scope at add missed a path a person wants to see.
 - **A step with many failures** is where retries go. A `could not run` count means a tool is missing on the
   machine: `[commands] provision` or `setup` should install it.
+- **`reverted afterwards`** is the guardrail on merging with nobody. When it rises on AUTO tickets, the time a
+  person saved at the merge was spent later, on the revert.
+- **Every check already green on the base** means those checks couldn't show that the work was done: the
+  ticket would have passed them with no change. Write checks that fail first.
 - **`no person acted`** against `merged` is how much of the AUTO work ran with nobody. `merged with no review`
   is what `[review] skip_paths` let through.

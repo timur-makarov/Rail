@@ -5,10 +5,12 @@ numbers can be checked against the journal they come from.
 """
 
 import datetime
+import re
 import statistics
 from collections import Counter
 
 from . import gitx
+from .project import events_path, parse_events, review_path
 from .review import Ledger, load_doc
 from .state import SHIP_STEPS
 from .ticket import TIERS
@@ -35,6 +37,40 @@ def _merge_times(project, tickets):
         return {}
     lines = gitx.out(["show", "--no-patch", "--format=%H %ct", *shas], project.root).splitlines()
     return {shas[sha]: int(at) for sha, at in (line.split() for line in lines if line.strip()) if sha in shas}
+
+
+def _reverted(project, tickets):
+    """The merged tickets whose squash commit a later commit on the base branch reverts. git revert writes "This
+    reverts commit <sha>."; GitHub's Revert button opens a pull request whose squash says "Reverts owner/repo#N",
+    where N is the pull request the ticket merged with."""
+    shas = {t.merged: nn for nn, t in tickets.items() if t.merged}
+    if not shas:
+        return set()
+    prs = {}
+    for line in gitx.out(["show", "--no-patch", "--format=%H %s", *shas], project.root).splitlines():
+        sha, _, subject = line.partition(" ")
+        if sha in shas and (m := re.search(r"\(#(\d+)\)$", subject.strip())):
+            prs[m.group(1)] = shas[sha]
+    log = gitx.out(["log", project.base_ref, "--grep=This reverts commit ", "--grep=^Reverts ", "--format=%B%x1e"],
+                   project.root)
+    found = set()
+    for body in log.split("\x1e"):
+        for sha in re.findall(r"This reverts commit ([0-9a-f]{7,40})", body):
+            found |= {nn for full, nn in shas.items() if full.startswith(sha)}
+        for number in re.findall(r"^Reverts \S+#(\d+)", body, re.M):
+            found |= {prs[number]} if number in prs else set()
+    return found
+
+
+def _journals_of_reverted(project, tickets):
+    """A revert of a squash commit takes the ticket's journal off the base branch with its code. The ticket still
+    counts: its journal is read from its squash commit."""
+    gone = [t for t in tickets.values() if t.merged and not t.events]
+    blobs = gitx.read_blobs([f"{t.merged}:{path(t.id)}" for t in gone for path in (events_path, review_path)],
+                            project.root) if gone else {}
+    for t in gone:
+        t.events = parse_events(blobs.get(f"{t.merged}:{events_path(t.id)}"))
+        t.review_text = blobs.get(f"{t.merged}:{review_path(t.id)}")
 
 
 def _ended(severity, last):
@@ -113,7 +149,11 @@ def collect(project, tickets, since=None, states=None):
     dropped."""
     start = _since(since) if since else None
     merged_at = _merge_times(project, tickets)
-    tiers = {tier: {"merged": 0, "reviewed": 0, "no_person": 0, "first_try": 0, "minutes": []} for tier in TIERS}
+    reverted = _reverted(project, tickets)
+    _journals_of_reverted(project, tickets)
+    tiers = {tier: {"merged": 0, "reviewed": 0, "no_person": 0, "first_try": 0, "reverted": 0, "minutes": []}
+             for tier in TIERS}
+    base = {"tickets": 0, "all_green": 0}  # tickets whose Check: lines ran on the base before the work
     raised, consults, steps, roles, models = Counter(), 0, {}, {}, {}
     blocking, advisory, parked, disputes = Counter(), Counter(), 0, Counter()
     for nn, t in tickets.items():
@@ -130,6 +170,11 @@ def collect(project, tickets, since=None, states=None):
                      or (e.get("event") == "finding" and e.get("by") == "owner") for e in t.events)
         row["no_person"] += tier == "AUTO" and not person
         row["first_try"] += _first_try(t, ships)
+        row["reverted"] += nn in reverted
+        found = t.last("base_checks")
+        if found and found.get("checks"):
+            base["tickets"] += 1
+            base["all_green"] += all(c.get("result") == "green" for c in found["checks"])
         claims = [e["at"] for e in t.events if e.get("event") == "claimed" and e.get("at")]
         if claims:
             row["minutes"].append(max(0.0, (merged_at[nn] - parse_iso(claims[0]).timestamp()) / 60))
@@ -178,6 +223,7 @@ def collect(project, tickets, since=None, states=None):
     merged = sum(row["merged"] for row in tiers.values())
     return {
         "since": since, "merged": merged, "left_out": len(tickets) - merged, "tiers": tiers, "raised": dict(raised),
+        "base_checks": base,
         "grilling": grilling(tickets, states or {}, merged_at, start),
         "consults": consults, "steps": {name: steps[name] for name in sorted(steps, key=_step_rank)},
         "review": {
@@ -275,7 +321,12 @@ def render(data):
         ["merged with no review", *[row["merged"] - row["reviewed"] for row in tiers.values()]],
         ["no person acted", *[row["no_person"] for row in tiers.values()]],
         ["shipped on the first try", *[row["first_try"] for row in tiers.values()]],
+        ["reverted afterwards", *[row["reverted"] for row in tiers.values()]],
         ["median claim to merge", *[_span(row["median_minutes"]) for row in tiers.values()]]])
+    base = data["base_checks"]
+    if base["tickets"]:
+        lines.append(f"Every check already green on the base: {base['all_green']} of {base['tickets']} tickets whose"
+                     " checks ran there before the work.")
     if data["raised"]:
         reasons = ", ".join(f"{reason} {n}" for reason, n in sorted(data["raised"].items()))
         lines.append(f"Became PERSON at ship: {sum(data['raised'].values())} ({reasons}).")

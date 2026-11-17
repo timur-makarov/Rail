@@ -29,6 +29,15 @@ reads the answer: the session that sees your `rail:go`, or the one you tell `acc
 once, because the session that claimed it rested at the wait. A session whose ticket was taken over is told
 to stop work on it.
 
+**The checks run once on the base.** At a ticket's first claim, once setup has passed, `next` runs each
+`Check:` line of the Done Contract once in the new worktree, which still holds the base branch, the same way
+ship runs it. It records each result in a `base_checks` event: `red`, `green`, `could_not_run` or `timed_out`.
+Then it resets the worktree to what it was, because a check may write files. A check that is already green on
+the base can't show that the work was done, and `rail stats` counts how often every check was. This is never
+a gate: the result fails nothing, spends no attempt, and changes neither the ticket's state nor its owner, and
+a failure inside it doesn't stop `next`. It runs once per ticket: not on a resume, not on a takeover, and not
+for a ticket with no `Check:` line yet. `[commands] base_checks = false` switches it off.
+
 **Work in flight is saved as it goes.** `rail save` commits a ticket's in-scope changes as they are and
 pushes them, with no checks. Two hooks run it: at the end of each agent turn, and at most every ten minutes
 while the agent works. So a machine that goes away takes minutes of work with it, and each save shows other
@@ -64,6 +73,7 @@ lost.
 - `rail status`: every ticket, its state and owner, LAST (the age of its last journal event) and NOTE (what it
   waits for, a stale warning, or its pull request), then leftovers to clean up.
 - `rail context NN`: the `## Areas` rows a ticket touches, and a directory digest.
-- `rail stats`: what the tickets' journals say: tickets by tier, failed steps, the reviewer's cost and hit
+- `rail stats`: what the tickets' journals and the base branch say: tickets by tier, how many were reverted,
+  how often every check was green on the base before the work, failed steps, the reviewer's cost and hit
   rate, and how the grilling went.
 - `rail docs TOPIC`: these pages. `rail docs cli` and `rail docs config` are the references.
