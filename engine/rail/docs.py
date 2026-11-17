@@ -25,7 +25,8 @@ READERS = {
     "commands.timeout_secs": "every command: setup, verify, provision, each check, each review run",
     "commands.base_checks": "next, at a ticket's first claim: runs each Check: line once on the untouched base and"
                             " records red or green in a base_checks event. Never a gate: it fails nothing",
-    "size.cap": "ship and CI: an AUTO change with more changed lines than this becomes PERSON",
+    "size.cap": "ship and CI: an AUTO change with more changed lines than this is offered a split at its first ship"
+                " (no attempt spent); the next ship over it, and CI, make it PERSON",
     "size.exclude": "ship and CI: globs left out of the size count, besides generated files and lockfiles",
     "review.command": "advance: the reviewer, run in the ticket's worktree with the brief on stdin",
     "review.model": "advance and sweep: the model the reviewer runs on (ANTHROPIC_MODEL and RAIL_MODEL for the"

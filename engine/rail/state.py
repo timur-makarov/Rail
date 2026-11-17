@@ -56,6 +56,7 @@ class Facts:
         self.dirty = []
         self.shipped = None
         self.last_fail = None
+        self.split = None
         self.setup_failed = None
         self.after_open = []
         self.after_dropped = []
@@ -253,12 +254,14 @@ class Facts:
         setups = [e for e in steps if e.get("step") == "setup"]
         if setups and setups[-1].get("result") == "fail":
             self.setup_failed = setups[-1]
-        # The last word on the current patch: a shipped event, or a ship step that failed.
+        # The last word on the current patch: a shipped event, a split offered, or a ship step that failed.
         verdicts = [e for e in t.events if e.get("patch_id") == self.patch_id and (
-            e.get("event") == "shipped" or (e.get("event") == "step" and e.get("result") == "fail"
-                                            and e.get("step") in SHIP_STEPS))]
+            e.get("event") in ("shipped", "split_offered") or (e.get("event") == "step" and e.get("result") == "fail"
+                                                              and e.get("step") in SHIP_STEPS))]
         if verdicts and verdicts[-1].get("event") == "shipped":
             self.shipped = verdicts[-1]
+        elif verdicts and verdicts[-1].get("event") == "split_offered":
+            self.split = verdicts[-1]
         elif verdicts:
             self.last_fail = verdicts[-1]
         red = project.cache_read("red-base", "base")

@@ -60,6 +60,7 @@ Disputes: 1. The refuter dismissed 1.
 | `median claim to merge` | From the first claim to the squash commit |
 | `Every check already green on the base` | Of the tickets with a `base_checks` event, those where every `Check:` line passed on the base before any work (`rail docs loop`) |
 | `Adopted from a branch with no ticket` | Tickets with an `adopted` event: work that came in through `rail adopt` (`rail docs adopt`). In JSON, `adopted`. Shown when there is one |
+| `Offered a split over [size] cap` | Tickets with a `split_offered` event, then those that shipped AUTO afterwards and those that became PERSON for `size`. In JSON, `split`: `offered`, `auto`, `person`. Shown when there is one |
 | `Became PERSON at ship or review` | `tier_raised` events, by reason: `person_paths`, `migration_paths`, `size`, `reviewer`. Such a ticket counts under PERSON |
 | `STEPS THAT FAILED` | For each step that failed at least once: its runs, the failed ones, and the ones the shell couldn't start |
 | `Consult ran` | `consulted` events |
@@ -110,7 +111,8 @@ prompt. One whose tickets are reverted files what is wrong.
   it counts as a hit, whether or not the finding was right. The disputes line shows how often the author
   pushes back at all.
 - **Many tickets under `Became PERSON at ship or review`** by `size` means tickets are too big: split them at
-  add. By `person_paths`, the scope at add missed a path a person wants to see. By `reviewer`, read the
+  add. Read it with the split line: many offers that end PERSON mean the agent can't find a part that stands
+  alone, and the tickets are written too wide. By `person_paths`, the scope at add missed a path a person wants to see. By `reviewer`, read the
   sentences in the journal: a kind that repeats belongs in `person_paths` or `REVIEW.md`.
 - **A step with many failures** is where retries go. A `could not run` count means a tool is missing on the
   machine: `[commands] provision` or `setup` should install it. `rail stats` doesn't read the failures'

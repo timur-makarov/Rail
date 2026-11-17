@@ -64,7 +64,8 @@ author's argument. The only changes that skip the reviewer are those to paths yo
 
 A ticket is PERSON when its author says so, when it touches `person_paths` (the paths you name, such as
 auth, payments and infrastructure, plus Rail's own files and the CI workflows) or a migration, or when the
-change grows past `[size] cap` (600 changed lines), or when the reviewer asks for one. The engine raises a
+change grows past `[size] cap` (600 changed lines) and the agent doesn't split it when the first ship offers a
+split, or when the reviewer asks for one. The engine raises a
 tier and never lowers one.
 
 **GitHub is the wall.** Every ticket is a pull request. The `rail` workflow runs `rail ci`, which repeats

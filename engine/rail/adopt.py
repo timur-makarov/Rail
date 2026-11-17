@@ -72,7 +72,10 @@ def tier(project, changed, size):
         return "PERSON", f"it changes {', '.join(hits[:5])}, on {reason}"
     cap = project.config["size"]["cap"]
     if rules.size_tier(project, "AUTO", size) == "PERSON":
-        return "PERSON", f"it changes {size} lines, over [size] cap of {cap}"
+        # As for any AUTO ticket, its first ship offers a split before a person has to merge it.
+        return "AUTO", (f"no changed file is on person_paths or migration_paths; at {size} lines it is over [size]"
+                        f" cap of {cap}, so its first ship offers a split, and it becomes PERSON when the split isn't"
+                        " taken")
     return "AUTO", f"no changed file is on person_paths or migration_paths, and {size} lines are within [size] cap"
 
 

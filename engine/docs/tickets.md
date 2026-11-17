@@ -40,7 +40,8 @@ external_id = "github#123"
   checks and the review. On `PERSON` a person approves the contract and merges. Write `PERSON` when a person
   should see this change. The engine makes a ticket PERSON by itself in four cases: its `scope_paths` reach
   `person_paths` or `migration_paths` (at add), it changes a file on those paths (at ship), it changes
-  more lines than `[size] cap` (at ship), or the reviewer asks for a person (at review). A tier never goes down. Tickets touching `migration_paths` must
+  more lines than `[size] cap` (at ship), or the reviewer asks for a person (at review). Over the cap, the
+  first ship offers a split instead (`rail docs loop`); only the next ship over the cap raises the tier. A tier never goes down. Tickets touching `migration_paths` must
   set `reversibility` and `rollback`.
 - **The contract** (Done Contract, scope and tier) freezes at acceptance. `rail amend NN` changes it.
 - **`## Grilling`** is optional: the record of questioning the person who asked for the ticket, written by the

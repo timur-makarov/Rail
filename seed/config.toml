@@ -21,7 +21,7 @@ base_checks = true                        # reader: next, at a ticket's first cl
                                           # untouched base and records red or green; never a gate
 
 [size]                                    # reader: ship and CI; changed lines, generated files and lockfiles excluded
-cap = 600                                 # an AUTO change over this becomes PERSON: a person has to merge it
+cap = 600                                 # an AUTO change over this is offered a split once, then becomes PERSON
 exclude = []
 
 [retry]

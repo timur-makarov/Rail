@@ -64,7 +64,18 @@ also takes in issues labelled `rail`, and every command that meets a wait labels
 In the ticket's worktree, `advance` commits your in-scope changes and ships: it rebases onto a moved base,
 then runs ticket lint, the ASSUMED rows, scope, structure rules, the migration fields, size, doc-lint,
 `verify` and each `Check:` line. Then it runs the review, unless every changed file is in
-`[review] skip_paths` (see [review](review.md)). With no remote, a ready AUTO ticket is merged by the next
+`[review] skip_paths` (see [review](review.md)).
+
+**Over the size cap, a split comes first.** When an AUTO ticket's change is over `[size] cap` and no file on
+`person_paths` or `migration_paths` made it PERSON, its first such ship stops at `size` with a `SPLIT` task and
+a `split_offered` event, and the ticket stays `implementing`. Nothing failed: it spends no attempt and doesn't
+move the model ladder. The brief says how to split: keep a first part that is under the cap and meets a `Check:`
+on its own, put the rest on a local branch `split/NN-rest`, narrow the contract with `rail amend` (accepted at
+once on an AUTO ticket), and file the rest with `rail add` and `after`. The offer is made once per ticket: the
+next ship goes on as AUTO under the cap, and over it the ticket becomes PERSON, so an agent that can't split
+just runs `rail advance` again. CI never offers: it checks the tier the patch shipped with.
+
+With no remote, a ready AUTO ticket is merged by the next
 `advance` (run it from the project's root: the merge removes the worktree), as a squash commit on the base
 branch; a PERSON ticket waits for `rail accept NN` first. With a remote, every ticket has a pull request;
 once its required checks are green, `advance` merges an AUTO ticket through GitHub's async merge, and a

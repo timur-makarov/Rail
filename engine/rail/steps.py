@@ -189,10 +189,11 @@ def _stop(run, step):
     return None
 
 
-def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None):
+def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, offer=False):
     """The checks ship and CI share, in order, stopping at the first failure.
 
-    Returns the tier the change needs (it may rise), or None when a check failed.
+    Returns the tier the change needs (it may rise), or None when a check failed or, with `offer`, when an AUTO change
+    over [size] cap is offered a split (a split_offered event, and no failure).
     """
     errors = lint(ticket, expect_id=nn)
     if accepted and not errors:
@@ -244,11 +245,16 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None):
     cap = project.config["size"]["cap"] if tier == "AUTO" else None  # a PERSON change has no cap: a person reads it
     run.record("size", True, patch_id, f"size {count}/{cap}" if cap else f"size {count}")
     sized = rules.size_tier(project, tier, count)
+    run.size = count
+    if rank(sized) > rank(tier) and offer:
+        # Once per ticket, before a person has to merge it: the agent may split the change. No step failed, so it
+        # spends no attempt; an advance with the change as it is raises the tier below.
+        run.events.append(event(nn, "split_offered", patch_id=patch_id, size=count, cap=cap))
+        return _stop(run, "size")
     if rank(sized) > rank(tier):
         run.events.append(event(nn, "tier_raised", **{"from": tier, "to": sized, "reason": "size",
                                                      "detail": f"{count} changed lines, over the cap of {cap}"}))
         tier = sized
-    run.size = count
 
     if gitx.read_blobs([f"{ref}:ARCHITECTURE.md"], project.root).get(f"{ref}:ARCHITECTURE.md") is None:
         run.not_run("doc-lint")
@@ -305,8 +311,9 @@ def ship(project, f, run):
 
     patch_id = project.patch_id(ref)
     text = gitx.read_blobs([f"{ref}:{ticket_path(t.id)}"], project.root)[f"{ref}:{ticket_path(t.id)}"]
-    tier = check(project, t.id, Ticket(text or ""), ref, wt, f.tier, run, patch_id, accepted=f.accepted)
-    if tier is None and run.failure[0] == "verify" and run.events[-1].get("status") != "could_not_run":
+    tier = check(project, t.id, Ticket(text or ""), ref, wt, f.tier, run, patch_id, accepted=f.accepted,
+                 offer=not t.last("split_offered"))
+    if tier is None and run.failure and run.failure[0] == "verify" and run.events[-1].get("status") != "could_not_run":
         # A red base spends no budget: two tickets that each pass can break main together. A verify that could
         # not start is the machine's lack, not the base's: it is never taken for a red base.
         red = base_fails_verify(project)

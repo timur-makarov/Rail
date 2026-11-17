@@ -404,6 +404,7 @@ class Shape(RailTest):
         brief = p.rail("next")["action"]["brief"]
         self.assertIn("size", brief)
         p.write("src/more.py", "".join(f"x{i} = {i}\n" for i in range(12)), base=p.worktree("1"))
+        self.assertEqual(p.rail("advance", "1")["reason"]["code"], "SPLIT")  # offered a split first
         shipped = p.rail("advance", "1")
         self.assertEqual((shipped["tier"], shipped["reason"]["code"]), ("PERSON", "MERGE_BY_PERSON"))  # too much to merge unread
         raised = events(p, "1-fix-add", "tier_raised")[0]
@@ -417,6 +418,91 @@ class Shape(RailTest):
         p.add(ticket(scope=("db/**", "src/**")))
         p.rail("accept", "1")
         self.assertIn("Migrations: expand, then contract.", p.rail("next")["action"]["brief"])
+
+
+class Split(RailTest):
+    BIG = "".join(f"x{i} = {i}\n" for i in range(12))
+
+    def over_the_cap(self, config=CONFIG):
+        p = self.fixture(config=config + "\n[size]\ncap = 10\n")
+        p.add(ticket())
+        p.rail("next")
+        p.fix_calc("1")
+        p.write("src/more.py", self.BIG, base=p.worktree("1"))
+        return p
+
+    def test_over_the_cap_an_auto_ticket_is_offered_a_split_once_then_becomes_person(self):
+        p = self.over_the_cap()
+        offered = p.rail("advance", "1")
+        self.assertEqual((offered["state"], offered["owner"], offered["tier"], offered["reason"]["code"]),
+                         ("implementing", "agent", "AUTO", "SPLIT"))
+        brief = offered["action"]["brief"]
+        for text in ("This change is 14 lines, over [size] cap of 10.", "git branch split/1-rest", "rail amend 1",
+                     'after = ["1"]', "split from ticket 1", "the ticket becomes PERSON and a person merges it"):
+            self.assertIn(text, brief)
+        # Not a failure: no step failed, so no attempt is spent and the model ladder stays at its first rung.
+        self.assertEqual([s["step"] for s in offered["steps"] if s.get("result") == "fail"], [])
+        self.assertEqual(offered["action"]["effort"], "medium")
+        self.assertEqual([s["status"] for s in offered["steps"] if s["step"] in ("verify", "checks")], ["not_run"] * 2)
+        self.assertEqual(events(p, "1-fix-add", "tier_raised"), [])
+        split = events(p, "1-fix-add", "split_offered")
+        self.assertEqual([(e["size"], e["cap"]) for e in split], [(14, 10)])
+        self.assertEqual(p.rail("next")["reason"]["code"], "SPLIT")
+        # The agent can't split it: advance as it is.
+        shipped = p.rail("advance", "1")
+        self.assertEqual((shipped["state"], shipped["tier"], shipped["reason"]["code"]),
+                         ("merge-ready", "PERSON", "MERGE_BY_PERSON"))
+        self.assertEqual([e["reason"] for e in events(p, "1-fix-add", "tier_raised")], ["size"])
+        self.assertEqual(len(events(p, "1-fix-add", "split_offered")), 1)
+        # CI agrees with the ship: the patch shipped as PERSON, and CI neither offers a split nor fails on the size.
+        ci = os.path.join(self.tmp, "ci")
+        subprocess.run(["git", "clone", "--quiet", p.root, ci], check=True)
+        subprocess.run(["git", "checkout", "--quiet", "--detach", p.git("rev-parse", "1-fix-add").strip()], cwd=ci, check=True)
+        result = subprocess.run([os.path.join(ci, ".rail", "bin", "rail"), "ci", "--json"], cwd=ci, capture_output=True,
+                                text=True, env=dict(os.environ, RAIL_BRANCH="1-fix-add"))
+        self.assertEqual((result.returncode, json.loads(result.stdout)["tier"]), (0, "PERSON"), result.stdout)
+
+    def test_the_offer_is_made_once_even_for_a_changed_patch(self):
+        p = self.over_the_cap()
+        self.assertEqual(p.rail("advance", "1")["reason"]["code"], "SPLIT")
+        p.write("src/more.py", self.BIG + "y = 1\n", base=p.worktree("1"))
+        shipped = p.rail("advance", "1")
+        self.assertEqual((shipped["tier"], shipped["reason"]["code"]), ("PERSON", "MERGE_BY_PERSON"))
+        self.assertEqual(len(events(p, "1-fix-add", "split_offered")), 1)
+
+    def test_a_split_under_the_cap_ships_auto_with_a_narrowed_contract(self):
+        p = self.over_the_cap()
+        p.rail("advance", "1")
+        wt = p.worktree("1")
+        p.git("branch", "split/1-rest", cwd=wt)
+        p.git("rm", "--quiet", "src/more.py", cwd=wt)
+        p.git("commit", "--quiet", "-m", "keep the first part", cwd=wt)
+        with open(os.path.join(wt, ".rail/tickets/1.md")) as f:
+            text = f.read()
+        p.write(".rail/tickets/1.md", text.replace("calc.add(2, 3) == 5", "calc.add(1, 1) == 2"), base=wt)
+        amended = p.rail("amend", "1")  # an AUTO ticket's narrowed contract needs no person
+        self.assertEqual((amended["owner"], amended["tier"]), ("agent", "AUTO"))
+        self.assertFalse(events(p, "1-fix-add", "amended")[-1]["needs_approval"])
+        rest = ticket(title="Add more", front=('after = ["1"]',),
+                      body="\n## Request\nSplit from ticket 1.\n\n## Look at\nThe code is on split/1-rest.\n")
+        self.assertEqual(p.add(rest)["reason"]["code"], "WAITING_AFTER")
+        p.queue_reviews(clean())
+        shipped = p.rail("advance", "1")
+        self.assertEqual((shipped["state"], shipped["tier"]), ("merge-ready", "AUTO"))
+        self.assertEqual(events(p, "1-fix-add", "tier_raised"), [])
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
+        stats = p.rail("stats")
+        self.assertEqual(stats["stats"]["split"], {"offered": 1, "auto": 1, "person": 0})
+        self.assertIn("Offered a split over [size] cap: 1. Shipped AUTO afterwards: 1; became PERSON for size: 0.",
+                      stats["text"])
+
+    def test_a_person_path_over_the_cap_is_raised_at_once_with_no_offer(self):
+        p = self.over_the_cap(config='person_paths = ["**/*.sql"]\n' + CONFIG)
+        p.write("src/report.sql", "select 1;\n", base=p.worktree("1"))
+        shipped = p.rail("advance", "1")
+        self.assertEqual((shipped["tier"], shipped["reason"]["code"]), ("PERSON", "MERGE_BY_PERSON"))
+        self.assertEqual([e["reason"] for e in events(p, "1-fix-add", "tier_raised")], ["person_paths"])
+        self.assertEqual(events(p, "1-fix-add", "split_offered"), [])
 
 
 class CIReview(RailTest):

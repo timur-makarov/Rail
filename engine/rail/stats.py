@@ -174,6 +174,7 @@ def collect(project, tickets, since=None, states=None):
              for tier in TIERS}
     base = {"tickets": 0, "all_green": 0}  # tickets whose Check: lines ran on the base before the work
     raised, consults, adopted, steps, roles, models = Counter(), 0, 0, {}, {}, {}
+    split = {"offered": 0, "auto": 0, "person": 0}  # AUTO changes over [size] cap offered a split, and what came of it
     blocking, advisory, parked, disputes = Counter(), Counter(), 0, Counter()
     for nn, t in tickets.items():
         ships = [e for e in t.events if e.get("event") == "shipped"]
@@ -200,6 +201,14 @@ def collect(project, tickets, since=None, states=None):
         claims = [e["at"] for e in t.events if e.get("event") == "claimed" and e.get("at")]
         if claims:
             row["minutes"].append(max(0.0, (merged_at[nn] - parse_iso(claims[0]).timestamp()) / 60))
+        offered = next((i for i, e in enumerate(t.events) if e.get("event") == "split_offered"), None)
+        if offered is not None:
+            later = t.events[offered + 1:]
+            split["offered"] += 1
+            if any(e.get("event") == "tier_raised" and e.get("reason") == "size" for e in later):
+                split["person"] += 1
+            elif any(e.get("event") == "shipped" and e.get("tier") == "AUTO" for e in later):
+                split["auto"] += 1
         for e in t.events:
             if e.get("event") == "tier_raised":
                 raised[e.get("reason") or "?"] += 1
@@ -245,7 +254,7 @@ def collect(project, tickets, since=None, states=None):
     merged = sum(row["merged"] for row in tiers.values())
     return {
         "since": since, "merged": merged, "left_out": len(tickets) - merged, "tiers": tiers, "raised": dict(raised),
-        "base_checks": base, "adopted": adopted,
+        "base_checks": base, "adopted": adopted, "split": split,
         "grilling": grilling(tickets, states or {}, merged_at, start),
         "sources": by_source(project, tickets, states or {}, merged_at, reverted, start),
         "consults": consults, "steps": {name: steps[name] for name in sorted(steps, key=_step_rank)},
@@ -362,6 +371,10 @@ def render(data):
     if data["raised"]:
         reasons = ", ".join(f"{reason} {n}" for reason, n in sorted(data["raised"].items()))
         lines.append(f"Became PERSON at ship or review: {sum(data['raised'].values())} ({reasons}).")
+    if data["split"]["offered"]:
+        split = data["split"]
+        lines.append(f"Offered a split over [size] cap: {split['offered']}. Shipped AUTO afterwards: {split['auto']};"
+                     f" became PERSON for size: {split['person']}.")
     failed = [[name, s["runs"], s["failed"], s["could_not_run"]] for name, s in data["steps"].items()
               if s["failed"] or s["could_not_run"]]
     lines.append("")

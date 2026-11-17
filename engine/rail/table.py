@@ -58,8 +58,8 @@ def _size(f):
     count, _ = rules.size(f.project, None, f.worktree)
     line = f"size {count}/{cap}"
     if count >= 0.8 * cap:
-        line += (": past 80% of the cap. Split what is left into a new ticket (rail add); over the cap, the ticket"
-                 " becomes PERSON, and a person has to merge it")
+        line += (": past 80% of the cap. Split what is left into a new ticket (rail add); over the cap, ship offers"
+                 " a split once, then the ticket becomes PERSON, and a person has to merge it")
     return line
 
 
@@ -89,6 +89,28 @@ def _implement(f):
         f"When the Done Contract holds, run: rail advance {f.id}",
     ]
     return "\n".join(lines) + _save_note(f) + _findings(f, "Open review findings:") + _note(f)
+
+
+def _split(f):
+    e, nn = f.split, f.id
+    return "\n".join([
+        f"This change is {e.get('size')} lines, over [size] cap of {e.get('cap')}. A reviewer checks a change of that"
+        " size badly, so an AUTO ticket over the cap goes to a person. Before that, see whether it splits into tickets"
+        " that each stand alone.", "",
+        "It splits when you can name a first part that is under the cap, meets at least one Check: of the Done Contract"
+        " on its own, and leaves the code working. If you can:",
+        f"1. Keep the first part on this ticket's branch, {f.t.branch}. Move the rest to a branch of its own, so"
+        f" nothing is lost: git branch split/{nn}-rest, then take the rest out of {f.cwd}. Do not push that branch.",
+        f"2. Narrow this ticket's contract to the first part: in {f.cwd}, edit {ticket_path(nn)} (the Done Contract,"
+        f" and scope_paths if they shrink), then run rail amend {nn}. On an AUTO ticket the engine accepts the"
+        " narrowed contract at once: no person approves it.",
+        f"3. File one ticket for each remaining part with rail add: its own Check: lines, after = [\"{nn}\"] (or the"
+        f" part before it), a line in ## Request saying it was split from ticket {nn}, and under ## Look at the branch"
+        f" that holds its code, split/{nn}-rest.",
+        f"4. Run rail advance {nn}.", "",
+        f"If it does not split (the parts would not work alone, or each Check: needs all of it), change nothing and run"
+        f" rail advance {nn}: the ticket becomes PERSON and a person merges it.",
+    ]) + _note(f)
 
 
 def _assumptions(f):
@@ -284,6 +306,8 @@ ROWS = [
                f" resolve the conflict in {f.cwd} and run it again."),
     ("RED_CHECK",          "agent", "agent_task",  lambda f: f.state == "implementing" and f.ci == "red" and not f.dirty,
      _red_check),
+    ("SPLIT",              "agent", "agent_task",  lambda f: f.state == "implementing" and f.split and not f.dirty,
+     _split),
     ("STEP_FAILED",        "agent", "agent_task",  lambda f: f.state == "implementing" and f.last_fail and not f.dirty,
      _step_failed),
     ("IMPLEMENT",          "agent", "agent_task",  lambda f: f.state == "implementing",

@@ -67,7 +67,7 @@ class Draft(RailTest):
         self.assertEqual(p.git("branch"), branches)
         self.assertEqual(p.rail("status")["tickets"], [])
 
-    def test_a_person_path_or_a_size_over_the_cap_makes_the_draft_person(self):
+    def test_a_person_path_makes_the_draft_person_and_a_size_over_the_cap_does_not(self):
         p = self.fixture(config='person_paths = ["api/**"]\n' + CONFIG)
         prototype(p, {"api/handlers.py": "def handle():\n    return 201\n"})
         drafted = p.rail("adopt", "proto")
@@ -77,8 +77,8 @@ class Draft(RailTest):
         q = self.fixture("big", config=CONFIG + "\n[size]\ncap = 5\n")
         prototype(q, {"src/big.py": "".join(f"x{i} = {i}\n" for i in range(10))})
         drafted = q.rail("adopt", "proto")
-        self.assertEqual(drafted["tier"], "PERSON")
-        self.assertIn("it changes 10 lines, over [size] cap of 5", drafted["action"]["brief"])
+        self.assertEqual(drafted["tier"], "AUTO")  # its first ship offers a split, as for any AUTO ticket
+        self.assertIn("at 10 lines it is over [size] cap of 5, so its first ship offers a split", drafted["action"]["brief"])
 
 
 class Refusals(RailTest):
