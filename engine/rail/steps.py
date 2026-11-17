@@ -363,6 +363,7 @@ def describe(project, t, ticket, tier):
         f"Migrations: {ticket.get('reversibility')}; rollback: {ticket.get('rollback')}.")
     risk = (f"{tier}. Touches {', '.join(ticket.scope)}. {migrations} "
             f"Changed lockfiles: {', '.join(lockfiles) or 'none'}.")
+    risk += "".join(f"\n\nThe reviewer asked for a person: {said}" for said in ledger.asked_for_person())
     external = ticket.get("external_id", "") or ""
     body = [
         "## Why", f"{ticket.sections.get('Why', '')} (ticket {t.id})", "",

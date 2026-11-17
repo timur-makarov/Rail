@@ -447,3 +447,100 @@ class Answer(RailTest):
         self.assertEqual(p.rail("answer", "1", "F1", "declined", expect=2)["reason"]["message"], "a decline needs a reason")
         self.assertEqual(p.rail("answer", "1", "F9", "fixed", expect=2)["reason"]["code"], "NO_FINDING")
         self.assertEqual(p.rail("answer", "1", "f1", "parked", "Old code.")["state"], "merge-ready")
+
+
+class Guidance(RailTest):
+    def test_review_md_at_the_root_and_above_a_changed_file_reaches_every_brief_and_others_stay_out(self):
+        p = self.fixture(files={"REVIEW.md": "Always flag a float used for money.\n",
+                                "src/REVIEW.md": "Never report the order of arguments.\n",
+                                "api/REVIEW.md": "Flag every new endpoint.\n"})
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")
+        p.rail("next")
+        p.fix_calc("1")
+        p.queue_reviews(clean(), clean())
+        p.rail("advance", "1")
+        briefs = [b["brief"] for b in p.briefs()]
+        self.assertEqual(len(briefs), 2)  # the review and the security seat
+        for brief in briefs:
+            self.assertIn("## The project's review guidance (from REVIEW.md)", brief)
+            root = brief.index("For the whole repository (REVIEW.md):\nAlways flag a float used for money.")
+            self.assertLess(brief.index("## The project's conventions (from AGENTS.md)"), root)
+            self.assertLess(root, brief.index("For src/ (src/REVIEW.md):\nNever report the order of arguments."))
+            self.assertNotIn("Flag every new endpoint.", brief)
+
+    def test_without_review_md_the_section_is_left_out(self):
+        p = self.fixture()
+        Review.medium(self, p)
+        p.rail("advance", "1")
+        self.assertNotIn("review guidance", p.briefs()[0]["brief"])
+
+    def test_review_md_is_cut_at_the_cap_and_the_brief_says_which_files(self):
+        p = self.fixture(files={"REVIEW.md": "r" * 5000 + "\n", "src/REVIEW.md": "s" * 5000 + "TAIL\n"})
+        Review.medium(self, p)
+        p.rail("advance", "1")
+        brief = p.briefs()[0]["brief"]
+        self.assertIn("r" * 5000, brief)
+        self.assertIn("s" * 3000, brief)
+        self.assertNotIn("TAIL", brief)
+        self.assertIn("(Cut at 8000 characters: src/REVIEW.md.)", brief)
+
+
+class BaseGreen(RailTest):
+    LINE = "Every check in the Done Contract already passed on the base branch before this work began"
+
+    def test_when_every_check_was_green_on_the_base_the_review_brief_says_so(self):
+        p = self.fixture()
+        Review.medium(self, p, check="grep -q add src/calc.py")
+        p.rail("advance", "1")
+        brief = p.briefs()[0]["brief"]
+        self.assertIn("scope_paths: src/**.\n\n" + self.LINE, brief)
+        self.assertIn("Look at whether the change is tested.\n\n## The diff", brief)
+
+    def test_a_check_red_on_the_base_leaves_the_line_out(self):
+        p = self.fixture()
+        p.add(ticket(body="- Check: `grep -q add src/calc.py`\n"))  # one green, one red
+        p.rail("next")
+        p.fix_calc("1")
+        p.rail("advance", "1")
+        self.assertNotIn(self.LINE, p.briefs()[0]["brief"])
+
+
+class NeedsPerson(RailTest):
+    ASKED = "It adds the first retry wrapper, which other calls will copy."
+
+    def test_a_reviewer_asking_for_a_person_makes_an_auto_ticket_person(self):
+        p = self.fixture()
+        Review.medium(self, p)
+        p.queue_reviews(clean() | {"needs_person": self.ASKED}, clean(), clean())
+        ready = p.rail("advance", "1")
+        # From the raise on, it is a PERSON ticket: the security seat runs, and a person merges.
+        self.assertEqual((ready["state"], ready["tier"], ready["reason"]["code"]), ("merge-ready", "PERSON", "MERGE_BY_PERSON"))
+        self.assertEqual([s["step"] for s in ready["steps"]][-2:], ["review", "security"])
+        self.assertIn("The reviewer asked for a person: " + self.ASKED, ready["action"]["brief"])
+        raised = events(p, "1-fix-add", "tier_raised")
+        self.assertEqual([(e["from"], e["to"], e["reason"], e["detail"]) for e in raised],
+                         [("AUTO", "PERSON", "reviewer", self.ASKED)])
+        doc = json.loads(p.git("show", "1-fix-add:.rail/journal/1-review.json"))
+        self.assertEqual(doc["runs"][0]["needs_person"], self.ASKED)
+        p.rail("accept", "1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
+        self.assertIn("The reviewer asked for a person: " + self.ASKED, p.git("log", "-1", "--format=%b", "main"))
+        stats = p.rail("stats")
+        self.assertEqual(stats["stats"]["raised"], {"reviewer": 1})
+        self.assertEqual(stats["stats"]["tiers"]["PERSON"]["merged"], 1)
+        self.assertIn("Became PERSON at ship or review: 1 (reviewer 1).", stats["text"])
+
+    def test_on_a_person_ticket_it_is_recorded_and_changes_nothing_else(self):
+        p = self.fixture()
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")
+        p.rail("next")
+        p.fix_calc("1")
+        p.queue_reviews(clean() | {"needs_person": self.ASKED}, clean() | {"needs_person": ""})
+        ready = p.rail("advance", "1")
+        self.assertEqual((ready["state"], ready["tier"], ready["reason"]["code"]), ("merge-ready", "PERSON", "MERGE_BY_PERSON"))
+        self.assertEqual(events(p, "1-fix-add", "tier_raised"), [])
+        doc = json.loads(p.git("show", "1-fix-add:.rail/journal/1-review.json"))
+        self.assertEqual([r.get("needs_person") for r in doc["runs"]], [self.ASKED, None])
+        self.assertIn("The reviewer asked for a person: " + self.ASKED, ready["action"]["brief"])

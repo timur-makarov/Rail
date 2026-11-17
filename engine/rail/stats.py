@@ -13,7 +13,7 @@ from . import gitx
 from .project import events_path, parse_events, review_path
 from .review import Ledger, load_doc
 from .state import SHIP_STEPS
-from .ticket import TIERS
+from .ticket import TIERS, highest
 from .util import RailError, parse_iso
 
 REVIEW_STEPS = ("review", "security", "refuter", "sweep")
@@ -159,6 +159,8 @@ def collect(project, tickets, since=None, states=None):
     for nn, t in tickets.items():
         ships = [e for e in t.events if e.get("event") == "shipped"]
         tier = (ships[-1] if ships else t.last("accepted") or {}).get("tier")
+        if tier in TIERS:  # a reviewer may raise it after the last ship
+            tier = highest(tier, *[e.get("to") for e in t.events if e.get("event") == "tier_raised"])
         if nn not in merged_at or tier not in tiers or (start is not None and merged_at[nn] < start):
             continue
         doc = load_doc(t.review_text, nn)
@@ -329,7 +331,7 @@ def render(data):
                      " checks ran there before the work.")
     if data["raised"]:
         reasons = ", ".join(f"{reason} {n}" for reason, n in sorted(data["raised"].items()))
-        lines.append(f"Became PERSON at ship: {sum(data['raised'].values())} ({reasons}).")
+        lines.append(f"Became PERSON at ship or review: {sum(data['raised'].values())} ({reasons}).")
     failed = [[name, s["runs"], s["failed"], s["could_not_run"]] for name, s in data["steps"].items()
               if s["failed"] or s["could_not_run"]]
     lines.append("")

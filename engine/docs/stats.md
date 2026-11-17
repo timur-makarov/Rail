@@ -59,7 +59,7 @@ Disputes: 1. The refuter dismissed 1.
 | `reverted afterwards` | Tickets whose squash commit a later commit on the base branch reverts: one whose message says `This reverts commit <sha>.` (what `git revert` writes), or `Reverts owner/repo#N` (what GitHub's Revert button writes), where N is the ticket's pull request |
 | `median claim to merge` | From the first claim to the squash commit |
 | `Every check already green on the base` | Of the tickets with a `base_checks` event, those where every `Check:` line passed on the base before any work (`rail docs loop`) |
-| `Became PERSON at ship` | `tier_raised` events, by reason: `person_paths`, `migration_paths`, `size` |
+| `Became PERSON at ship or review` | `tier_raised` events, by reason: `person_paths`, `migration_paths`, `size`, `reviewer`. Such a ticket counts under PERSON |
 | `STEPS THAT FAILED` | For each step that failed at least once: its runs, the failed ones, and the ones the shell couldn't start |
 | `Consult ran` | `consulted` events |
 | `REVIEW` | Runs, cost and time by role. Cost is what the review command reported; a command that reports none counts as $0 |
@@ -101,8 +101,9 @@ itself; the ticket keeps the recommendation and the answer word for word, so the
 - **A hit rate near 100%** is weaker evidence than it looks: an author who fixes a finding without disputing
   it counts as a hit, whether or not the finding was right. The disputes line shows how often the author
   pushes back at all.
-- **Many tickets under `Became PERSON at ship`** by `size` means tickets are too big: split them at add. By
-  `person_paths`, the scope at add missed a path a person wants to see.
+- **Many tickets under `Became PERSON at ship or review`** by `size` means tickets are too big: split them at
+  add. By `person_paths`, the scope at add missed a path a person wants to see. By `reviewer`, read the
+  sentences in the journal: a kind that repeats belongs in `person_paths` or `REVIEW.md`.
 - **A step with many failures** is where retries go. A `could not run` count means a tool is missing on the
   machine: `[commands] provision` or `setup` should install it. `rail stats` doesn't read the failures'
   `signature`s; to see whether a step failed the same way again and again or differently each time, compare

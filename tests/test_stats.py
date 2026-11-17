@@ -111,7 +111,7 @@ class Stats(RailTest):
         stats = p.rail("stats")
         self.assertEqual(stats["stats"]["raised"], {"size": 1})
         self.assertEqual((stats["stats"]["tiers"]["AUTO"]["merged"], stats["stats"]["tiers"]["PERSON"]["merged"]), (0, 1))
-        self.assertIn("Became PERSON at ship: 1 (size 1).", stats["text"])
+        self.assertIn("Became PERSON at ship or review: 1 (size 1).", stats["text"])
         self.assertIn("No step failed.", stats["text"])
 
     def test_with_nothing_merged_only_where_the_tickets_came_from_is_counted(self):

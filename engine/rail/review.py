@@ -46,6 +46,10 @@ SECURITY_LOOK_FOR = ("Only security: trust boundaries, input handling, auth, sec
 
 SEVERITIES = ("blocking", "advisory", "parked")
 EVIDENCE_LIMIT = 2000
+GUIDANCE_LIMIT = 8000  # characters of REVIEW.md in a brief, all files together
+
+BASE_GREEN = ("Every check in the Done Contract already passed on the base branch before this work began, so the checks"
+              " alone do not show the work was done. Look at whether the change is tested.")
 
 
 def load_doc(text, nn):
@@ -141,6 +145,10 @@ class Ledger:
         return not self.unanswered() and not self.disputed() and not self.disputed_again() \
             and self.needed_run(patch_id, tier) is None
 
+    def asked_for_person(self):
+        """What review and security runs said a person should see before the merge, each sentence once."""
+        return list(dict.fromkeys(r["needs_person"] for r in self.doc["runs"] if r.get("needs_person")))
+
     def describe(self, fid, with_answer=True):
         f = self.findings[fid]
         where = f"{f.get('file')}:{f['line']}" if f.get("line") else f.get("file")
@@ -168,6 +176,38 @@ def project_conventions(project, ref):
     return "\n".join(kept).strip()
 
 
+def review_guidance(project, ref):
+    """The project's REVIEW.md files at the ticket's ref: the root one, then one in each directory above a changed
+    file, shallowest first. Empty when there is none. Cut at GUIDANCE_LIMIT characters, saying which files were."""
+    dirs = {""}
+    for path in project.changed_files(ref):
+        parts = path.split("/")[:-1]
+        dirs.update("/".join(parts[:n]) for n in range(1, len(parts) + 1))
+    paths = [f"{d}/REVIEW.md" if d else "REVIEW.md" for d in sorted(dirs, key=lambda d: (d.count("/") + bool(d), d))]
+    blobs = gitx.read_blobs([f"{ref}:{p}" for p in paths], project.root)
+    parts, cut, room = [], [], GUIDANCE_LIMIT
+    for path in paths:
+        text = (blobs.get(f"{ref}:{path}") or "").strip()
+        if not text:
+            continue
+        if len(text) > room:
+            cut.append(path)
+            text = text[:room]
+        room -= len(text)
+        where = os.path.dirname(path)
+        parts += [f"For {where + '/' if where else 'the whole repository'} ({path}):", text, ""] if text else []
+    if cut:
+        parts.append(f"(Cut at {GUIDANCE_LIMIT} characters: {', '.join(cut)}.)")
+    return "\n".join(parts).strip()
+
+
+def checks_green_on_base(t):
+    """Whether the ticket's base_checks event shows every check already passing before the work began."""
+    found = t.last("base_checks")
+    checks = (found or {}).get("checks") or []
+    return bool(checks) and all(c.get("result") == "green" for c in checks)
+
+
 def brief(project, f, role, ledger, disputed=None):
     t, ref = f.t, f.t.ref
     ticket_text = gitx.read_blobs([f"{ref}:{ticket_path(t.id)}"], project.root)[f"{ref}:{ticket_path(t.id)}"] or ""
@@ -187,14 +227,17 @@ def brief(project, f, role, ledger, disputed=None):
                     "severity; when the problem is real but this change didn't cause it, the severity is parked. If it "
                     "doesn't hold, return an empty list. `summary` says why. When it has evidence, run the command again.")
         job = f"Decide whether finding {disputed} holds. You are the refuter."
+    guidance = review_guidance(project, ref)
     parts = [
         f"# Review brief: ticket {t.id}, {f.tier}", "", f"This run's job: {job}", "",
         "## The ticket", ticket_text.strip(), "",
         f"Risk: tier {f.tier}. scope_paths: {', '.join(f.ticket.scope)}.", "",
+        *([BASE_GREEN, ""] if role == "review" and checks_green_on_base(t) else []),
         "## The diff", "```diff", diff, "```", "",
         "## Areas this change touches", "| Area | Paths | Holds |", "|---|---|---|", rows, "",
         "Directories:", found["digest"], "",
         "## The project's conventions (from AGENTS.md)", project_conventions(project, ref) or "(none written)", "",
+        *(["## The project's review guidance (from REVIEW.md)", guidance, ""] if guidance else []),
         "## What to look for", look_for, "", DO_NOT_REPORT,
     ]
     if role == "refuter":
@@ -232,7 +275,7 @@ def validate(project, head, nn, data, ledger, role, disputed):
     inside it, and `repeats` names an earlier finding of this ticket. Returns a list of errors."""
     if not isinstance(data, dict) or not isinstance(data.get("summary"), str) or not isinstance(data.get("findings"), list):
         return ["the output is not a review/v1 object with summary and findings"]
-    errors = []
+    errors = [] if isinstance(data.get("needs_person", ""), str) else ["needs_person is not a string"]
     allowed = {"severity", "file", "line", "claim", "check", "evidence", "repeats"}
     for n, f in enumerate(data["findings"]):
         where = f"finding {n + 1}"
@@ -326,6 +369,13 @@ def run(project, f, role, receipt, disputed=None, prompt=None):
         entry["findings"].append(finding)
     if role == "sweep":
         events = []  # the sweep's findings become tickets, not ledger entries
+    asked = data.get("needs_person", "").strip() if role in ("review", "security") else ""
+    if asked:
+        # A change a person should see although nothing blocks it: an AUTO ticket becomes PERSON, never back.
+        entry["needs_person"] = asked
+        if f.tier == "AUTO":
+            events.append(event(t.id, "tier_raised", **{"from": "AUTO", "to": "PERSON", "reason": "reviewer",
+                                                         "detail": asked}))
     if role == "refuter" and not data["findings"]:
         events.append(event(t.id, "finding", id=disputed, outcome="declined", by="refuter", reason=data["summary"]))
     parked_by_refuter = [x["repeats"] for x in entry["findings"]

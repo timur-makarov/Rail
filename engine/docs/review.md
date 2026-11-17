@@ -17,9 +17,19 @@ for any other command. Empty leaves the command's own default. The model that an
 run and shown in the pull request's Evidence table. `[consult] model` does the same for consult.
 
 The brief holds the ticket, the diff, the matching `## Areas` rows, the project's own part of `AGENTS.md`
-(never the `## Rail` section), what to look for, and the do-not-report list. On an AUTO ticket, what to
-look for includes a security checklist. On a re-review the brief also holds the earlier findings and your
-answers.
+(never the `## Rail` section), the project's `REVIEW.md` files, what to look for, and the do-not-report
+list. On an AUTO ticket, what to look for includes a security checklist. On a re-review the brief also
+holds the earlier findings and your answers.
+
+**`REVIEW.md`** is review guidance a project writes for itself: what to always flag, what never to report.
+The brief takes the one at the repository root and one in each directory above a file the change touches
+(`src/api/REVIEW.md` when `src/api/x.py` changed), root first, from the ticket's branch. Together they are
+cut at 8,000 characters, and the brief names the files that were cut. Every run gets them: the review, the
+security seat and the refuter.
+
+**When the checks can't show the work.** When every `Check:` line already passed on the base branch before
+the work began (the `base_checks` event, `rail docs loop`), the review run's brief says so, and asks the
+reviewer to look at whether the change is tested.
 
 ## Findings
 
@@ -51,6 +61,13 @@ counts only once a later run doesn't repeat it.
 
 A PERSON ticket adds a security seat: a second run whose brief asks only about security. Each blocking
 finding it reports goes to a refuter at once. A person merges a PERSON ticket.
+
+**The reviewer may ask for a person.** A review or security run can return `needs_person`: one sentence on
+why a person should see the change before it merges although no finding blocks it, such as a pattern other
+code will copy. On an AUTO ticket the engine writes `tier_raised` with the reason `reviewer`, and the ticket
+is PERSON from then on: the security seat runs next, and a person merges. A later run that doesn't ask
+never lowers it. On a PERSON ticket the sentence is only recorded. Either way the sentence is kept with the
+run and shown in the pull request's Risk section and in the wait for a person. A refuter's is ignored.
 
 ## What the reviewer costs and finds
 

@@ -193,10 +193,11 @@ def _merge_stale(f):
 
 
 def _merge_by_person(f):
+    asked = "".join(f"\nThe reviewer asked for a person: {said}" for said in f.ledger.asked_for_person())
     if f.project.remote:
-        return f"Ticket {f.id} ({f.tier}) is ready: a person reviews and merges {_pr(f)}."
+        return f"Ticket {f.id} ({f.tier}) is ready: a person reviews and merges {_pr(f)}." + asked
     return (f"Ticket {f.id} ({f.tier}) is ready to merge. A person reviews branch {f.t.name} and approves the merge:"
-            f" rail accept {f.id}. The engine then merges it.")
+            f" rail accept {f.id}. The engine then merges it." + asked)
 
 
 ROWS = [

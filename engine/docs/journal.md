@@ -29,7 +29,7 @@ stores state. Never edit it by hand: the guard denies it.
 | `saved` | `rail save`, the save hooks, and `advance` before a long command | `via` (`save`, `stop`, `pulse`, `advance`), `files` | Shows the ticket is alive: its `at` is what `[claim] stale_minutes` is measured from |
 | `step` | Every step the engine runs (below) | `step`, `status` (`ran`, or `could_not_run` when the shell couldn't start the command: exit 127 or 126), `result` (`pass`, `fail`; always `fail` when it couldn't run), `patch_id`, `counted`, `detail`, `duration_ms`, `cost_usd`. A failed step has `signature`: the step's name and 12 hex characters of a hash of its normalised output (below) | The retry budget and cap, and the pull request's Evidence table |
 | `shipped` | Every ship step passed for the current patch | `patch_id`, `head`, `tier`, `size` | CI's "not shipped yet" test, and the `reviewing` and `in-ci` states |
-| `tier_raised` | Ship makes an AUTO ticket PERSON | `from`, `to`, `reason` (`size`, `person_paths`, `migration_paths`), `detail` | The ticket's tier from then on |
+| `tier_raised` | Ship makes an AUTO ticket PERSON, or a review run asks for a person | `from`, `to`, `reason` (`size`, `person_paths`, `migration_paths`, `reviewer`), `detail` (for `reviewer`: the reviewer's sentence) | The ticket's tier from then on, CI included |
 | `finding` | A review run reports or repeats a finding; `rail answer`; a refuter or the owner decides one | `id`, `outcome` (`open`, `fixed`, `declined`, `parked`), `by` (`reviewer`, `author`, `refuter`, `owner`), `reason`, `disputed`. The first event for an id also has `severity`, `claim` and `check` | `advance` and CI: no finding may be open. The sweep reads the parked ones and the `check` of fixed ones |
 | `consulted` | Consult ran | `trigger` (`retry_cap`, `request`), `step`, `verdict` (`proceed`, `change`, `stop`), `same_model` | The retry rule below, and the limit of three per ticket |
 | `continued` | A person continued a wait with `rail:go` or `rail accept` | `via` (`label`, `accept`), `note` | A fresh retry budget, and the agent's next brief |
@@ -128,6 +128,7 @@ One file per ticket. The engine appends one entry per run.
 | `head` | The commit the reviewer saw | The person, and the reset after the run |
 | `tier` | The tier at the time | CI: was a `security` run needed |
 | `disputes` | A refuter run only: the finding's id | `advance`: which finding the refuter judged |
+| `needs_person` | A `review` or `security` run that asked for a person: its sentence | The pull request's Risk section and the wait for a person |
 | `model`, `cost_usd` | From the command's JSON, when it gives them. `model` is the one that did the work | The Evidence table |
 
 **A review is complete for a patch** when all three hold. The `reviewing` state and CI use the same test:
@@ -154,6 +155,7 @@ sweep. The schema is `.rail/engine/review-v1.json`; the default command passes i
 | `findings[].check` | A deterministic check that would catch this kind of mistake, when one exists | The sweep, which turns repeated kinds into checks |
 | `findings[].evidence` | `command` and `output`: what the reviewer ran | The refuter, which runs it again |
 | `findings[].repeats` | On a re-review: the id of the earlier finding this one repeats | The engine: the finding keeps its id and is open again |
+| `needs_person` | Optional, rarely given: one sentence on why a person should see the change although no finding blocks it | `advance`: from a `review` or `security` run, an AUTO ticket becomes PERSON. A refuter's or a sweep's is ignored |
 
 After the schema, the engine checks what only it can: `file` is a tracked path at the reviewed commit and
 `line` is inside it (within two lines, because reviewers are sometimes off by one or two); `repeats` names
