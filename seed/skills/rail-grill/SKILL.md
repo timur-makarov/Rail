@@ -6,3 +6,7 @@ description: Turn a request for new work into a Rail ticket by questioning the p
 Read `.rail/engine/docs/grill.md` (or run `rail docs grill`) and follow it. In this session, file the confirmed
 ticket with `rail add FILE`, from a file outside the repository, with `Channel: session` in its `## Grilling`
 section.
+
+Four other skills can come before this one. Each is optional: `rail-clarity` when the person is not sure
+what to ask for, `rail-deepen` when the request is clear but shallow, `rail-blast-radius` for the scope and
+tier of a change to existing code, and `rail-slice` when the work is more than one ticket.

@@ -48,7 +48,17 @@ drafts overlap something open, and leave those out or point at the open one.
 ## 5. Show, then file
 
 Show the whole set: the titles, the order, and each Done Contract. With a person present, file only what
-they confirm. With no person present (a ticket over the size cap that you split yourself), file the set and
-record in each ticket's `## Request` which ticket it was split from.
+they confirm. Each draft is filed like any ticket: `rail add FILE`, from a file outside the repository.
 
-Each draft is filed like any ticket: `rail add FILE`, from a file outside the repository.
+## When the engine offered the split
+
+`rail advance` offers a split once when an AUTO change is over the size cap. The code is written already,
+no person is present, and the brief lists the commands. Use the tests above to decide:
+
+- The first part is the smallest one that passes test 1 with a `Check:` the ticket already has. It stays on
+  the ticket's branch, and `rail amend` narrows the contract to it.
+- Each remaining part becomes a draft with `after`, a line in `## Request` naming the ticket it was split
+  from, and under `## Look at` the branch that holds its code.
+- When no first part passes test 1, the change does not split. Change nothing and run `rail advance` again:
+  a person merges it. That is a complete outcome, and a forced split that leaves the code broken between
+  tickets is worse.
