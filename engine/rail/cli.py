@@ -32,8 +32,20 @@ def answer(ticket=None, state=None, owner="none", action=None, code="NO_WORK", s
     return result
 
 
+def worker(f, action):
+    """The model and effort an agent_task for a ticket's work names: the tier's ladder, one rung per failed attempt at
+    the step the ticket is failing, capped at the last rung. The engine starts no agent; the session that runs the loop
+    may start one on them."""
+    ladder = f.project.config["worker"]["person_ladder" if f.tier == "PERSON" else "ladder"]
+    if action.get("kind") == "agent_task" and ladder:
+        model, _, effort = ladder[min(f.attempts.get(f.failing, 0), len(ladder) - 1)].rpartition(":")
+        action.update(model=model, effort=effort)
+    return action
+
+
 def from_facts(f, steps_=None, code=None, **extra):
     row_code, owner, action = first_match(f)
+    worker(f, action)
     if owner == "human":
         label_wait(f.project, f, row_code)  # the person's inbox is this label, whichever command met the wait
     cwd = "." if row_code == "MERGE" else f.cwd  # the merge removes the worktree, so it runs from the project's root
@@ -1022,8 +1034,8 @@ def cmd_advance(project, args):
                 code_, owner_, action_ = first_match(nf)
                 if owner_ == "human":
                     return from_facts(nf, receipts)
-                return answer(nn, nf.state, "agent", {"kind": "agent_task", "brief": brief}, "STEP_FAILED", receipts,
-                              nf.cwd, tier=nf.tier)
+                return answer(nn, nf.state, "agent", worker(nf, {"kind": "agent_task", "brief": brief}), "STEP_FAILED",
+                              receipts, nf.cwd, tier=nf.tier)
             update_pr(project, nf, receipts)
             result = from_facts(nf, receipts)
             if advice:
@@ -1537,6 +1549,8 @@ def render(result):
     lines = [head]
     if result.get("cwd"):
         lines.append(f"cwd: {result['cwd']}")
+    if result["action"].get("model"):
+        lines.append(f"model: {result['action']['model']}, effort {result['action']['effort']}")
     for s in result.get("steps", []):
         lines.append(f"  {s['step']}: {s['status']}" + (f", {s['result']}" if s.get("result") else "")
                      + (f" ({s['detail']})" if s.get("detail") else ""))

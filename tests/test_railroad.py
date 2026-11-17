@@ -551,6 +551,47 @@ class Reading(RailTest):
         self.assertEqual(len(p.rail("context")["areas"]), 2)
 
 
+class Worker(RailTest):
+    """next names the model and effort for a ticket's work; the engine itself starts no agent."""
+
+    def test_the_ladder_climbs_one_rung_per_failed_attempt(self):
+        p = self.fixture()
+        p.add(ticket())
+        claimed = p.rail("next")
+        self.assertEqual((claimed["reason"]["code"], claimed["action"]["model"], claimed["action"]["effort"]),
+                         ("IMPLEMENT", "claude-sonnet-5-5", "medium"))
+        self.assertIn("model: claude-sonnet-5-5, effort medium", p.rail("next", raw=True).stdout)
+        failed = p.rail("advance", "1", expect=3)
+        self.assertEqual((failed["action"]["model"], failed["action"]["effort"]), ("claude-sonnet-5-5", "high"))
+        again = p.rail("next")
+        self.assertEqual((again["reason"]["code"], again["action"]["effort"]), ("STEP_FAILED", "high"))
+        p.fix_calc("1")
+        shipped = p.rail("advance", "1")
+        self.assertNotIn("model", shipped["action"])  # a script for the engine, not work for an agent
+
+    def test_a_person_ticket_starts_higher(self):
+        p = self.fixture()
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")
+        claimed = p.rail("next")
+        self.assertEqual((claimed["action"]["model"], claimed["action"]["effort"]), ("claude-opus-5-5", "medium"))
+
+    def test_an_empty_ladder_names_no_model(self):
+        p = self.fixture(config=CONFIG + "\n[worker]\nladder = []\n")
+        p.add(ticket())
+        claimed = p.rail("next")
+        self.assertEqual(claimed["action"]["kind"], "agent_task")
+        self.assertNotIn("model", claimed["action"])
+        self.assertNotIn("effort", claimed["action"])
+
+    def test_a_rung_that_is_not_model_and_effort_is_a_config_error(self):
+        p = self.fixture(config=CONFIG + '\n[worker]\nladder = ["claude-sonnet-5-5:medium", "claude-opus-5-5:hard"]\n')
+        failed = p.rail("status", expect=2)
+        self.assertIn("worker.ladder[1] must be model:effort", failed["reason"]["message"])
+        p.write(".rail/config.toml", CONFIG + '\n[worker]\nperson_ladder = [":high"]\n')
+        self.assertIn("worker.person_ladder[0]", p.rail("status", expect=2)["reason"]["message"])
+
+
 class Usage(RailTest):
     def test_usage_errors_exit_2_with_one_shape(self):
         p = self.fixture()

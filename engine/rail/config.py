@@ -24,11 +24,14 @@ DEFAULTS = {
     "retry": {"budget": 2},
     "consult": {"command": "claude -p --safe-mode --tools Read,Grep,Glob", "model": ""},
     "claim": {"stale_minutes": 30, "save_minutes": 10},
+    "worker": {"ladder": ["claude-sonnet-5-5:medium", "claude-sonnet-5-5:high", "claude-opus-5-5:medium"],
+               "person_ladder": ["claude-opus-5-5:medium", "claude-opus-5-5:high"]},
     "sweep": {"after": 20},
     "map": {"depth": 1, "ignore": []},
     "rules": [],
 }
 
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
 RULE_KEYS = {"id": str, "files": str, "forbid": list, "only_in": str, "allow": list, "fix": str, "why": str}
 
 
@@ -68,6 +71,16 @@ def _check_rule(rule, n):
     return rule
 
 
+def _check_ladder(config):
+    """Each rung of a worker ladder is model:effort."""
+    for key in ("ladder", "person_ladder"):
+        for n, rung in enumerate(config["worker"][key]):
+            model, _, effort = rung.rpartition(":")
+            if not model.strip() or effort not in EFFORTS:
+                raise RailError(f"config: worker.{key}[{n}] must be model:effort, such as \"claude-sonnet-5-5:medium\","
+                                f" with an effort of {', '.join(EFFORTS)}; got \"{rung}\"")
+
+
 def load(root):
     path = os.path.join(root, ".rail", "config.toml")
     if not os.path.exists(path):
@@ -90,4 +103,5 @@ def load(root):
             config[key] = value  # a pack's own section; the pack reads it
         else:
             raise RailError(f"config: unknown key '{key}'{_suggest(key, DEFAULTS)}")
+    _check_ladder(config)
     return config

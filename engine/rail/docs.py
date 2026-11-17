@@ -38,6 +38,9 @@ READERS = {
                            " taken to be abandoned and resumed. Keep it above your longest command",
     "claim.save_minutes": "the save hooks and advance: work in flight is saved, and shows it is alive, at least this"
                           " often while a session works",
+    "worker.ladder": "next and advance: the model and effort an agent_task names for an AUTO ticket's work, as"
+                     " model:effort, one rung per failed attempt at the step the ticket is failing. Empty names none",
+    "worker.person_ladder": "next and advance: the same ladder for a PERSON ticket, which starts higher",
     "sweep.after": "next: changes merged with no review (tickets inside review.skip_paths, and commits with no"
                    " ticket) since the last sweep before one is offered",
     "map.depth": "doc-lint: the directory depth ## Areas must cover",

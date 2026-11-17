@@ -94,7 +94,7 @@ class Facts:
     def _budgets(self, project, events):
         """Retry budgets and the waits derived from the journal."""
         budget = project.config["retry"]["budget"]
-        attempts, consulted, since = {}, set(), 0
+        attempts, consulted, since, failing = {}, set(), 0, None
         accepted_at = amended_at = shipped_at = continued_at = -1
         for i, e in enumerate(events):
             kind = e.get("event")
@@ -112,6 +112,7 @@ class Facts:
                     consulted.discard(step)
                 elif e.get("counted", True):
                     attempts[step] = attempts.get(step, 0) + 1
+                    failing = step
             elif kind == "consulted" and e.get("trigger") == "retry_cap":
                 consulted.add(e.get("step"))
             elif kind == "accepted":
@@ -124,6 +125,7 @@ class Facts:
         pack = os.path.join(project.root, ".rail", "packs", "consult", "bin", "consult")
         can_consult = os.path.exists(pack) and self.consults < 3
         self.attempts = attempts
+        self.failing = failing if attempts.get(failing) else None  # the step the ticket is failing now, if any
         self.consult_due = next((s for s, n in attempts.items() if n >= budget and s not in consulted and can_consult), None)
         self.capped = [s for s, n in attempts.items()
                        if (s in consulted and n > budget) or (s not in consulted and n >= budget and not can_consult)]
