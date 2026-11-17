@@ -173,7 +173,7 @@ def collect(project, tickets, since=None, states=None):
     tiers = {tier: {"merged": 0, "reviewed": 0, "no_person": 0, "first_try": 0, "reverted": 0, "minutes": []}
              for tier in TIERS}
     base = {"tickets": 0, "all_green": 0}  # tickets whose Check: lines ran on the base before the work
-    raised, consults, steps, roles, models = Counter(), 0, {}, {}, {}
+    raised, consults, adopted, steps, roles, models = Counter(), 0, 0, {}, {}, {}
     blocking, advisory, parked, disputes = Counter(), Counter(), 0, Counter()
     for nn, t in tickets.items():
         ships = [e for e in t.events if e.get("event") == "shipped"]
@@ -192,6 +192,7 @@ def collect(project, tickets, since=None, states=None):
         row["no_person"] += tier == "AUTO" and not person
         row["first_try"] += _first_try(t, ships)
         row["reverted"] += nn in reverted
+        adopted += t.last("adopted") is not None  # work that came in on a branch with no ticket: rail adopt
         found = t.last("base_checks")
         if found and found.get("checks"):
             base["tickets"] += 1
@@ -244,7 +245,7 @@ def collect(project, tickets, since=None, states=None):
     merged = sum(row["merged"] for row in tiers.values())
     return {
         "since": since, "merged": merged, "left_out": len(tickets) - merged, "tiers": tiers, "raised": dict(raised),
-        "base_checks": base,
+        "base_checks": base, "adopted": adopted,
         "grilling": grilling(tickets, states or {}, merged_at, start),
         "sources": by_source(project, tickets, states or {}, merged_at, reverted, start),
         "consults": consults, "steps": {name: steps[name] for name in sorted(steps, key=_step_rank)},
@@ -355,6 +356,9 @@ def render(data):
     if base["tickets"]:
         lines.append(f"Every check already green on the base: {base['all_green']} of {base['tickets']} tickets whose"
                      " checks ran there before the work.")
+    if data["adopted"]:
+        lines.append(f"Adopted from a branch with no ticket (rail adopt): {data['adopted']} of {data['merged']} merged"
+                     " tickets.")
     if data["raised"]:
         reasons = ", ".join(f"{reason} {n}" for reason, n in sorted(data["raised"].items()))
         lines.append(f"Became PERSON at ship or review: {sum(data['raised'].values())} ({reasons}).")

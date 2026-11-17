@@ -43,7 +43,8 @@ Then it resets the worktree to what it was, because a check may write files. A c
 the base can't show that the work was done, and `rail stats` counts how often every check was. This is never
 a gate: the result fails nothing, spends no attempt, and changes neither the ticket's state nor its owner, and
 a failure inside it doesn't stop `next`. It runs once per ticket: not on a resume, not on a takeover, and not
-for a ticket with no `Check:` line yet. `[commands] base_checks = false` switches it off.
+for a ticket with no `Check:` line yet. `[commands] base_checks = false` switches it off. An adopted ticket
+has the event already: `rail adopt` ran its checks on the base before filing it, as a gate (`rail docs adopt`).
 
 **Work in flight is saved as it goes.** `rail save` commits a ticket's in-scope changes as they are and
 pushes them, with no checks. Two hooks run it: at the end of each agent turn, and at most every ten minutes
@@ -80,6 +81,7 @@ lost.
 - `rail status`: every ticket, its state and owner, LAST (the age of its last journal event) and NOTE (what it
   waits for, a stale warning, or its pull request), then leftovers to clean up.
 - `rail context NN`: the `## Areas` rows a ticket touches, and a directory digest.
+- `rail adopt BRANCH`: put work already on a branch with no ticket onto the rail (`rail docs adopt`).
 - `rail stats`: what the tickets' journals and the base branch say: tickets by tier, how many were reverted,
   how often every check was green on the base before the work, failed steps, the reviewer's cost and hit
   rate, and how the grilling went.

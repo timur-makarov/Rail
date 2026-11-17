@@ -59,6 +59,7 @@ Disputes: 1. The refuter dismissed 1.
 | `reverted afterwards` | Tickets whose squash commit a later commit on the base branch reverts: one whose message says `This reverts commit <sha>.` (what `git revert` writes), or `Reverts owner/repo#N` (what GitHub's Revert button writes), where N is the ticket's pull request |
 | `median claim to merge` | From the first claim to the squash commit |
 | `Every check already green on the base` | Of the tickets with a `base_checks` event, those where every `Check:` line passed on the base before any work (`rail docs loop`) |
+| `Adopted from a branch with no ticket` | Tickets with an `adopted` event: work that came in through `rail adopt` (`rail docs adopt`). In JSON, `adopted`. Shown when there is one |
 | `Became PERSON at ship or review` | `tier_raised` events, by reason: `person_paths`, `migration_paths`, `size`, `reviewer`. Such a ticket counts under PERSON |
 | `STEPS THAT FAILED` | For each step that failed at least once: its runs, the failed ones, and the ones the shell couldn't start |
 | `Consult ran` | `consulted` events |

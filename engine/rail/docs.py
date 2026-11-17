@@ -17,7 +17,8 @@ READERS = {
     "person_paths": "add (matched against scope_paths) and ship (changed files): a ticket that touches one is"
                     " PERSON, so a person approves its contract and merges it",
     "migration_paths": "add and ship: PERSON as well; tickets touching them need reversibility and rollback",
-    "commands.setup": "the claim: runs in each new ticket worktree, with RAIL_TICKET set",
+    "commands.setup": "the claim: runs in each new ticket worktree, with RAIL_TICKET set; rail adopt: runs in the"
+                      " throwaway worktrees on the base and the branch before its checks",
     "commands.verify": "ship and CI: the whole project's checks, scanners included",
     "commands.provision": "rail provision, next in a cloud session, and CI: installs what the machine lacks, once"
                           " per machine, as root. Never run on a person's own machine",

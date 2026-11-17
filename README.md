@@ -142,7 +142,9 @@ need, and the guard asks before `sudo` and other commands that could hurt your m
 ## Use it
 
 Write a ticket like `.rail/tickets/TEMPLATE.md` and run `rail add <file>`, or label a GitHub issue `rail`.
-Then tell Claude Code to work through the backlog.
+Then tell Claude Code to work through the backlog. Work you already did on a branch with no ticket comes in
+with `rail adopt BRANCH`: the agent writes its ticket, and its checks must fail on the base and pass on the
+branch.
 
 Everything else is in the docs that ship with the engine, readable before `rail init` too. `rail docs` lists
 the pages, which are also in [`engine/docs/`](engine/docs):
@@ -150,6 +152,7 @@ the pages, which are also in [`engine/docs/`](engine/docs):
 | To learn | Read |
 |---|---|
 | The loop, and what `next` and `advance` do | [`loop`](engine/docs/loop.md) |
+| Putting work already on a branch onto the rail | [`adopt`](engine/docs/adopt.md) |
 | How to write a ticket, and the tiers | [`tickets`](engine/docs/tickets.md), [`contract`](engine/docs/contract.md) |
 | Questioning a request into a ticket, from a session or a chat bot | [`grill`](engine/docs/grill.md), [`bots`](engine/docs/bots.md) |
 | The review, findings and the refuter | [`review`](engine/docs/review.md) |

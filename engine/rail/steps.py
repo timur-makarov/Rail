@@ -1,9 +1,11 @@
 """The steps the engine runs: claim and setup, ship, the local merge and the PR description."""
 
+import contextlib
 import hashlib
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 
 from . import doclint, gitx, rules
@@ -142,21 +144,39 @@ def base_checks(project, t):
     if not commands or not project.config["commands"]["base_checks"] or t.last("base_checks"):
         return None
     head = gitx.rev(t.ref, project.root)
-    timeout = project.config["commands"]["timeout_secs"]
     try:
-        results = []
-        for command in commands:
-            code, _, _ = run_shell(command, t.worktree, {"RAIL_TICKET": t.id, "RAIL_BASE": project.base_ref}, timeout)
-            result = ("timed_out" if code is None else "could_not_run" if could_not_run(code)
-                      else "green" if code == 0 else "red")
-            results.append({"command": command, "result": result})
-        return event(t.id, "base_checks", base=gitx.rev(project.base_ref, project.root)[:12], checks=results)
+        return event(t.id, "base_checks", base=gitx.rev(project.base_ref, project.root)[:12],
+                     checks=run_checks(project, commands, t.worktree, t.id))
     except Exception:
         return None  # a fact the engine couldn't gather; the claim goes on without it
     finally:
         # Checks may write files: the worktree goes back to what it was, as after a review.
         gitx.git(["reset", "--quiet", "--hard", head], t.worktree, check=False)
         gitx.git(["clean", "-fdq"], t.worktree, check=False)
+
+
+def run_checks(project, commands, cwd, nn):
+    """Run each check once in `cwd`: per check, red, green, could_not_run or timed_out."""
+    timeout = project.config["commands"]["timeout_secs"]
+    results = []
+    for command in commands:
+        code, _, _ = run_shell(command, cwd, {"RAIL_TICKET": nn, "RAIL_BASE": project.base_ref}, timeout)
+        result = "timed_out" if code is None else "could_not_run" if could_not_run(code) else "green" if code == 0 else "red"
+        results.append({"command": command, "result": result})
+    return results
+
+
+@contextlib.contextmanager
+def scratch(project, commit):
+    """A throwaway worktree at `commit`, detached, with the files .worktreeinclude lists. Removed afterwards."""
+    path = tempfile.mkdtemp(prefix="rail-scratch-")
+    gitx.git(["worktree", "add", "--quiet", "--detach", path, commit], project.root)
+    try:
+        copy_includes(project, path)
+        yield path
+    finally:
+        gitx.git(["worktree", "remove", "--force", path], project.root, check=False)
+        shutil.rmtree(path, ignore_errors=True)
 
 
 # --- ship and CI -------------------------------------------------------------------
@@ -253,21 +273,13 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None):
 
 def base_fails_verify(project):
     """Run verify once more on the base branch, in a scratch worktree. Returns its output when it fails there too."""
-    import tempfile
-
-    tip = gitx.rev(project.base_ref, project.root)
-    path = tempfile.mkdtemp(prefix="rail-base-")
-    gitx.git(["worktree", "add", "--quiet", "--detach", path, tip], project.root)
-    try:
-        copy_includes(project, path)
+    with scratch(project, gitx.rev(project.base_ref, project.root)) as path:
         timeout = project.config["commands"]["timeout_secs"]
         if project.config["commands"]["setup"]:
             run_shell(project.config["commands"]["setup"], path, {"RAIL_TICKET": ""}, timeout)
         code, output, _ = run_shell(project.config["commands"]["verify"], path, {"RAIL_TICKET": ""}, timeout)
         # verify that can't start on the base proves nothing about the base: the ticket's own failure stands
         return None if code == 0 or could_not_run(code) else tail(output)
-    finally:
-        gitx.git(["worktree", "remove", "--force", path], project.root, check=False)
 
 
 def ship(project, f, run):

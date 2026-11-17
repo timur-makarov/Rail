@@ -54,7 +54,9 @@ the same on request), and work from any other tracker with
 the `+++` line, becomes that ticket as it is, when it passes lint and its author can push to the repository:
 that is how a chat bot files what it grilled out of a person (`rail docs bots`). Anything else makes a ticket
 with the request, quoted, and an empty contract; `rail next` asks the agent to write it, and
-`rail amend NN --file FILE` saves it. Intake is idempotent by `external_id`.
+`rail amend NN --file FILE` saves it. Intake is idempotent by `external_id`. Work already done on a branch
+with no ticket comes in with `rail adopt BRANCH`: the ticket's branch starts from that branch's commits, and
+each check must fail on the base and pass on the branch before the ticket is filed (`rail docs adopt`).
 
 `add` takes the next ID, makes the branch `NN-slug`, and commits the ticket there without touching your
 checkout. With a remote, the ID is taken by moving one counter branch, `rail/ids`, a commit forward: if

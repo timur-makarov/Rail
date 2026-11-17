@@ -25,7 +25,7 @@ class Reference(RailTest):
         p = self.fixture()
         page = p.rail("docs", "cli")["text"]
         for verb in ("init", "add", "accept", "amend", "answer", "next", "advance", "status", "context", "drop",
-                     "doctor", "ci", "consult", "docs", "stats", "sweep", "source"):
+                     "doctor", "ci", "consult", "docs", "stats", "sweep", "source", "adopt"):
             self.assertIn(f"## rail {verb}", page)
         self.assertNotIn("## rail hook", page)
 
@@ -96,6 +96,9 @@ class Operations(RailTest):
         for text in (".rail/sources/NAME.md", "max_open", "rail source NAME --json", "NAME#KEY", "weekly-review"):
             self.assertIn(text, sources)
         self.assertIn("rail source NAME --json", cloud)
+        adopt = p.rail("docs", "adopt")["text"]
+        for text in ("rail adopt BRANCH FILE", "fails on the base", "base_checks", "`adopted` event", "ASSUMED:"):
+            self.assertIn(text, adopt)
         self.assertIn("a stranger's ticket is only ever a request", p.rail("docs", "bots")["text"])
         self.assertIn("| Q1 | scope |", p.rail("docs", "grill")["text"])
         stats = p.rail("docs", "stats")["text"]

@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 
-from . import areas, gitx, guard, hooks, steps
+from . import areas, gitx, guard, hooks, rules, steps
 from .project import Project, event, events_path, ticket_path
 from .state import OPEN, derive, floor
 from .table import TRANSITIONS, first_match
@@ -18,7 +18,7 @@ from .ticket import Ticket, branch_name, highest, lint, rank, with_field, with_i
 from .forge import ENGINE_MARK, TRUSTED
 from .util import RailError, age, cloud, could_not_run, disposable, match_any, session_url, shell
 
-VERBS = ("init", "add", "accept", "amend", "answer", "next", "advance", "status", "context", "drop", "doctor", "ci",
+VERBS = ("init", "add", "adopt", "accept", "amend", "answer", "next", "advance", "status", "context", "drop", "doctor", "ci",
          "consult", "docs", "intake", "sweep", "source", "provision", "save", "stats")
 STALE_DAYS = 3
 
@@ -393,10 +393,10 @@ def requested_event(nn, ticket, via, channel, **extra):
     return event(nn, "requested", **fields)
 
 
-def create_ticket(project, text, via="add", channel="session", **extra):
+def create_ticket(project, text, via="add", channel="session", parent=None, **extra):
     """Take the next ID and make the ticket's branch with the ticket file, without touching any checkout. The
-    journal starts with a `requested` event; an AUTO ticket that passes lint is accepted at once. Returns (id,
-    branch, push result)."""
+    journal starts with a `requested` event; an AUTO ticket that passes lint is accepted at once. The branch starts
+    from the base branch, or from `parent` (an adopted branch's head). Returns (id, branch, push result)."""
     base_tip = gitx.rev(project.base_ref, project.root)
     if not base_tip:
         raise RailError(f"the base branch '{project.base}' has no commits yet")
@@ -417,7 +417,7 @@ def create_ticket(project, text, via="add", channel="session", **extra):
                 events.append(accepted_event(nn, ticket, tier, "engine", "lint"))
         events.insert(0, requested_event(nn, ticket, via, channel, **extra))
         files[events_path(nn)] = "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events)
-        return gitx.commit_files(project.root, base_tip, files, f"{nn}: add ticket: {ticket.title}")
+        return gitx.commit_files(project.root, parent or base_tip, files, f"{nn}: add ticket: {ticket.title}")
 
     nn, commit = project.take_id(project.max_id(tickets) + 1, build, label=Ticket(text).title or "")
     branch = branch_name(Ticket(with_id(text, nn)))
@@ -457,6 +457,72 @@ def cmd_add(project, args):
         tickets, facts = load(project)
         f = facts[nn]
     return from_facts(f, receipts, branch=branch)
+
+
+def cmd_adopt(project, args):
+    """`rail adopt [BRANCH]` reads a branch with no ticket and hands the agent a ticket draft; it creates nothing.
+    `rail adopt BRANCH FILE` runs the draft's checks on the base and on the branch, and when each is red on the
+    base and green on the branch, files the ticket with the branch's commits on its own branch, claimed by this
+    session. The adopted branch is left as it is."""
+    from . import adopt
+
+    project.sync()
+    tickets = project.tickets()
+    branch, head = adopt.resolve(project, tickets, args.branch)
+    if not args.file:
+        rows = adopt.files(project, head)
+        changed = [p for p, _, _ in rows]
+        size, _ = rules.size(project, head)
+        tier, why = adopt.tier(project, changed, size)
+        path = adopt.write_draft(branch, adopt.draft(project, tier, adopt.scope(project, head, changed)))
+        return answer(owner="agent", code="ADOPT", branch=branch, head=head, draft=path, size=size, tier=tier,
+                      files=[{"path": p, "added": a, "deleted": d} for p, a, d in rows],
+                      action={"kind": "agent_task", "brief": adopt.brief(project, branch, head, rows, size, tier, why,
+                                                                         path)})
+    with open(args.file) as f:
+        text = f.read()
+    errors = lint(Ticket(text))
+    if errors:
+        return answer(owner="agent", code="TICKET_LINT", action={"kind": "agent_task", "brief": (
+            f"Fix the ticket, then run rail adopt {branch} {args.file} again:\n- " + "\n- ".join(errors))},
+                      steps_=[{"step": "ticket-lint", "status": "ran", "result": "fail", "detail": "; ".join(errors)}])
+    receipts = [{"step": "ticket-lint", "status": "ran", "result": "pass"}]
+    # The one gate that exists only here: the work is done already, so each check must show it.
+    run = steps.Run(project, type("T", (), {"id": ""})())
+    base_tip = gitx.rev(project.base_ref, project.root)
+    found = adopt.gate(project, Ticket(text).checks(), base_tip, head, run)
+    if found is None:
+        return answer(owner="agent", code="ADOPT_SETUP_FAILED", steps_=receipts + run.steps, action={
+            "kind": "agent_task", "brief": f"{run.failure[1]}\n\nNothing was created. Fix setup, then run rail adopt"
+                                           f" {branch} {args.file} again."})
+    refused = adopt.refusal(project, branch, *found)
+    checks = [{"command": b["command"], "base": b["result"], "branch": a["result"]} for b, a in zip(*found)]
+    receipts.append({"step": "adopt-checks", "status": "ran", "result": "fail" if refused else "pass",
+                     "detail": f"{len(checks)} checks on {project.base} and {branch}"})
+    if refused:
+        return answer(owner="agent", code="ADOPT_CHECKS", steps_=receipts, checks=checks,
+                      action={"kind": "agent_task", "brief": refused})
+
+    nn, name, pushed = create_ticket(project, text, via="adopt", parent=head)
+    t = project.tickets()[nn]
+    project.append_events(t, [event(nn, "adopted", branch=branch, head=head[:12]),
+                              event(nn, "base_checks", base=base_tip[:12], checks=found[0])], "adopt")
+    claim(project, t)
+    run = steps.Run(project, t)
+    make_ready(project, t, run)  # not fresh: the branch keeps its commits as they are, and ship rebases them
+    receipts += run.steps
+    tickets, facts = load(project)
+    if ensure_pr(project, facts[nn], receipts):
+        tickets, facts = load(project)
+    f = facts[nn]
+    said = f"Ticket {nn} holds the work of branch {branch} ({head[:12]}), on its own branch {name}."
+    if first_match(f)[0] == "IMPLEMENT":
+        command = f"rail advance {nn}"
+        return answer(nn, f.state, "agent", {"kind": "script", "brief": f"{said} Next: {command}", "command": command},
+                      "ADOPTED", receipts, f.cwd, tier=f.tier, branch=name, adopted=branch, checks=checks)
+    result = from_facts(f, receipts, branch=name, adopted=branch, checks=checks)
+    result["action"]["brief"] = f"{said}\n\n{result['action']['brief']}"
+    return result
 
 
 def stub(title, request, external_id, caused_by=""):
@@ -1629,6 +1695,10 @@ def parser():
 
     add = verb("add", "create a ticket from a ticket file", ticket=False)
     add.add_argument("file", help="the ticket file, or - for stdin")
+    adopt_ = verb("adopt", "put work already on a branch with no ticket onto the rail: with no FILE, a ticket draft"
+                           " for it; with FILE, check it and file the ticket", ticket=False)
+    adopt_.add_argument("branch", nargs="?", help="the branch; the current one when left out")
+    adopt_.add_argument("file", nargs="?", help="the ticket draft, written from the first step's brief")
     accept = verb("accept", "approve a ticket's contract")
     accept.add_argument("note", nargs="?", help="a note for the agent's next brief")
     verb("next", "the next legal move")
