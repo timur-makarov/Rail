@@ -19,6 +19,10 @@ rail next       the engine picks a ticket, makes its worktree, and says what to 
 rail advance    the engine checks the work and moves the ticket on, or says what failed
 ```
 
+For a ticket's work, `rail next` also names a model and effort: a cheaper one for a fresh ticket, one rung
+higher after each failed attempt. A session run unattended hands each brief to a fresh subagent on that model
+and runs `rail advance` itself.
+
 A ticket goes through these states. The engine derives the state each time; the agent can't set it.
 
 ```text

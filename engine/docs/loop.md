@@ -11,6 +11,13 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   needed, then take the next ticket or stop.
 - `action.kind` is `agent_task` (do the brief), `script` (run `action.command`), `human_wait` (a person
   acts; the brief says what) or `rest` (nothing to do).
+- `action.model` and `action.effort` name the model and effort for an `agent_task` that is a ticket's work,
+  from `[worker] ladder` (`person_ladder` for a PERSON ticket). The rung is the number of failed attempts at
+  the step the ticket is failing, 0 when there are none, capped at the last rung; a person's act starts it
+  again at 0. With an empty ladder neither is there. A session a person is driving does the brief itself and
+  may ignore them. An unattended session starts one subagent on that model and effort, gives it the brief
+  word for word and the `cwd`, and runs `rail advance` itself when the subagent returns (`rail docs cloud`).
+  The engine starts no agent.
 - `steps` lists what the command ran: `ran` with `pass` or `fail`, `could_not_run` with `fail` (the shell
   couldn't start the command: it isn't on the machine, or isn't executable), `not_run`, or `unavailable`. A
   skipped step never looks like a pass, and a step that couldn't start never looks like a check that ran.

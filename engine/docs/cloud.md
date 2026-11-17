@@ -67,8 +67,16 @@ starts from the last save.
 
 Make one scheduled task for the repository, on the environment from step 4, with this prompt:
 
-    Run `rail next` and do what it says, then `rail advance`, and repeat until `rail next` answers that
-    only a person can act or that there is no work. Then say which tickets wait for a person, and stop.
+    Run `rail next --json`. When `action.kind` is `agent_task` and the answer names `action.model`, start
+    one subagent on that model and effort. Give it `action.brief` word for word, tell it to work in `cwd`,
+    and tell it to stop when the brief is done without running `rail advance`. When it returns, run
+    `rail advance --json` yourself. For any other `action.kind`, do what the answer says yourself. Repeat
+    until `rail next` answers that only a person can act or that there is no work. Then say which tickets
+    wait for a person, and stop.
+
+Each ticket gets a fresh context and the model its tier and its failed attempts call for. The runner decides
+nothing and keeps a small context, so one run can move many tickets. A failed attempt goes to a new worker
+one rung up, with the failure in its brief.
 
 Give it these triggers:
 

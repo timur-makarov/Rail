@@ -4,7 +4,8 @@ Rail never waits: a wait is a state on a ticket, and the agent takes other work 
 moving while you are away, use what Claude Code ships.
 
 **The loop prompt:** run `rail next` and do what it says, then `rail advance`, until `rail next` returns
-`rest` or only waits on a person. `next` itself takes in issues labelled `rail`, moves shipped tickets, and
+`rest` or only waits on a person. When the answer names `action.model`, an unattended session hands the brief
+to a subagent on that model (`rail docs cloud` has the exact prompt). `next` itself takes in issues labelled `rail`, moves shipped tickets, and
 resumes work an ended session left. Write the prompt into `.claude/loop.md` to get it from a bare `/loop`.
 
 - **A cloud scheduled task** runs with your machine off, on a schedule or on a GitHub event. It is Rail's

@@ -3,6 +3,8 @@
 This repository runs on Rail: the engine owns ticket state, and you write the code.
 
 - The loop: `rail next --json`, do what `action.brief` says, then `rail advance --json`. Repeat.
+- When `action.model` is set and nobody is driving this session, start a subagent on that model and effort
+  for the brief, then run `rail advance` yourself (`rail docs loop`).
 - When `owner` is not `agent`, tell the person what is needed, then take the next ticket or stop.
 - New work is a ticket. Question the person who asks for it first (`rail docs grill`), write it like
   `.rail/tickets/TEMPLATE.md`, then run `rail add <file>`.
