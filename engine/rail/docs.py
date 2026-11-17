@@ -22,6 +22,8 @@ READERS = {
     "commands.provision": "rail provision, next in a cloud session, and CI: installs what the machine lacks, once"
                           " per machine, as root. Never run on a person's own machine",
     "commands.timeout_secs": "every command: setup, verify, provision, each check, each review run",
+    "commands.base_checks": "next, at a ticket's first claim: runs each Check: line once on the untouched base and"
+                            " records red or green in a base_checks event. Never a gate: it fails nothing",
     "size.cap": "ship and CI: an AUTO change with more changed lines than this becomes PERSON",
     "size.exclude": "ship and CI: globs left out of the size count, besides generated files and lockfiles",
     "review.command": "advance: the reviewer, run in the ticket's worktree with the brief on stdin",
@@ -63,7 +65,7 @@ def config_page():
             long.append((name, default))
             shown = "(below)"
         else:
-            shown = f"`{default!r}`"
+            shown = f"`{str(default).lower() if isinstance(default, bool) else repr(default)}`"  # TOML spells true
         lines.append(f"| `{name}` | {shown} | {READERS.get(name, '')} |")
     lines += ["", "A `[[rules]]` table takes: " + ", ".join(f"`{k}`" for k in configmod.RULE_KEYS) + "."]
     for name, default in long:

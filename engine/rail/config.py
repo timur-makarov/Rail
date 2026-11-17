@@ -18,7 +18,7 @@ DEFAULTS = {
     "base_branch": "main",
     "person_paths": [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".claude/**", ".github/workflows/**"],
     "migration_paths": ["**/migrations/**"],
-    "commands": {"setup": "", "verify": "", "provision": "", "timeout_secs": 900},
+    "commands": {"setup": "", "verify": "", "provision": "", "timeout_secs": 900, "base_checks": True},
     "size": {"cap": 600, "exclude": []},
     "review": {"command": REVIEW_COMMAND, "model": "", "skip_paths": []},
     "retry": {"budget": 2},
@@ -48,7 +48,7 @@ def _check(value, default, where):
                 raise RailError(f"config: unknown key '{where}.{key}'{_suggest(key, default)}")
             merged[key] = _check(item, default[key], f"{where}.{key}")
         return merged
-    if isinstance(value, bool) or not isinstance(value, type(default)):
+    if isinstance(value, bool) != isinstance(default, bool) or not isinstance(value, type(default)):
         raise RailError(f"config: {where} must be {type(default).__name__}")
     if isinstance(default, list) and not all(isinstance(v, str) for v in value):
         raise RailError(f"config: {where} must be a list of strings")

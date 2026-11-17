@@ -126,6 +126,9 @@ def make_ready(project, t, run, fresh=False):
         steps.setup(project, t, run)
         if run.events:
             project.append_events(t, run.events, "setup")
+        found = steps.base_checks(project, t) if fresh and run.ok else None
+        if found:
+            project.append_events(t, [found], "base checks")
 
 
 def contract_pr(f):
