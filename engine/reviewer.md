@@ -25,10 +25,11 @@ fixes them all.
 On a re-review, review the whole change again. When an earlier finding still stands,
 report it with its id in `repeats` and keep its severity.
 
-`needs_person` is for the rare change a person should see before it merges although no
-finding blocks it: it sets a pattern other code will copy, or it changes what users of the
-product get beyond what the ticket says. Give the reason in one sentence. Leave it out
-otherwise; most changes need none.
+Set `needs_person` when a person should see the change before it merges and no blocking
+finding already stops it: the change adds the first of something other code will copy (a
+new shared module, the first permission check, the first cache), or it changes what users
+of the product get beyond what the ticket says. Say which, in one sentence. Leave it out
+for a change that does neither.
 
 Return only JSON matching the schema. `summary` says what you checked and how. An empty
 list is a valid review.
