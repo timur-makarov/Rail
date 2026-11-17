@@ -19,7 +19,7 @@ from .forge import ENGINE_MARK, TRUSTED
 from .util import RailError, age, cloud, could_not_run, disposable, match_any, session_url, shell
 
 VERBS = ("init", "add", "accept", "amend", "answer", "next", "advance", "status", "context", "drop", "doctor", "ci",
-         "consult", "docs", "intake", "sweep", "provision", "save", "stats")
+         "consult", "docs", "intake", "sweep", "source", "provision", "save", "stats")
 STALE_DAYS = 3
 
 
@@ -387,6 +387,8 @@ def requested_event(nn, ticket, via, channel, **extra):
     fields = {"via": via, "channel": (record or {}).get("channel") or channel, "grilled": record is not None,
               "assumed": len(ticket.open_assumptions())}
     fields.update({k: v for k, v in (record or {}).items() if k != "channel" and v not in (None, "")})
+    if ticket.get("external_id"):
+        fields["external_id"] = ticket.get("external_id")  # a drop mark keeps it: rail stats counts by source
     fields.update({k: v for k, v in extra.items() if v})
     return event(nn, "requested", **fields)
 
@@ -439,6 +441,11 @@ def cmd_add(project, args):
                       action={"kind": "agent_task", "brief": "Fix the ticket, then run rail add again:\n- " + "\n- ".join(errors)},
                       steps_=[{"step": "ticket-lint", "status": "ran", "result": "fail", "detail": "; ".join(errors)}])
     project.sync()
+    from . import sources
+    external = Ticket(text).get("external_id")
+    if sources.owner(project, external):  # a source's ticket: one open ticket per key, and no more than max_open
+        tickets, facts = load(project)
+        sources.check_add(project, facts, external)
     nn, branch, pushed = create_ticket(project, text)
     tickets, facts = load(project)
     f = facts[nn]
@@ -709,6 +716,44 @@ def cmd_sweep(project, args):
         receipts += run.steps
     tickets, facts = load(project)
     return from_facts(facts[nn], receipts)
+
+
+def cmd_source(project, args):
+    """`rail source NAME`: run the source's fetch and hand the agent a brief that files tickets from its output.
+    With no name, the sources and how many of each one's tickets are open."""
+    from . import sources
+    from .util import run_shell, tail
+
+    project.sync()
+    tickets, facts = load(project)
+    if not args.name:
+        rows = []
+        for name in sources.names(project):
+            source = sources.load(project, name)
+            open_ = sum(state not in sources.ENDED for _, _, state in sources.tickets_of(facts, name))
+            rows.append({"name": name, "open": open_, "max_open": source.max_open})
+        text = "\n".join(f"{r['name']}: {r['open']}/{r['max_open']} open" for r in rows) or \
+            f"No sources: add one as {sources.DIR}/NAME.md (rail docs sources)."
+        return answer(code="SOURCES", sources=rows, text=text)
+    source = sources.load(project, args.name)
+    mine = sources.tickets_of(facts, source.name)
+    room = source.max_open - sum(state not in sources.ENDED for _, _, state in mine)
+    if room <= 0:
+        return answer(code="SOURCE_FULL", action={"kind": "rest", "brief": (
+            f"Source {source.name} has {source.max_open} open tickets, its max_open: nothing to file until one merges"
+            " or is dropped. fetch did not run.")}, source=source.name)
+    timeout = project.config["commands"]["timeout_secs"]
+    code, output, ms = run_shell(source.fetch, project.root, {"RAIL_BASE": project.base_ref}, timeout)
+    if code != 0:
+        why = "timeout" if code is None else could_not_run(code) or f"exit {code}"
+        step = {"step": "fetch", "status": "could_not_run" if code and could_not_run(code) else "ran",
+                "result": "fail", "detail": why}
+        return answer(code="SOURCE_FETCH_FAILED", steps_=[step], source=source.name, action={"kind": "rest", "brief": (
+            f"The fetch of source {source.name} failed ({why}), so nothing was filed:\n$ {source.fetch}\n"
+            + tail(output, 30))})
+    step = {"step": "fetch", "status": "ran", "result": "pass", "detail": f"{len(output)} characters"}
+    return answer(owner="agent", code="SOURCE", steps_=[step], source=source.name, room=room,
+                  action={"kind": "agent_task", "brief": sources.brief(source, output, room, mine)})
 
 
 def cmd_consult(project, args):
@@ -1613,6 +1658,9 @@ def parser():
     intake.add_argument("--brief", help="a file with the request, verbatim")
     verb("sweep", "review what merged without a review, gather the findings reviewers parked and the checks they"
                   " proposed, and turn them into tickets", ticket=False)
+    source = verb("source", "run a source's fetch and file tickets from what it finds; with no name, list the sources",
+                  ticket=False)
+    source.add_argument("name", nargs="?", help="the source, .rail/sources/NAME.md")
     verb("save", "commit and push the work in flight as it is, with no checks")
     stats_ = verb("stats", "what the merged tickets' journals say: tickets by tier, failed steps, and the reviewer's"
                            " cost and hit rate", ticket=False)

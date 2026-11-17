@@ -171,6 +171,7 @@ def init(cwd):
         "tickets/TEMPLATE.md": ".rail/tickets/TEMPLATE.md",
         "rail.yml": ".github/workflows/rail.yml",
         "skills/rail-grill/SKILL.md": ".claude/skills/rail-grill/SKILL.md",  # the grilling, as a Claude Code skill
+        "sources/weekly-review.md": ".rail/sources/weekly-review.md",  # a source: the week's merges read together
         "ruleset.json": ".rail/ruleset.json",  # for the person to import in GitHub: a session can't set it. It
                                                # names the default branch, so one file fits every repository
     }

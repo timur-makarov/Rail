@@ -36,4 +36,5 @@ When the sweep finds nothing (no unreviewed change, no parked finding, no propos
 clean), the agent gets no task: `rail next` answers `SWEEP_EMPTY` with `rail advance NN`, and the sweep's
 ticket merges, which moves the marker.
 
-A sweep never blocks a merge.
+A sweep never blocks a merge. To turn other signals into tickets, such as failed CI runs or an error
+tracker's export, write a [source](sources.md).

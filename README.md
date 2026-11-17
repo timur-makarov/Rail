@@ -94,7 +94,9 @@ table of every step that ran, and a `Review:` trailer that says who reviewed it.
 ticket and what it waits for. `rail stats` counts, over the merged tickets, how many needed a person, how
 many were reverted, which steps failed, what the reviewer cost and how often its findings ended in a fix, and how the grilling went. Every 20
 merged tickets, a sweep gathers the findings reviewers parked and the checks they proposed, reads any changes
-that merged with no review, and turns what it finds into tickets.
+that merged with no review, and turns what it finds into tickets. A source does the same for any other
+signal, such as failed CI runs or last week's merges: a prompt in `.rail/sources/` that files tickets and
+never edits.
 
 **What Rail leaves to others.** It starts no agents: a session or a scheduled task does. It doesn't say how
 to write, test or debug code: that is the agent's craft. It doesn't deploy: a ticket ends at its merge.
@@ -156,7 +158,7 @@ the pages, which are also in [`engine/docs/`](engine/docs):
 | GitHub settings and pull requests | [`github`](engine/docs/github.md) |
 | The guards | [`guards`](engine/docs/guards.md) |
 | The journal's files and events | [`journal`](engine/docs/journal.md) |
-| The sweep and the numbers | [`sweep`](engine/docs/sweep.md), [`stats`](engine/docs/stats.md) |
+| The sweep, sources and the numbers | [`sweep`](engine/docs/sweep.md), [`sources`](engine/docs/sources.md), [`stats`](engine/docs/stats.md) |
 | Every setting and every verb | `rail docs config`, `rail docs cli` |
 
 ## This repository

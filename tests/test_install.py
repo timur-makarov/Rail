@@ -25,7 +25,8 @@ class Init(RailTest):
         done = p.rail("init")
         self.assertEqual(done["reason"]["code"], "INITIALISED")
         for path in (".rail/engine/rail/cli.py", ".rail/bin/rail", ".rail/config.toml", ".rail/SOURCE",
-                     ".rail/tickets/TEMPLATE.md", ".github/workflows/rail.yml", "AGENTS.md", ".claude/settings.json"):
+                     ".rail/tickets/TEMPLATE.md", ".github/workflows/rail.yml", "AGENTS.md", ".claude/settings.json",
+                     ".rail/sources/weekly-review.md"):
             self.assertTrue(os.path.exists(p.path(path)), path)
         self.assertFalse(os.path.exists(p.path("CLAUDE.md")))
         self.assertIn(".claude/worktrees/", read(p.path(".gitignore")))

@@ -85,6 +85,11 @@ def checks(project):
         parent = os.path.dirname(parent)
 
     found.append(("config", True, ".rail/config.toml is valid"))  # Project() failed otherwise
+    from . import sources
+    if sources.names(project):
+        bad = sources.problems(project)
+        found.append(("sources", not bad, f"{len(sources.names(project))} sources in {sources.DIR} load" if not bad
+                      else "; ".join(bad)))
 
     if cloud():
         found += cloud_checks(project)

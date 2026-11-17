@@ -88,6 +88,15 @@ Each run is a fresh session, and the section above is why that is enough. For mo
 more sessions: claims are taken on the remote, so two never take the same ticket. `rail status --json`
 lists the tickets whose owner is `agent`.
 
+## Run a source on a schedule
+
+A [source](sources.md) turns a signal, such as failed CI runs, into tickets. Make one scheduled task for
+each source, on the same environment, with this prompt:
+
+    Run `rail source NAME --json` and do its brief.
+
+The source only files tickets. The runner above picks them up on its own schedule, as any other ticket.
+
 ## Where your acts go
 
 - **Your inbox** is one saved search: `is:open label:rail:needs-you`. Every wait gets the label as soon as

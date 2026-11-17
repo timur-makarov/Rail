@@ -143,6 +143,25 @@ def grilling(tickets, states, merged_at, start):
     return {"groups": groups, "channels": dict(sorted(channels.items())), "agents": dict(sorted(agents.items()))}
 
 
+def by_source(project, tickets, states, merged_at, reverted, start):
+    """What became of each source's tickets: those requested on or after `start`, as the grilling counts them."""
+    from . import sources
+
+    rows = {}
+    for nn, t in tickets.items():
+        req = next((e for e in t.events if e.get("event") == "requested"), None) or t.dropped_request
+        external = (t.ticket.get("external_id") if t.ticket else None) or (req or {}).get("external_id")
+        name = sources.owner(project, external)
+        if not name or (start is not None and (not req or parse_iso(req["at"]).timestamp() < start)):
+            continue
+        state = states.get(nn) or ("merged" if nn in merged_at else "dropped" if t.last("dropped") else "open")
+        row = rows.setdefault(name, {"filed": 0, "merged": 0, "reverted": 0, "dropped": 0, "open": 0})
+        row["filed"] += 1
+        row[state if state in ("merged", "dropped") else "open"] += 1
+        row["reverted"] += nn in reverted
+    return dict(sorted(rows.items()))
+
+
 def collect(project, tickets, since=None, states=None):
     """The numbers, for tickets merged on or after `since` (YYYY-MM-DD), or for every merged ticket. The grilling
     numbers count the tickets requested on or after `since`, whatever became of them; `states` says which were
@@ -227,6 +246,7 @@ def collect(project, tickets, since=None, states=None):
         "since": since, "merged": merged, "left_out": len(tickets) - merged, "tiers": tiers, "raised": dict(raised),
         "base_checks": base,
         "grilling": grilling(tickets, states or {}, merged_at, start),
+        "sources": by_source(project, tickets, states or {}, merged_at, reverted, start),
         "consults": consults, "steps": {name: steps[name] for name in sorted(steps, key=_step_rank)},
         "review": {
             "roles": {name: _rounded(roles[name]) for name in REVIEW_STEPS if name in roles},
@@ -305,10 +325,16 @@ def render_grilling(data):
     return lines
 
 
+def render_sources(data):
+    rows = data["sources"]
+    head = ["filed", "merged", "reverted", "dropped", "open"]
+    return ["", *_table(["SOURCES", *head], [[name, *[r[k] for k in head]] for name, r in rows.items()])] if rows else []
+
+
 def render(data):
     when = f" since {data['since']}" if data["since"] else ""
     if not data["merged"]:
-        grill = render_grilling(data)
+        grill = render_sources(data) + render_grilling(data)
         if grill:
             return "\n".join([f"Rail stats: no ticket has merged{when} yet.", *grill])
         return f"No ticket has merged{when}, so there is nothing to count yet."
@@ -342,7 +368,7 @@ def render(data):
     if data["consults"]:
         lines.append(f"Consult ran {data['consults']} times.")
     if not review["roles"]:
-        return "\n".join(lines + ["", "No review ran.", *render_grilling(data)])
+        return "\n".join(lines + ["", "No review ran.", *render_sources(data), *render_grilling(data)])
     roles = review["roles"]
     total = ["total", sum(r["runs"] for r in roles.values()), f"${review['cost_usd']:.2f}",
              _span(sum(r["minutes"] for r in roles.values()))]
@@ -367,5 +393,5 @@ def render(data):
     if review["disputes"]:
         lines.append(f"Disputes: {sum(review['disputes'].values())}. " + _listed(review["disputes"], (
             ("dismissed", "the refuter dismissed"), ("parked", "parked"), ("upheld", "upheld"))))
-    lines += render_grilling(data)
+    lines += render_sources(data) + render_grilling(data)
     return "\n".join(line.rstrip() for line in lines)

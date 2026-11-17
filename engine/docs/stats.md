@@ -94,6 +94,13 @@ deciding, and the recommendations steered them. Many acceptances with few amends
 well. A low rate means it doesn't know the project or the person yet. The grilling agent grades the answers
 itself; the ticket keeps the recommendation and the answer word for word, so the grade can be checked.
 
+## Sources
+
+The SOURCES table has one row for each [source](sources.md) with a ticket requested in the period: how many
+it filed, and how many of those merged, were reverted afterwards, were dropped, and are still open. In JSON
+it is under `sources`. A source whose tickets are mostly dropped files what isn't worth a ticket: tighten its
+prompt. One whose tickets are reverted files what is wrong.
+
 ## What to read from it
 
 - **A low hit rate with many dismissals** means the reviewer reports what isn't wrong. Try another
