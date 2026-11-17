@@ -47,6 +47,26 @@ For a bug, first write the test that reproduces the reported symptom, and watch 
 
 ## 5. Make the smallest change that meets the contract
 
+Before you write new code, stop at the first of these that holds:
+
+1. The contract can be met without it.
+2. This codebase already has it. Search for the helper, the pattern, or the neighbour that does the same
+   thing, and use it.
+3. The language's standard library or the platform has it.
+4. A dependency the project already installs has it.
+
+Only then write it, and only as much as the contract needs. A new dependency comes last: say in
+`## Look at` which of the four you checked and why none served.
+
+- **Abstraction:** add one after the second real duplication, not before.
+- **Place:** the smallest change in the wrong place is a second bug. When several callers share the fault,
+  fix the shared code, and check the other callers.
+- **Where small does not apply:** checking input where it enters from outside, handling an error that could
+  lose data, security, and anything the contract asks for.
+- **A shortcut you take on purpose:** mark it with a comment `SHORTCUT(NN):` that carries this ticket's
+  number, the known limit, and what to do when the limit is reached. A structure rule refuses the marker
+  without a number.
+
 - **You need a path outside `scope_paths`:** widen the scope with `rail amend NN`. Don't work around it.
 - **You notice a problem the ticket didn't ask about:** leave it. Name it in `## Look at`, or open a ticket
   with `rail add`.

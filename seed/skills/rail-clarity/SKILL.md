@@ -27,6 +27,10 @@ trying to do?
 6. **If the talk repeats** without new information, take a position: "I would do X, because Y". Ask them
    to react to it.
 
+Weigh the small words in what the person says. "Just", "only" and "quick" set a ceiling on the size of the
+answer. "Still" means something was tried and failed, so the obvious cause is suspect. "Again" means it came
+back, so the cause matters more than the symptom.
+
 Question the premise at least once. "Do you need this at all?" is often the most useful question.
 
 ## Close

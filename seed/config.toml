@@ -80,3 +80,9 @@ id = "no-new-suppressions"
 forbid = ["eslint-disable", "@ts-ignore", "# noqa", ".skip("]
 allow = []
 fix = "Fix the cause instead of silencing the check."
+
+[[rules]]
+id = "shortcut-names-its-ticket"          # a corner cut on purpose is marked SHORTCUT(NN): with the ticket's number
+forbid = ["SHORTCUT:", "SHORTCUT()", "SHORTCUT(NN)", "SHORTCUT(TODO)"]
+allow = [".claude/**"]                    # the guides write the marker's form
+fix = "Write SHORTCUT(NN): with this ticket's number, the known limit, and what to do when it is reached."

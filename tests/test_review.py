@@ -379,6 +379,22 @@ class Bugs(RailTest):
         p.fix_calc("1")
         self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")
 
+    def test_the_seeds_shortcut_rule_refuses_a_marker_without_its_ticket(self):
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "seed", "config.toml")) as f:
+            rule = "\n[[rules]]\n" + f.read().split("[[rules]]")[2]  # the second rule of the seed, as it ships
+        self.assertIn("shortcut-names-its-ticket", rule)
+        p = self.fixture(config=CONFIG + rule)
+        p.add(ticket())
+        p.rail("next")
+        p.write("src/calc.py", "def add(a, b):\n    return a + b  # SHORTCUT: ints only\n", base=p.worktree("1"))
+        failed = p.rail("advance", "1", expect=3)
+        step = [s for s in failed["steps"] if s.get("result") == "fail"][0]
+        self.assertEqual((step["step"], step["detail"]), ("rules", "1 broken: shortcut-names-its-ticket"))
+        self.assertIn("this ticket's number", failed["action"]["brief"])
+        p.write("src/calc.py", "def add(a, b):\n    return a + b  # SHORTCUT(1): ints only; use Decimal for money\n",
+                base=p.worktree("1"))
+        self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")
+
 
 class Shape(RailTest):
     def test_only_in_keeps_new_files_in_their_home(self):
