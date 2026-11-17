@@ -29,8 +29,7 @@ Set `needs_person` when a person should see the change before it merges and no b
 finding already stops it: the change adds the first of something other code will copy (a
 new shared module, the first permission check, the first cache), it adds a dependency the
 project did not have, or it changes what users of the product get beyond what the ticket
-says. Say which, in one sentence. Leave it out
-for a change that does neither.
+says. Say which, in one sentence. Leave it out for a change that does none of these.
 
 Return only JSON matching the schema. `summary` says what you checked and how. An empty
 list is a valid review.
