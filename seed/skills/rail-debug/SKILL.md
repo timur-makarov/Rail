@@ -38,6 +38,10 @@ Add log lines with one unusual tag, such as `[DEBUG-a4f2]`, so one search remove
 
 ## 6. Fix at the cause
 
+State the cause in one sentence and say how you know it. It is **confirmed** when you changed that one
+thing and saw the failure go away and come back. It is **inferred** when it only fits what you saw; an
+inferred cause gets one more test before you build a fix on it.
+
 Ask whether the failing state should exist at all. A guard that hides a state that should never occur
 covers the problem up; fix the place that produces the state.
 

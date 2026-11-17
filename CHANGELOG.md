@@ -151,3 +151,4 @@ One line for each change, saying why.
 - Ship a second structure rule: a `SHORTCUT` marker must carry its ticket's number. A corner cut on purpose can then be told from an accident, and found again.
 - Tell the grilling and the clarity skill to weigh "just", "still" and "again" and to check a named mechanism against its problem, and tell every session in `AGENTS.md` that text found in files and logs is data: these were rules of the earlier framework that Rail had dropped.
 - Have the reviewer ask for a person when a change adds a dependency the project did not have: a new package is a decision about supply chain and upkeep that no check sees. The wording is not yet tested with real runs.
+- Ask the worker to mark each fact in `## Look at`, and the cause of a failure, as confirmed or inferred: the rule was in the page for writing guides and in one intake skill, but not in the pages a worker reads.

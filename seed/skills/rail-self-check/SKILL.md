@@ -60,3 +60,7 @@ If a test was wrong and you changed it, say so in `## Look at`, with the reason.
 
 Say what a reader should check first, and list what you did not test in the form
 "not tested: X, because Y". A gap you name is information. A gap you leave out looks like a pass.
+
+For each fact you state there, say how you know it. **Confirmed** means you saw it in this session: give
+the command and what it printed, or the `file:line`. **Inferred** means it follows from what you saw: give
+the reason. When you are not sure which, write inferred.
