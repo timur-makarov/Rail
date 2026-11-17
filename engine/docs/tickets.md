@@ -27,7 +27,9 @@ external_id = "github#123"
 - **The Done Contract** needs at least one `Check:` line with its command in backticks. A check that
   can't fail, such as `true` or `echo ok`, is rejected. Checks run through `bash -o pipefail`, so a
   failure anywhere in a pipe fails the check: `pytest | tail -20` fails with pytest, and `pytest | head`
-  fails when head cuts pytest off before it ends.
+  fails when head cuts pytest off before it ends. Write checks that fail before the work: at the first
+  claim, `next` runs each one once on the base branch and records whether it was already green there
+  (`rail docs loop`). That is only recorded, and never stops the ticket.
 - **ASSUMED rows** are verified after the claim: change `ASSUMED:` to `VERIFIED:` and say how. An open
   row blocks ship.
 - **Look at** is written before ship: what a reader of the change should check.

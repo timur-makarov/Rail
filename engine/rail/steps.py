@@ -115,6 +115,32 @@ def setup(project, t, run, cwd=None):
     return run_command(project, cwd or t.worktree, t.id, "setup", command, run)
 
 
+def base_checks(project, t):
+    """Run each Check: line once in a freshly claimed ticket's worktree, which is still the base branch, and return
+    the base_checks event: per check, red, green, could_not_run or timed_out. A check already green on the base
+    can't show that the work was done. It is a recorded fact, never a gate: no step, no attempt, no state. None when
+    it is switched off, already recorded, the ticket has no checks yet, or something went wrong."""
+    commands = t.ticket.checks() if t.ticket else []
+    if not commands or not project.config["commands"]["base_checks"] or t.last("base_checks"):
+        return None
+    head = gitx.rev(t.ref, project.root)
+    timeout = project.config["commands"]["timeout_secs"]
+    try:
+        results = []
+        for command in commands:
+            code, _, _ = run_shell(command, t.worktree, {"RAIL_TICKET": t.id, "RAIL_BASE": project.base_ref}, timeout)
+            result = ("timed_out" if code is None else "could_not_run" if could_not_run(code)
+                      else "green" if code == 0 else "red")
+            results.append({"command": command, "result": result})
+        return event(t.id, "base_checks", base=gitx.rev(project.base_ref, project.root)[:12], checks=results)
+    except Exception:
+        return None  # a fact the engine couldn't gather; the claim goes on without it
+    finally:
+        # Checks may write files: the worktree goes back to what it was, as after a review.
+        gitx.git(["reset", "--quiet", "--hard", head], t.worktree, check=False)
+        gitx.git(["clean", "-fdq"], t.worktree, check=False)
+
+
 # --- ship and CI -------------------------------------------------------------------
 
 CHECKS = ["ticket-lint", "assumptions", "scope", "rules", "migration", "size", "doc-lint", "verify", "checks"]

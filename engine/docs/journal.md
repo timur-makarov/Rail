@@ -25,6 +25,7 @@ stores state. Never edit it by hand: the guard denies it.
 | `accepted` | Ticket lint first passes on an AUTO ticket; a person approves; an amend takes effect | `by` (`engine`, `person`), `via` (`lint`, `label`, `accept`, `amend`, `merge`), `tier`, `contract`, `done`, `scope_paths`, `note` | The `accepted` state. Ship and CI compare `contract` and `tier` with the ticket: that is the freeze. `via: merge` is a contract pull request that a person merged |
 | `amended` | `rail amend NN` | `contract` (the new hash), `changed` (any of `done_contract`, `scope`, `tier`), `added_paths`, `needs_approval` | When `needs_approval` is true, the ticket waits until a later `accepted` |
 | `claimed` | A claim or a takeover inside `next` | `session`, `takeover`, and in a cloud session `session_url` | The `implementing` state. `next` finds this session's ticket by it, and the pull request ends with the last `session_url` |
+| `base_checks` | `next`, at a ticket's first claim, once setup has passed, unless `[commands] base_checks` is false. Not for a ticket with no `Check:` line | `base` (the base branch's commit, 12 characters), `checks`: each check's `command` and `result` (`red`: it ran and failed; `green`: it ran and passed; `could_not_run`: exit 127 or 126; `timed_out`: past `timeout_secs`) | `rail stats`. Nothing else: it is no step, no attempt and no state |
 | `saved` | `rail save`, the save hooks, and `advance` before a long command | `via` (`save`, `stop`, `pulse`, `advance`), `files` | Shows the ticket is alive: its `at` is what `[claim] stale_minutes` is measured from |
 | `step` | Every step the engine runs (below) | `step`, `status` (`ran`, or `could_not_run` when the shell couldn't start the command: exit 127 or 126), `result` (`pass`, `fail`; always `fail` when it couldn't run), `patch_id`, `counted`, `detail`, `duration_ms`, `cost_usd` | The retry budget and the pull request's Evidence table |
 | `shipped` | Every ship step passed for the current patch | `patch_id`, `head`, `tier`, `size` | CI's "not shipped yet" test, and the `reviewing` and `in-ci` states |
@@ -158,8 +159,9 @@ and the reviewer never writes one except in `repeats`.
 
 ## What reads it afterwards
 
-`rail stats` counts over the journals of merged tickets: tickets by tier, the steps that failed, and the
-review runs with their cost and how each finding ended (`rail docs stats`).
+`rail stats` counts over the journals of merged tickets: tickets by tier, how often every check was green on
+the base before the work, the steps that failed, and the review runs with their cost and how each finding
+ended (`rail docs stats`).
 
 ## What is not in the journal
 
