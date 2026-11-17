@@ -100,7 +100,9 @@ def _split(f):
         "It splits when you can name a first part that is under the cap, meets at least one Check: of the Done Contract"
         " on its own, and leaves the code working. If you can:",
         f"1. Keep the first part on this ticket's branch, {f.t.branch}. Move the rest to a branch of its own, so"
-        f" nothing is lost: git branch split/{nn}-rest, then take the rest out of {f.cwd}. Do not push that branch.",
+        f" nothing is lost: git branch split/{nn}-rest, then take the rest out of {f.cwd}."
+        + (f" Push that branch (git push {f.project.remote} split/{nn}-rest): another session may work the later"
+           " tickets." if f.project.remote else ""),
         f"2. Narrow this ticket's contract to the first part: in {f.cwd}, edit {ticket_path(nn)} (the Done Contract,"
         f" and scope_paths if they shrink), then run rail amend {nn}. On an AUTO ticket the engine accepts the"
         " narrowed contract at once: no person approves it.",
