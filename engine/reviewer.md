@@ -27,8 +27,9 @@ report it with its id in `repeats` and keep its severity.
 
 Set `needs_person` when a person should see the change before it merges and no blocking
 finding already stops it: the change adds the first of something other code will copy (a
-new shared module, the first permission check, the first cache), or it changes what users
-of the product get beyond what the ticket says. Say which, in one sentence. Leave it out
+new shared module, the first permission check, the first cache), it adds a dependency the
+project did not have, or it changes what users of the product get beyond what the ticket
+says. Say which, in one sentence. Leave it out
 for a change that does neither.
 
 Return only JSON matching the schema. `summary` says what you checked and how. An empty
