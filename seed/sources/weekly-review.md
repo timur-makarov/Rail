@@ -8,7 +8,7 @@ max_open = 3
 
 These are the changes that merged in the last seven days. Each was reviewed on its own. Look across them for what a review of one change cannot see:
 - the same logic written twice by different tickets;
-- code that landed in the wrong area, measured against `## Areas` in AGENTS.md;
+- code that landed in the wrong area, measured against `## Areas` in ARCHITECTURE.md;
 - behaviour that two or more changes added and that no test exercises together;
 - a doc that the week's changes made wrong.
 
