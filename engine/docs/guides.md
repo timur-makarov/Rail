@@ -6,23 +6,29 @@ fails when an agent ignores it. The checks stay the enforcement.
 
 ## When the engine names a guide
 
-`[guides]` in `.rail/config.toml` maps a situation to a page. `rail next` adds one line to the brief, such
-as "Guide: read `.claude/skills/rail-debug/SKILL.md` and follow it."
+`[guides]` in `.rail/config.toml` maps a situation to a page, as a path from the repository root.
+`rail next` and `rail advance` add one line to the brief, such as
+`Guide: read .claude/skills/rail-debug/SKILL.md and follow it.`, and the answer's `guide` field names the
+situation and the path.
 
 | Situation | When | Default guide |
 |---|---|---|
-| `start` | The first brief of a claimed ticket | `rail-build`, which ends with `rail-self-check` |
-| `stuck` | The same step failed again | `rail-debug` |
+| `start` | The first `IMPLEMENT` brief of a claimed ticket, once per ticket | `rail-build`, which ends with `rail-self-check` |
+| `stuck` | A step failed the same way twice in a row (the same `signature`) | `rail-debug` |
 | `findings` | A review left findings to answer | `rail-findings` |
-| `conflict` | A rebase stopped on a conflict | `rail-conflict` |
+| `conflict` | A rebase stopped on a conflict in the ticket's worktree (`REBASING`) | `rail-conflict` |
 | `contract` | A ticket came in as a request and needs its contract | `rail-blast-radius` |
-| `split` | A change is over `[size] cap` | `rail-slice` |
+| `split` | Ship offered a split: an AUTO change is over `[size] cap` | `rail-slice` |
 | `setup` | The init task | `rail-verify` |
 
 - To give no guide in a situation, delete its line. To use your own page, point the line at it.
-- The engine records each guide it named as a `guided` event in the ticket's journal, and `rail stats`
-  counts failed steps and review runs for tickets with and without a guide. That is how you tell whether a
-  guide earns its place.
+- The seed config that `rail init` copies has the table above. A config with no `[guides]` table names no
+  guide.
+- A page that isn't there, in the ticket's worktree or at the root, names nothing; `rail doctor` lists it.
+- The engine records the first time it names each guide for a ticket as a `guided` event in the ticket's
+  journal. While a rebase is stopped it writes nothing, so `conflict` has no event, and the init task has no
+  ticket. `rail stats` counts failed steps and review runs for tickets with and without the `start` guide.
+  That is how you tell whether a guide earns its place.
 
 ## Skills a person starts
 

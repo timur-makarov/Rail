@@ -139,7 +139,7 @@ class Facts:
         self.consults = sum(1 for e in events if e.get("event") == "consulted")
         pack = os.path.join(project.root, ".rail", "packs", "consult", "bin", "consult")
         can_consult = os.path.exists(pack) and self.consults < 3
-        self.attempts = attempts
+        self.attempts, self.same = attempts, same
         self.failing = failing if attempts.get(failing) else None  # the step the ticket is failing now, if any
         # Why each step waits for a person: the cap, the attempt after consult, or the budget with no consult to ask.
         self.capped_why = {}

@@ -147,6 +147,13 @@ Then tell Claude Code to work through the backlog. Work you already did on a bra
 with `rail adopt BRANCH`: the agent writes its ticket, and its checks must fail on the base and pass on the
 branch.
 
+**Guides and skills.** `rail init` adds Claude Code skills to `.claude/skills/`: some help a person turn
+an idea into a ticket (`rail-clarity`, `rail-deepen`, `rail-blast-radius`, `rail-grill`, `rail-slice`), and
+some are craft for the work itself, such as building a ticket, debugging a repeated failure or answering
+review findings. The `[guides]` table in `.rail/config.toml` names the right one in the brief when its
+situation comes up. A guide is a hint: nothing fails when an agent ignores it, and `rail stats` shows whether
+it helps. [`guides`](engine/docs/guides.md) has the situations and how to write a page.
+
 Everything else is in the docs that ship with the engine, readable before `rail init` too. `rail docs` lists
 the pages, which are also in [`engine/docs/`](engine/docs):
 
@@ -161,6 +168,7 @@ the pages, which are also in [`engine/docs/`](engine/docs):
 | Cloud sessions, and running with no session open | [`cloud`](engine/docs/cloud.md), [`away`](engine/docs/away.md) |
 | GitHub settings and pull requests | [`github`](engine/docs/github.md) |
 | The guards | [`guards`](engine/docs/guards.md) |
+| Guides named in the brief, and the skills | [`guides`](engine/docs/guides.md) |
 | The journal's files and events | [`journal`](engine/docs/journal.md) |
 | The sweep, sources and the numbers | [`sweep`](engine/docs/sweep.md), [`sources`](engine/docs/sources.md), [`stats`](engine/docs/stats.md) |
 | Every setting and every verb | `rail docs config`, `rail docs cli` |

@@ -53,6 +53,16 @@ READERS = {
     "map.depth": "doc-lint: the directory depth ## Areas must cover",
     "map.ignore": "doc-lint: directories that need no ## Areas row",
     "rules": "ship and CI: structure rules on added lines and files (rail docs rules)",
+    "guides.start": "next and advance: the page named in a ticket's first IMPLEMENT brief, once per ticket. Each"
+                    " guides key is a path from the repository root, or empty for none; the seed config names the"
+                    " rail-* skills, and a config with no [guides] table names none (rail docs guides)",
+    "guides.stuck": "next and advance: the page named in a STEP_FAILED brief once the same failure has repeated",
+    "guides.findings": "next and advance: the page named in the brief that asks for answers to review findings",
+    "guides.conflict": "next and advance: the page named in the brief while a rebase is stopped on a conflict",
+    "guides.contract": "next: the page named in the brief that asks for the contract of a ticket that came in as a"
+                       " request",
+    "guides.split": "advance and next: the page named in the SPLIT brief",
+    "guides.setup": "next: the page named in the init task",
 }
 
 

@@ -170,11 +170,15 @@ def init(cwd):
         "config.toml": ".rail/config.toml",
         "tickets/TEMPLATE.md": ".rail/tickets/TEMPLATE.md",
         "rail.yml": ".github/workflows/rail.yml",
-        "skills/rail-grill/SKILL.md": ".claude/skills/rail-grill/SKILL.md",  # the grilling, as a Claude Code skill
         "sources/weekly-review.md": ".rail/sources/weekly-review.md",  # a source: the week's merges read together
         "ruleset.json": ".rail/ruleset.json",  # for the person to import in GitHub: a session can't set it. It
                                                # names the default branch, so one file fits every repository
     }
+    # The skills, as Claude Code skills: the grilling, and the pages [guides] names in the briefs.
+    skills = os.path.join(seed, "skills")
+    for name in sorted(os.listdir(skills)):
+        if os.path.isfile(os.path.join(skills, name, "SKILL.md")):
+            copies[f"skills/{name}/SKILL.md"] = f".claude/skills/{name}/SKILL.md"
     packs = os.path.join(FRAMEWORK, "packs")
     for name in sorted(os.listdir(packs)) if os.path.isdir(packs) else []:
         dest = os.path.join(rail_dir, "packs", name)

@@ -76,7 +76,7 @@ Make one scheduled task for the repository, on the environment from step 4, with
 
 Each ticket gets a fresh context and the model its tier and its failed attempts call for. The runner decides
 nothing and keeps a small context, so one run can move many tickets. A failed attempt goes to a new worker
-one rung up, with the failure in its brief.
+one rung up, with the failure in its brief. A guide line (`rail docs guides`) is part of the brief, so the worker gets it.
 
 Give it these triggers:
 

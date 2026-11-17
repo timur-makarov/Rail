@@ -43,11 +43,38 @@ def worker(f, action):
     return action
 
 
+# The brief a [guides] situation is named in: a table row, or the init task.
+GUIDED = {"IMPLEMENT": "start", "STEP_FAILED": "stuck", "ANSWER_FINDINGS": "findings", "REBASING": "conflict",
+          "TICKET_LINT": "contract", "SPLIT": "split", "INIT_TASK": "setup"}
+
+
+def guide(project, code, action, f=None):
+    """The [guides] page for the brief's situation: a line in the brief, and the first time for a ticket a `guided`
+    event. A hint only: a page that isn't there names nothing, and `rail doctor` says so. `start` is named once per
+    ticket, and `stuck` only once the same failure has repeated. Returns {situation, path}, or None."""
+    situation = GUIDED.get(code)
+    path = project.config["guides"][situation] if situation else ""
+    given = {e.get("situation") for e in f.t.events if e.get("event") == "guided"} if f else set()
+    if not path or (situation == "start" and "start" in given) or (
+            situation == "stuck" and f.same.get(f.failing, 0) < 2):
+        return None
+    if not os.path.isfile(os.path.join(f.t.worktree if f and f.t.worktree else project.root, path)):
+        return None
+    action["brief"] += f"\n\nGuide: read {path} and follow it."
+    if f and situation not in given and not f.rebasing:  # mid-rebase the engine writes nothing to the ticket
+        ensure_local(project, f.t)
+        project.append_events(f.t, [event(f.id, "guided", situation=situation, path=path)], f"guide: {situation}")
+    return {"situation": situation, "path": path}
+
+
 def from_facts(f, steps_=None, code=None, **extra):
     row_code, owner, action = first_match(f)
     worker(f, action)
     if owner == "human":
         label_wait(f.project, f, row_code)  # the person's inbox is this label, whichever command met the wait
+    named = guide(f.project, row_code, action, f)
+    if named:
+        extra["guide"] = named
     cwd = "." if row_code == "MERGE" else f.cwd  # the merge removes the worktree, so it runs from the project's root
     return answer(f.id, f.state, owner, action, code or row_code, steps_, cwd, tier=f.tier, **extra)
 
@@ -1149,8 +1176,10 @@ def cmd_advance(project, args):
                 code_, owner_, action_ = first_match(nf)
                 if owner_ == "human":
                     return from_facts(nf, receipts)
-                return answer(nn, nf.state, "agent", worker(nf, {"kind": "agent_task", "brief": brief}), "STEP_FAILED",
-                              receipts, nf.cwd, tier=nf.tier)
+                action = worker(nf, {"kind": "agent_task", "brief": brief})
+                named = guide(project, "STEP_FAILED", action, nf)
+                return answer(nn, nf.state, "agent", action, "STEP_FAILED", receipts, nf.cwd, tier=nf.tier,
+                              **({"guide": named} if named else {}))
             update_pr(project, nf, receipts)
             result = from_facts(nf, receipts)
             if advice:
@@ -1296,7 +1325,9 @@ def init_task(project):
         return None
     from .init import INIT_TASK, INIT_TASK_CLOUD
     brief = (INIT_TASK_CLOUD if cloud() else INIT_TASK).format(base=project.base, depth=project.config["map"]["depth"])
-    return answer(owner="agent", code="INIT_TASK", action={"kind": "agent_task", "brief": brief}, cwd=".")
+    action = {"kind": "agent_task", "brief": brief}
+    named = guide(project, "INIT_TASK", action)  # no ticket, so no event
+    return answer(owner="agent", code="INIT_TASK", action=action, cwd=".", **({"guide": named} if named else {}))
 
 
 # --- saving work in flight ---------------------------------------------------------------

@@ -85,6 +85,11 @@ def checks(project):
         parent = os.path.dirname(parent)
 
     found.append(("config", True, ".rail/config.toml is valid"))  # Project() failed otherwise
+    guides = {key: path for key, path in project.config["guides"].items() if path}
+    if guides:
+        gone = [f"{key} = {path}" for key, path in guides.items() if not os.path.isfile(os.path.join(root, path))]
+        found.append(("guides", not gone, f"the {len(guides)} pages [guides] names are there" if not gone else
+                      f"[guides] names pages that aren't there, so no brief names them: {', '.join(gone)}"))
     from . import sources
     if sources.names(project):
         bad = sources.problems(project)

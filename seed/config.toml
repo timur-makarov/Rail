@@ -64,6 +64,17 @@ command = "claude -p --safe-mode --tools Read,Grep,Glob"
 model = "claude-fable-5-2"                # the model consult runs on; empty is the CLI's default
                                           # point it at another vendor's CLI when you have one; claude is labelled same-model
 
+[guides]                                  # reader: next and advance; a page named in the brief when its situation
+                                          # applies. A hint: nothing fails when it is ignored. Delete a line to give
+                                          # no guide (rail docs guides)
+start = ".claude/skills/rail-build/SKILL.md"
+stuck = ".claude/skills/rail-debug/SKILL.md"
+findings = ".claude/skills/rail-findings/SKILL.md"
+conflict = ".claude/skills/rail-conflict/SKILL.md"
+contract = ".claude/skills/rail-blast-radius/SKILL.md"
+split = ".claude/skills/rail-slice/SKILL.md"
+setup = ".claude/skills/rail-verify/SKILL.md"
+
 [[rules]]                                 # reader: ship and CI; structure rules on added lines (rail docs rules)
 id = "no-new-suppressions"
 forbid = ["eslint-disable", "@ts-ignore", "# noqa", ".skip("]

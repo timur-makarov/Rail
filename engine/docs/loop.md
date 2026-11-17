@@ -18,6 +18,9 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   may ignore them. An unattended session starts one subagent on that model and effort, gives it the brief
   word for word and the `cwd`, and runs `rail advance` itself when the subagent returns (`rail docs cloud`).
   The engine starts no agent.
+- `guide` names the page `[guides]` gives for the brief's situation, such as the start of a ticket or a
+  failure that repeats; the brief's last line then says to read it (`rail docs guides`). It is a hint, and
+  part of the brief, so a subagent that gets the brief word for word gets the guide too.
 - `steps` lists what the command ran: `ran` with `pass` or `fail`, `could_not_run` with `fail` (the shell
   couldn't start the command: it isn't on the machine, or isn't executable), `not_run`, or `unavailable`. A
   skipped step never looks like a pass, and a step that couldn't start never looks like a check that ran.
