@@ -20,8 +20,8 @@ rail advance    the engine checks the work and moves the ticket on, or says what
 ```
 
 For a ticket's work, `rail next` also names a model and effort: a cheaper one for a fresh ticket, one rung
-higher after each failed attempt. A session run unattended hands each brief to a fresh subagent on that model
-and runs `rail advance` itself.
+higher after each failed attempt. An unattended runner, a cloud session a scheduled task starts, hands each
+brief to a fresh subagent on that model and runs `rail advance` itself.
 
 A ticket goes through these states. The engine derives the state each time; the agent can't set it.
 
@@ -99,7 +99,7 @@ that merged with no review, and turns what it finds into tickets. A source does 
 signal, such as failed CI runs or last week's merges: a prompt in `.rail/sources/` that files tickets and
 never edits.
 
-**What Rail leaves to others.** It starts no agents: a session or a scheduled task does. It doesn't say how
+**What Rail leaves to others.** It starts no agents: a session or a cloud scheduled task does. It doesn't say how
 to write, test or debug code: that is the agent's craft. It doesn't deploy: a ticket ends at its merge.
 
 ## Start in a Claude Code cloud session
@@ -143,7 +143,8 @@ need, and the guard asks before `sudo` and other commands that could hurt your m
 ## Use it
 
 Write a ticket like `.rail/tickets/TEMPLATE.md` and run `rail add <file>`, or label a GitHub issue `rail`.
-Then tell Claude Code to work through the backlog. Work you already did on a branch with no ticket comes in
+Then tell Claude Code to work through the backlog, or drive one ticket with `rail next --ticket NN`. A local
+session is for work you are there for; unattended work runs in the cloud (`rail docs cloud`). Work you already did on a branch with no ticket comes in
 with `rail adopt BRANCH`: the agent writes its ticket, and its checks must fail on the base and pass on the
 branch.
 
@@ -165,7 +166,7 @@ the pages, which are also in [`engine/docs/`](engine/docs):
 | Questioning a request into a ticket, from a session or a chat bot | [`grill`](engine/docs/grill.md), [`bots`](engine/docs/bots.md) |
 | The review, findings and the refuter | [`review`](engine/docs/review.md) |
 | States, retries and waits | [`states`](engine/docs/states.md), [`retries`](engine/docs/retries.md) |
-| Cloud sessions, and running with no session open | [`cloud`](engine/docs/cloud.md), [`away`](engine/docs/away.md) |
+| Cloud sessions, and running with no session open | [`cloud`](engine/docs/cloud.md), [`github-runner`](engine/docs/github-runner.md) |
 | GitHub settings and pull requests | [`github`](engine/docs/github.md) |
 | The guards | [`guards`](engine/docs/guards.md) |
 | Guides named in the brief, and the skills | [`guides`](engine/docs/guides.md) |

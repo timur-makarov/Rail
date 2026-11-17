@@ -15,9 +15,9 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   from `[worker] ladder` (`person_ladder` for a PERSON ticket). The rung is the number of failed attempts at
   the step the ticket is failing, 0 when there are none, capped at the last rung; a person's act starts it
   again at 0. With an empty ladder neither is there. A session a person is driving does the brief itself and
-  may ignore them. An unattended session starts one subagent on that model and effort, gives it the brief
-  word for word and the `cwd`, and runs `rail advance` itself when the subagent returns (`rail docs cloud`).
-  The engine starts no agent.
+  may ignore them. An unattended runner, a cloud session a scheduled task starts, starts one subagent on
+  that model and effort, gives it the brief word for word and the `cwd`, and runs `rail advance` itself when
+  the subagent returns (`rail docs cloud`). The engine starts no agent.
 - `guide` names the page `[guides]` gives for the brief's situation, such as the start of a ticket or a
   failure that repeats; the brief's last line then says to read it (`rail docs guides`). It is a hint, and
   part of the brief, so a subagent that gets the brief word for word gets the guide too.

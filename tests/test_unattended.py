@@ -1,4 +1,4 @@
-"""What keeps a backlog moving with nobody at the desk: intake, the red base, the notify hook and the sweep."""
+"""What keeps a backlog moving and tells a person about waits: intake, the red base, the notify hook and the sweep."""
 
 import json
 import os
