@@ -124,3 +124,51 @@ class Stats(RailTest):
         self.assertEqual(answer["stats"]["grilling"]["groups"]["not grilled"]["open"], 1)
         self.assertEqual(list(answer["stats"]["grilling"]["channels"]), ["session"])
         self.assertIn("GRILLING", answer["text"])
+
+
+MUL_CHECK = "python3 -c \"import sys; sys.path.insert(0, 'src'); import mul; assert mul.mul(2, 3) == 6\""
+
+
+class Reverts(RailTest):
+    def test_a_reverted_ticket_and_checks_green_on_the_base_are_counted(self):
+        p = self.fixture()
+        # 1: its only check is already green on the base, so it can't show the work was done.
+        p.add(ticket(check="grep -q add src/calc.py"))
+        p.rail("next")
+        p.fix_calc("1")
+        p.queue_reviews(clean())
+        p.rail("advance", "1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
+        # 2: its check is red on the base.
+        p.add(ticket(title="Add mul", check=MUL_CHECK))
+        p.rail("next")
+        p.write("src/mul.py", "def mul(a, b):\n    return a * b\n", base=p.worktree("2"))
+        p.queue_reviews(clean())
+        p.rail("advance", "2")
+        self.assertEqual(p.rail("advance", "2")["state"], "merged")
+        # A person reverts ticket 1 with git revert: its journal leaves the base branch with its code.
+        p.git("revert", "--no-edit", p.git("log", "--grep=^Ticket: 1$", "--format=%H", "main").strip())
+
+        stats = p.rail("stats")["stats"]
+        self.assertEqual((stats["merged"], stats["tiers"]["AUTO"]["reverted"], stats["tiers"]["PERSON"]["reverted"]),
+                         (2, 1, 0))
+        self.assertEqual(stats["base_checks"], {"tickets": 2, "all_green": 1})
+        text = p.rail("stats", raw=True).stdout
+        self.assertRegex(text, r"\nreverted afterwards +1 +0\n")
+        self.assertIn("Every check already green on the base: 1 of 2 tickets whose checks ran there before the work.",
+                      text)
+
+    def test_a_revert_made_with_githubs_button_counts_by_its_pull_request(self):
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        a.rail("next")
+        a.fix_calc("1")
+        a.rail("advance", "1")
+        github.ci("1-fix-add", "success")
+        self.assertEqual(a.rail("advance", "1")["state"], "merged")
+        self.assertEqual(a.rail("stats")["stats"]["tiers"]["AUTO"]["reverted"], 0)
+        # GitHub's Revert button opens a pull request; its squash says which pull request it reverts.
+        b.git("pull", "--quiet")
+        b.git("commit", "--quiet", "--allow-empty", "-m", 'Revert "1: fix add" (#2)', "-m", "Reverts acme/app#1")
+        b.git("push", "--quiet", "origin", "HEAD:main")
+        self.assertEqual(a.rail("stats")["stats"]["tiers"]["AUTO"]["reverted"], 1)
