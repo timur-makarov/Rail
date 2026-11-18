@@ -49,7 +49,8 @@ rail answer NN F3 parked "a real problem this change didn't cause"
 ```
 
 You can't decline or park a blocking finding: either answer disputes it, and a fresh refuter decides at the
-next `advance`. The refuter sees the location, the claim and the evidence, not your argument. It dismisses
+next `advance`. The refuter's brief has the location, the claim and the evidence, and leaves your argument out. It works in
+the ticket's worktree, so the argument is in the journal there if it looks; make the code show your point. It dismisses
 the finding, parks it (the problem is real, but this change didn't cause it), or upholds it. If it upholds
 the finding and you still can't fix it, a person decides, with `rail answer NN F1 declined "why" --owner`
 or `rail answer NN F1 parked "why" --owner`.

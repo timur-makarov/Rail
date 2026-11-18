@@ -171,6 +171,21 @@ class Review(RailTest):
         self.assertEqual(approved["reason"]["code"], "MERGE")
         self.assertEqual(p.rail("advance", "1")["state"], "merged")
 
+    def test_the_security_step_says_how_many_blocking_findings_it_sent_to_the_refuter(self):
+        leak = {"severity": "blocking", "file": "src/calc.py", "claim": "The result is logged with the user's token."}
+        for name, seat, detail in (("leak", found(leak), "run 2: 0 blocking, 1 more blocking to the refuter, 1 findings"),
+                                   ("quiet", clean(), "run 2: 0 blocking, 0 findings")):
+            with self.subTest(seat=name):
+                p = self.fixture(name=name)
+                p.add(ticket(tier="PERSON"))
+                p.rail("accept", "1")
+                p.rail("next")
+                p.fix_calc("1")
+                p.queue_reviews(clean(), seat, clean("Nothing is logged at all."))
+                ready = p.rail("advance", "1")
+                security = [s for s in ready["steps"] if s["step"] == "security"][-1]
+                self.assertEqual((security["result"], security["detail"]), ("pass", detail))
+
     def test_invalid_output_fails_the_step(self):
         p = self.fixture()
         self.medium(p)

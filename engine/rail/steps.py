@@ -285,7 +285,9 @@ def base_fails_verify(project):
             run_shell(project.config["commands"]["setup"], path, {"RAIL_TICKET": ""}, timeout)
         code, output, _ = run_shell(project.config["commands"]["verify"], path, {"RAIL_TICKET": ""}, timeout)
         # verify that can't start on the base proves nothing about the base: the ticket's own failure stands
-        return None if code == 0 or could_not_run(code) else tail(output)
+        if code is None or code == 0 or could_not_run(code):  # None: it timed out, which proves nothing either
+            return None
+        return tail(output) or f"verify exits {code} on the base branch and prints nothing."
 
 
 def ship(project, f, run):

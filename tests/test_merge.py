@@ -115,6 +115,19 @@ class Ship(RailTest):
         p.write("src/report.py", "def report():\n    return 0\n", base=p.worktree("1"))
         self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")
 
+    def test_a_verify_that_fails_on_the_base_too_and_prints_nothing_is_still_a_red_base(self):
+        # grep -q exits 1 in silence, on the base and on the change: no output must not read as green on the base.
+        p = self.fixture(config=CONFIG.replace("python3 -m py_compile src/calc.py", "grep -q total src/calc.py"))
+        p.add(ticket())
+        p.rail("next")
+        p.fix_calc("1")
+        failed = p.rail("advance", "1", expect=3)
+        self.assertEqual(failed_step(failed), ("verify", "red base"))
+        self.assertIn("verify fails on the base branch too", failed["action"]["brief"])
+        recorded = [e for e in journal(p) if e["event"] == "step" and e["step"] == "verify"][-1]
+        self.assertEqual((recorded["result"], recorded["counted"]), ("fail", False))
+        self.assertEqual(p.rail("next", "--ticket", "1")["reason"]["code"], "RED_BASE")
+
     def test_a_check_that_runs_past_timeout_secs_fails_with_timeout(self):
         p = self.fixture(config=CONFIG.replace("timeout_secs = 60", "timeout_secs = 2"))
         p.add(ticket(check="sleep 30"))
@@ -207,6 +220,27 @@ class RemoteMerge(RailTest):
         github.update(lambda s: s.pop("merge_lands_later"))
         github.person_merges(1)  # the person lands it
         self.assertEqual(a.rail("status")["tickets"][0]["state"], "merged")
+
+    def test_a_merge_that_never_lands_keeps_its_own_reason_once_the_wait_is_labelled(self):
+        # The engine labels every wait rail:needs-you; the label must not turn the failed merge into a person's hold.
+        a, b, github = self.github_pair()
+        more_github(github)
+        github.update(lambda s: s.__setitem__("merge_lands_later", True))
+        shipped(a)
+        github.ci("1-fix-add", "success")
+        self.assertEqual(a.rail("advance", "1")["reason"]["code"], "MERGE_REQUESTED")
+        note = os.path.join(a.root, ".git", "rail", "cache", "merge", "1")
+        with open(note) as f:
+            sha = f.read().split()[0]
+        with open(note, "w") as f:
+            f.write(f"{sha} {int(time.time()) - 700}")  # ten minutes pass and the merge hasn't landed
+        a.rail("next")
+        self.assertIn("rail:needs-you", github.pr(1)["labels"])
+        waiting = a.rail("next")
+        self.assertEqual((waiting["owner"], [w["needs"] for w in waiting["waits"]]), ("human", ["MERGE_FAILED"]))
+        self.assertIn("was requested and hasn't landed", waiting["waits"][0]["brief"])
+        self.assertNotIn("holds ticket 1", waiting["waits"][0]["brief"])
+        self.assertEqual(a.rail("status")["tickets"][0]["note"], "waiting: merge failed")
 
     def test_a_merge_refused_for_a_conflict_that_came_meanwhile_sends_the_ticket_back_to_the_agent(self):
         a, b, github = self.github_pair()

@@ -73,6 +73,24 @@ class Consult(RailTest):
         self.assertIn("'checks' failed the same way 2 times in a row ([retry] budget)", stuck["action"]["brief"])
         self.assertEqual(len(events(p, "consulted")), 3)
 
+    def test_when_consult_says_stop_the_ticket_waits_for_a_person_at_once(self):
+        p = self.fixture()
+        p.write(".rail/packs/consult/bin/consult",
+                '#!/bin/sh\ncat > /dev/null\necho \'{"verdict": "stop", "advice": "The check contradicts the Why."}\'\n')
+        os.chmod(p.path(".rail", "packs", "consult", "bin", "consult"), 0o755)
+        p.git("add", "-A")
+        p.git("commit", "--quiet", "-m", "a consult pack that says stop")
+        p.add(ticket())
+        p.rail("next")
+        p.rail("advance", "1", expect=3)
+        second = p.rail("advance", "1", expect=3)  # the same failure again: the budget, and consult is asked
+        self.assertEqual([e["verdict"] for e in events(p, "consulted")], ["stop"])
+        self.assertEqual((second["owner"], second["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertIn("'checks' failed the same way 2 times in a row, and consult said a person must decide"
+                      " (its advice is in .rail/journal/1-advice.md) ([retry] budget)", second["action"]["brief"])
+        self.assertIn("The check contradicts the Why.", p.git("show", "1-fix-add:.rail/journal/1-advice.md"))
+        self.assertEqual(p.rail("next")["owner"], "human")  # no further attempt is offered
+
     def test_a_consult_pack_that_answers_nothing_readable_counts_as_stop(self):
         p = self.fixture()
         p.write(".rail/packs/consult/bin/consult", '#!/bin/sh\necho "consult: no model is configured"\n')
@@ -82,14 +100,32 @@ class Consult(RailTest):
         p.add(ticket())
         p.rail("next")
         p.rail("advance", "1", expect=3)
-        second = p.rail("advance", "1", expect=3)
-        self.assertEqual((second["owner"], second["reason"]["code"]), ("agent", "STEP_FAILED"))
-        self.assertIn("consult says stop: The consult pack failed: consult: no model is configured",
-                      second["action"]["brief"])
-        self.assertEqual([e["verdict"] for e in events(p, "consulted")], ["stop"])
         stuck = p.rail("advance", "1", expect=3)
+        self.assertEqual([e["verdict"] for e in events(p, "consulted")], ["stop"])
         self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "RETRY_CAP"))
-        self.assertIn("then once more after consult", stuck["action"]["brief"])
+        self.assertIn("consult said a person must decide", stuck["action"]["brief"])
+        self.assertIn("The consult pack failed: consult: no model is configured",
+                      p.git("show", "1-fix-add:.rail/journal/1-advice.md"))
+
+    def test_consults_brief_leaves_out_the_workers_own_story(self):
+        # The worker writes ## Look at; consult judges from the ticket and the diff, not from the worker's account.
+        p = self.fixture()
+        saved = os.path.join(self.tmp, "consult-request.json")
+        p.write(".rail/packs/consult/bin/consult",
+                f'#!/bin/sh\ncat > "{saved}"\necho \'{{"verdict": "proceed", "advice": "Go on."}}\'\n')
+        os.chmod(p.path(".rail", "packs", "consult", "bin", "consult"), 0o755)
+        p.git("add", "-A")
+        p.git("commit", "--quiet", "-m", "a consult pack that keeps its request")
+        p.add(ticket(body="\n## Look at\nI am sure the sign flip is the only bug.\n\n"
+                          "## Out of scope\nMultiplication stays as it is.\n"))
+        p.rail("next")
+        self.assertIn("consult says proceed", p.rail("consult", "1", "Is a + b the right fix?")["advice"])
+        with open(saved) as f:
+            text = json.load(f)["ticket_text"]
+        self.assertIn("add subtracts instead of adding.", text)  # ## Why
+        self.assertIn("Multiplication stays as it is.", text)  # the section after ## Look at stays
+        self.assertNotIn("## Look at", text)
+        self.assertNotIn("I am sure the sign flip is the only bug.", text)
 
 
 class Ladder(RailTest):

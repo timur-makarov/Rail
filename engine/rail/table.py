@@ -158,7 +158,9 @@ def _stuck(f, step):
     """Why a step waits for a person: the same failure at the budget, or the cap on failures of any kind."""
     if f.capped_why[step] == "cap":
         return f"'{step}' failed {f.attempts[step]} times since it last passed, whatever the output ([retry] cap)"
-    after = ", then once more after consult" if f.capped_why[step] == "consulted" else ""
+    after = (", then once more after consult" if f.capped_why[step] == "consulted" else
+             f", and consult said a person must decide (its advice is in .rail/journal/{f.id}-advice.md)"
+             if f.capped_why[step] == "stop" else "")
     return f"'{step}' failed the same way {f.project.config['retry']['budget']} times in a row{after} ([retry] budget)"
 
 
@@ -273,6 +275,10 @@ ROWS = [
      lambda f: f"The refuter upheld {_join(f.ledger.disputed_again())} on ticket {f.id}, and the agent still disputes it."
                f" A person decides: rail answer {f.id} F1 declined \"why\" --owner, rail answer {f.id} F1 parked"
                f" \"why\" --owner when this change didn't cause it, or rail accept {f.id} \"how to fix it\"."),
+    # Before HOLD: the engine labels every wait rail:needs-you, and this one would then read as a person's hold.
+    ("MERGE_FAILED",       "human", "human_wait",  lambda f: f.state == "merge-ready" and _merge_stale(f),
+     lambda f: f"The merge of {_pr(f)} was requested and hasn't landed. A person looks at the pull request, then"
+               f" continues: rail accept {f.id}." + _go(f)),
     ("HOLD",               "human", "human_wait",  lambda f: "rail:needs-you" in f.labels
                                                    and not (f.state == "merge-ready" and not f.auto),
      lambda f: f"A person holds ticket {f.id} with the label rail:needs-you on {_pr(f)}. They continue it with the"
@@ -326,9 +332,6 @@ ROWS = [
     ("CI_WAIT",            "none",  "rest",        lambda f: f.state == "in-ci",
      lambda f: f"Ticket {f.id} shipped; CI runs on {_pr(f)}." if f.pushed else
                f"Ticket {f.id} shipped; its branch isn't pushed to {_pr(f)} yet: run rail advance {f.id}."),
-    ("MERGE_FAILED",       "human", "human_wait",  lambda f: f.state == "merge-ready" and _merge_stale(f),
-     lambda f: f"The merge of {_pr(f)} was requested and hasn't landed. A person looks at the pull request, then"
-               f" continues: rail accept {f.id}." + _go(f)),
     ("MERGE_REQUESTED",    "none",  "rest",        lambda f: f.state == "merge-ready" and _merge_requested(f),
      lambda f: f"The merge of {_pr(f)} is requested; rail next sees it on the base branch once GitHub lands it."),
     ("MERGE",              "agent", "script",      lambda f: f.state == "merge-ready" and (f.auto or f.merge_approved)
