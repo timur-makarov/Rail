@@ -128,6 +128,35 @@ class Consult(RailTest):
         self.assertNotIn("I am sure the sign flip is the only bug.", text)
 
 
+class Checks(RailTest):
+    def test_a_check_line_that_passes_before_one_that_fails_does_not_reset_the_budget(self):
+        # Each Check: line is its own event at the step 'checks'. The first line passes on every ship and the
+        # second fails the same way: that is the same failure in a row, so consult advises and then a person acts.
+        p = self.fixture()
+        p.add(ticket(body="- Check: `test -f src/never.py`\n"))
+        p.rail("next")
+        p.fix_calc("1")
+        first = p.rail("advance", "1", expect=3)
+        self.assertEqual((first["owner"], first["reason"]["code"]), ("agent", "STEP_FAILED"))
+        self.assertEqual(events(p, "consulted"), [])
+        second = p.rail("advance", "1", expect=3)
+        self.assertEqual([(e["trigger"], e["step"]) for e in events(p, "consulted")], [("retry_cap", "checks")])
+        self.assertEqual(second["owner"], "agent")
+        stuck = p.rail("advance", "1", expect=3)
+        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "RETRY_CAP"))
+
+    def test_a_ship_where_every_check_line_passes_resets_the_budget(self):
+        p = self.fixture()
+        p.add(ticket(body="- Check: `test -f src/later.py`\n"))
+        p.rail("next")
+        p.fix_calc("1")
+        p.rail("advance", "1", expect=3)  # the second line fails once
+        p.write("src/later.py", "", base=p.worktree("1"))
+        shipped = p.rail("advance", "1")
+        self.assertEqual(events(p, "consulted"), [])
+        self.assertNotEqual(shipped["owner"], "human")
+
+
 class Ladder(RailTest):
     def test_the_ladder_holds_at_its_last_rung(self):
         p = self.fixture(config=CONFIG + '\n[worker]\nladder = ["model-small:low", "model-big:high"]\n')

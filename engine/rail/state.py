@@ -8,7 +8,8 @@ from .ticket import TIERS, Ticket, highest, lint
 from .util import globs_overlap, match_any, minutes_since
 
 OPEN = ("implementing", "reviewing", "in-ci", "merge-ready")  # claimed and not finished
-SHIP_STEPS = ("rebase", "ticket-lint", "assumptions", "scope", "rules", "migration", "size", "verify", "checks")
+SHIP_STEPS = ("rebase", "ticket-lint", "assumptions", "scope", "rules", "migration", "size", "doc-lint", "verify",
+              "checks")
 
 
 def floor(project, scope):
@@ -102,9 +103,23 @@ class Facts:
         budget, cap = project.config["retry"]["budget"], project.config["retry"]["cap"]
         attempts, same, seen, consulted, since, failing = {}, {}, {}, {}, 0, None
         stopped = set()  # steps where consult, asked at the budget, said that a person must decide
+        passed = None    # a step whose last event passed: its counts reset once the run leaves that step
+
+        def settle():
+            # Each Check: line is its own event at the step 'checks'. A line that passes before a later line
+            # fails is no pass of the step, so a pass resets the counts only when no failure follows it.
+            if passed is not None:
+                attempts[passed] = same[passed] = 0
+                seen.pop(passed, None)
+                consulted.pop(passed, None)
+                stopped.discard(passed)
+
         accepted_at = amended_at = shipped_at = continued_at = -1
         for i, e in enumerate(events):
             kind = e.get("event")
+            if passed is not None and not (kind == "step" and e.get("step") == passed):
+                settle()
+                passed = None
             if kind == "continued" or (kind == "accepted" and e.get("by") == "person"):
                 # A person's act gives a fresh budget and a fresh cap, whether it continues a wait or approves.
                 attempts, same, seen, consulted, since = {}, {}, {}, {}, i
@@ -116,11 +131,10 @@ class Facts:
             elif kind == "step" and e.get("status") in ("ran", "could_not_run"):
                 step = e.get("step")
                 if e.get("result") == "pass":
-                    attempts[step] = same[step] = 0
-                    seen.pop(step, None)
-                    consulted.pop(step, None)
-                    stopped.discard(step)
-                elif e.get("counted", True):
+                    passed = step
+                else:
+                    passed = None
+                if e.get("result") != "pass" and e.get("counted", True):
                     # The same failure as the last one at this step, or a new one, which is progress. An event with
                     # no signature, from an older engine, is the same failure as its neighbour.
                     sig, last = e.get("signature"), seen.get(step)
@@ -141,6 +155,7 @@ class Facts:
                 amended_at = i
             elif kind == "shipped":
                 shipped_at = i
+        settle()
         self.consults = sum(1 for e in events if e.get("event") == "consulted")
         pack = os.path.join(project.root, ".rail", "packs", "consult", "bin", "consult")
         can_consult = os.path.exists(pack) and self.consults < 3
