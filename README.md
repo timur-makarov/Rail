@@ -19,6 +19,10 @@ rail next       the engine picks a ticket, makes its worktree, and says what to 
 rail advance    the engine checks the work and moves the ticket on, or says what failed
 ```
 
+For a ticket's work, `rail next` also names a model and effort: a cheaper one for a fresh ticket, one rung
+higher after each failed attempt. An unattended runner, a cloud session a scheduled task starts, hands each
+brief to a fresh subagent on that model and runs `rail advance` itself.
+
 A ticket goes through these states. The engine derives the state each time; the agent can't set it.
 
 ```text
@@ -38,8 +42,10 @@ person.
 **The engine decides what "done" means.** `rail advance` commits the change and runs the ship checks in
 order: a rebase onto the base branch, ticket lint, open assumptions, scope, structure rules, migration
 fields, size, the architecture map, the project's own `verify` command (tests, lint, scans), and each
-`Check:` line. A failure sends the ticket back with the output. A step may fail twice; then a second
-opinion (`rail consult`) advises once, and after one more failure the ticket waits for a person.
+`Check:` line. A failure sends the ticket back with the output. A failure counts as stuck only when it
+repeats: when a step fails the same way twice in a row, a second opinion (`rail consult`) advises once, and
+after one more failure the ticket waits for a person. Five failures at one step wait for a person whatever
+they were.
 
 **A fresh agent reviews every change, and the author can't steer it.** The engine starts the reviewer
 itself, in the ticket's worktree, with a brief built from the ticket and the diff, and binds the result to
@@ -58,7 +64,9 @@ author's argument. The only changes that skip the reviewer are those to paths yo
 
 A ticket is PERSON when its author says so, when it touches `person_paths` (the paths you name, such as
 auth, payments and infrastructure, plus Rail's own files and the CI workflows) or a migration, or when the
-change grows past `[size] cap` (600 changed lines). The engine raises a tier and never lowers one.
+change grows past `[size] cap` (600 changed lines) and the agent doesn't split it when the first ship offers a
+split, or when the reviewer asks for one. The engine raises a
+tier and never lowers one.
 
 **GitHub is the wall.** Every ticket is a pull request. The `rail` workflow runs `rail ci`, which repeats
 every ship check on the pull request's head and fails when the patch has no complete review. A ruleset makes
@@ -85,10 +93,13 @@ the next ticket.
 **Afterwards you can check what happened.** Each merge is one squash commit with the ticket, the tier, a
 table of every step that ran, and a `Review:` trailer that says who reviewed it. `rail status` lists every
 ticket and what it waits for. `rail stats` counts, over the merged tickets, how many needed a person, how
-many were reverted, which steps failed, what the reviewer cost and how often its findings ended in a fix, and how the grilling went. Once 20 changes have
-merged with no review, a sweep reads them together and turns what it finds into tickets.
+many were reverted, which steps failed, what the reviewer cost and how often its findings ended in a fix, and how the grilling went. Every 20
+merged tickets, a sweep gathers the findings reviewers parked and the checks they proposed, reads any changes
+that merged with no review, and turns what it finds into tickets. A source does the same for any other
+signal, such as failed CI runs or last week's merges: a prompt in `.rail/sources/` that files tickets and
+never edits.
 
-**What Rail leaves to others.** It starts no agents: a session or a scheduled task does. It doesn't say how
+**What Rail leaves to others.** It starts no agents: a session or a cloud scheduled task does. It doesn't say how
 to write, test or debug code: that is the agent's craft. It doesn't deploy: a ticket ends at its merge.
 
 ## Start in a Claude Code cloud session
@@ -132,7 +143,17 @@ need, and the guard asks before `sudo` and other commands that could hurt your m
 ## Use it
 
 Write a ticket like `.rail/tickets/TEMPLATE.md` and run `rail add <file>`, or label a GitHub issue `rail`.
-Then tell Claude Code to work through the backlog.
+Then tell Claude Code to work through the backlog, or drive one ticket with `rail next --ticket NN`. A local
+session is for work you are there for; unattended work runs in the cloud (`rail docs cloud`). Work you already did on a branch with no ticket comes in
+with `rail adopt BRANCH`: the agent writes its ticket, and its checks must fail on the base and pass on the
+branch.
+
+**Guides and skills.** `rail init` adds Claude Code skills to `.claude/skills/`: some help a person turn
+an idea into a ticket (`rail-clarity`, `rail-deepen`, `rail-blast-radius`, `rail-grill`, `rail-slice`), and
+some are craft for the work itself, such as building a ticket, debugging a repeated failure or answering
+review findings. The `[guides]` table in `.rail/config.toml` names the right one in the brief when its
+situation comes up. A guide is a hint: nothing fails when an agent ignores it, and `rail stats` shows whether
+it helps. [`guides`](engine/docs/guides.md) has the situations and how to write a page.
 
 Everything else is in the docs that ship with the engine, readable before `rail init` too. `rail docs` lists
 the pages, which are also in [`engine/docs/`](engine/docs):
@@ -140,15 +161,17 @@ the pages, which are also in [`engine/docs/`](engine/docs):
 | To learn | Read |
 |---|---|
 | The loop, and what `next` and `advance` do | [`loop`](engine/docs/loop.md) |
+| Putting work already on a branch onto the rail | [`adopt`](engine/docs/adopt.md) |
 | How to write a ticket, and the tiers | [`tickets`](engine/docs/tickets.md), [`contract`](engine/docs/contract.md) |
 | Questioning a request into a ticket, from a session or a chat bot | [`grill`](engine/docs/grill.md), [`bots`](engine/docs/bots.md) |
 | The review, findings and the refuter | [`review`](engine/docs/review.md) |
 | States, retries and waits | [`states`](engine/docs/states.md), [`retries`](engine/docs/retries.md) |
-| Cloud sessions, and running with no session open | [`cloud`](engine/docs/cloud.md), [`away`](engine/docs/away.md) |
+| Cloud sessions, and running with no session open | [`cloud`](engine/docs/cloud.md), [`github-runner`](engine/docs/github-runner.md) |
 | GitHub settings and pull requests | [`github`](engine/docs/github.md) |
 | The guards | [`guards`](engine/docs/guards.md) |
+| Guides named in the brief, and the skills | [`guides`](engine/docs/guides.md) |
 | The journal's files and events | [`journal`](engine/docs/journal.md) |
-| The sweep and the numbers | [`sweep`](engine/docs/sweep.md), [`stats`](engine/docs/stats.md) |
+| The sweep, sources and the numbers | [`sweep`](engine/docs/sweep.md), [`sources`](engine/docs/sources.md), [`stats`](engine/docs/stats.md) |
 | Every setting and every verb | `rail docs config`, `rail docs cli` |
 
 ## This repository

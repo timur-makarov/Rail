@@ -23,6 +23,11 @@ Write the whole ticket yourself before you ask anything: Why, Done Contract, `sc
 scope, Assumptions. A good check fails today and passes once the work is done: a test that names the new
 behaviour, not "the tests pass".
 
+Read the request's small words before you draft. "Just", "only" and "quick" set a ceiling on the scope.
+"Still" and "again" mean an earlier fix did not hold, so the check must name the cause and not only the
+symptom. When the request names a mechanism ("add a retry"), work out the problem it is meant to solve and
+write the check for that problem; if the mechanism does not fit it, say so in your first question.
+
 ## 3. Ask only what changes the contract
 
 A question is worth asking when its answer changes a `Check:` line, `scope_paths`, the tier, or what is out

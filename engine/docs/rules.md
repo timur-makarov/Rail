@@ -22,4 +22,7 @@ fix = "Create migrations with make migration."
 - `allow` lists paths the rule skips.
 - A rule prevents mistakes; real dependency analysis belongs in `verify`, with any checker the project likes.
 - A finding a rule already covers is not a review finding.
-- The seed ships one rule: no new suppressions or skipped tests.
+- The seed ships two rules: no new suppressions or skipped tests, and a `SHORTCUT` marker must carry its
+  ticket's number. The marker is how an agent says "I cut this corner on purpose": `SHORTCUT(41): linear
+  scan, fine under 1,000 rows; index it past that`. A rule is a text match, so it refuses the marker without
+  a number; it can't find a shortcut nobody marked.

@@ -1,6 +1,7 @@
 # Running from GitHub events
 
-Rail starts no agents; a host does. To run the loop from GitHub instead of a session you keep open:
+Rail starts no agents; a host does. Unattended work runs in the cloud, started on a schedule or by a GitHub
+event, in one of two ways:
 
 - **Claude Code scheduled tasks:** a cloud scheduled task runs the loop prompt on a schedule, or on a GitHub
   event such as an issue labelled `rail`. Each run is a fresh session on a fresh clone, and a bare

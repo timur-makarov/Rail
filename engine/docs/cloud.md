@@ -65,10 +65,22 @@ starts from the last save.
 
 ## Run with no session open
 
+Unattended work runs in the cloud, and only there: a scheduled task starts a runner session, on a schedule
+or on a GitHub event. A session on your own machine is for work you drive yourself: free work, grilling a
+ticket, `rail next --ticket NN`, `rail adopt`.
+
 Make one scheduled task for the repository, on the environment from step 4, with this prompt:
 
-    Run `rail next` and do what it says, then `rail advance`, and repeat until `rail next` answers that
-    only a person can act or that there is no work. Then say which tickets wait for a person, and stop.
+    Run `rail next --json`. When `action.kind` is `agent_task` and the answer names `action.model`, start
+    one subagent on that model and effort. Give it `action.brief` word for word, tell it to work in `cwd`,
+    and tell it to stop when the brief is done without running `rail advance`. When it returns, run
+    `rail advance --json` yourself. For any other `action.kind`, do what the answer says yourself. Repeat
+    until `rail next` answers that only a person can act or that there is no work. Then say which tickets
+    wait for a person, and stop.
+
+Each ticket gets a fresh context and the model its tier and its failed attempts call for. The runner decides
+nothing and keeps a small context, so one run can move many tickets. A failed attempt goes to a new worker
+one rung up, with the failure in its brief. A guide line (`rail docs guides`) is part of the brief, so the worker gets it.
 
 Give it these triggers:
 
@@ -80,10 +92,28 @@ Each run is a fresh session, and the section above is why that is enough. For mo
 more sessions: claims are taken on the remote, so two never take the same ticket. `rail status --json`
 lists the tickets whose owner is `agent`.
 
+A scheduled task starts in auto mode. The loop's own commands are allowed by rule, so auto mode doesn't
+review them (`rail docs guards`), and in a cloud session the guard asks nothing, so no run stops for an
+answer. To run from GitHub Actions instead, see `rail docs github-runner`.
+
+## Run a source on a schedule
+
+A [source](sources.md) turns a signal, such as failed CI runs, into tickets. Make one scheduled task for
+each source, on the same environment, with this prompt:
+
+    Run `rail source NAME --json` and do its brief.
+
+The source only files tickets. The runner above picks them up on its own schedule, as any other ticket.
+
 ## Where your acts go
 
 - **Your inbox** is one saved search: `is:open label:rail:needs-you`. Every wait gets the label as soon as
-  any session sees it.
+  any session sees it. GitHub doesn't notify you about pull requests made with your own token, so the search
+  is how you find every wait.
+- **Waits are named.** A runner ends its turn by saying which tickets wait for a person, and
+  the Claude app notifies you. In a session on your own machine, the `notify` hook pings the desktop once
+  for each new wait while Claude sits idle.
+- **Answer from any device.** Every act below is on GitHub, so the GitHub app or a browser is enough.
 - **Approve or continue:** add the label `rail:go` to the pull request. A comment you leave there reaches
   the agent as your note. Don't merge a contract pull request: it holds only the contract. If you do, Rail
   takes it as your approval and opens a new pull request for the work.

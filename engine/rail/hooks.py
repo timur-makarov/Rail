@@ -209,7 +209,7 @@ def pulse():
 
 NEEDS = {
     "APPROVE_CONTRACT": "approve the contract", "APPROVE_AMEND": "approve the amended contract",
-    "MERGE_BY_PERSON": "merge", "RETRY_CAP": "stuck at the retry budget", "STUCK_REVIEW": "the review timed out",
+    "MERGE_BY_PERSON": "merge", "RETRY_CAP": "stuck at the retry budget or cap", "STUCK_REVIEW": "the review timed out",
     "FINDING_UPHELD": "decide a finding", "HOLD": "held", "MERGE_FAILED": "the merge failed",
 }
 

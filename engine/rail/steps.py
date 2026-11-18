@@ -1,7 +1,11 @@
 """The steps the engine runs: claim and setup, ship, the local merge and the PR description."""
 
+import contextlib
+import hashlib
 import os
+import re
 import shutil
+import tempfile
 from pathlib import Path
 
 from . import doclint, gitx, rules
@@ -13,6 +17,20 @@ from .util import MISSING_HELP, could_not_run, match_any, minutes_since, run_she
 # A step's status: it ran and passed or failed, or the shell could not start its command (could_not_run, a failure
 # that checked nothing). Both are attempts, and both count toward the step's retry budget.
 TRIED = ("ran", "could_not_run")
+REVIEW_STEPS = ("review", "security", "refuter")  # every failed run at one of these is the same failure: plain count
+
+
+def signature(step, output):
+    """The step and a hash of its failure's output, normalised so that the same failure gives the same signature
+    across runs: what changes from run to run (numbers, hashes, paths, temp folders) and spacing are left out."""
+    text = "" if step in REVIEW_STEPS else tail(output).lower()
+    text = re.sub(r"(?<![\w.~-])/[^\s:'\"(),]+", "<path>", text)  # absolute paths, temp folders among them
+    text = re.sub(r"\btmp[\w.-]*", "<tmp>", text)                   # temp names: tmpab12_cd, tmp.x8Q2
+    text = re.sub(r"\b(?:0x[0-9a-f]+|(?=[a-f]*\d)[0-9a-f]{7,})\b", "<hex>", text)  # commits, ids, addresses
+    text = re.sub(r"\d+", "<n>", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return f"{step}:{hashlib.sha256(text.encode()).hexdigest()[:12]}"
+
 
 class Run:
     """The receipt of one command: the steps it ran, their events, and the first failure."""
@@ -41,6 +59,8 @@ class Run:
                 fields["duration_ms"] = duration_ms
             if cost_usd is not None:
                 fields["cost_usd"] = cost_usd
+            if not passed:
+                fields["signature"] = signature(step, output or detail or "")
             self.events.append(event(self.t.id, "step", **fields))
         if detail:
             receipt["detail"] = detail
@@ -124,21 +144,39 @@ def base_checks(project, t):
     if not commands or not project.config["commands"]["base_checks"] or t.last("base_checks"):
         return None
     head = gitx.rev(t.ref, project.root)
-    timeout = project.config["commands"]["timeout_secs"]
     try:
-        results = []
-        for command in commands:
-            code, _, _ = run_shell(command, t.worktree, {"RAIL_TICKET": t.id, "RAIL_BASE": project.base_ref}, timeout)
-            result = ("timed_out" if code is None else "could_not_run" if could_not_run(code)
-                      else "green" if code == 0 else "red")
-            results.append({"command": command, "result": result})
-        return event(t.id, "base_checks", base=gitx.rev(project.base_ref, project.root)[:12], checks=results)
+        return event(t.id, "base_checks", base=gitx.rev(project.base_ref, project.root)[:12],
+                     checks=run_checks(project, commands, t.worktree, t.id))
     except Exception:
         return None  # a fact the engine couldn't gather; the claim goes on without it
     finally:
         # Checks may write files: the worktree goes back to what it was, as after a review.
         gitx.git(["reset", "--quiet", "--hard", head], t.worktree, check=False)
         gitx.git(["clean", "-fdq"], t.worktree, check=False)
+
+
+def run_checks(project, commands, cwd, nn):
+    """Run each check once in `cwd`: per check, red, green, could_not_run or timed_out."""
+    timeout = project.config["commands"]["timeout_secs"]
+    results = []
+    for command in commands:
+        code, _, _ = run_shell(command, cwd, {"RAIL_TICKET": nn, "RAIL_BASE": project.base_ref}, timeout)
+        result = "timed_out" if code is None else "could_not_run" if could_not_run(code) else "green" if code == 0 else "red"
+        results.append({"command": command, "result": result})
+    return results
+
+
+@contextlib.contextmanager
+def scratch(project, commit):
+    """A throwaway worktree at `commit`, detached, with the files .worktreeinclude lists. Removed afterwards."""
+    path = tempfile.mkdtemp(prefix="rail-scratch-")
+    gitx.git(["worktree", "add", "--quiet", "--detach", path, commit], project.root)
+    try:
+        copy_includes(project, path)
+        yield path
+    finally:
+        gitx.git(["worktree", "remove", "--force", path], project.root, check=False)
+        shutil.rmtree(path, ignore_errors=True)
 
 
 # --- ship and CI -------------------------------------------------------------------
@@ -151,10 +189,11 @@ def _stop(run, step):
     return None
 
 
-def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None):
+def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, offer=False):
     """The checks ship and CI share, in order, stopping at the first failure.
 
-    Returns the tier the change needs (it may rise), or None when a check failed.
+    Returns the tier the change needs (it may rise), or None when a check failed or, with `offer`, when an AUTO change
+    over [size] cap is offered a split (a split_offered event, and no failure).
     """
     errors = lint(ticket, expect_id=nn)
     if accepted and not errors:
@@ -206,11 +245,16 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None):
     cap = project.config["size"]["cap"] if tier == "AUTO" else None  # a PERSON change has no cap: a person reads it
     run.record("size", True, patch_id, f"size {count}/{cap}" if cap else f"size {count}")
     sized = rules.size_tier(project, tier, count)
+    run.size = count
+    if rank(sized) > rank(tier) and offer:
+        # Once per ticket, before a person has to merge it: the agent may split the change. No step failed, so it
+        # spends no attempt; an advance with the change as it is raises the tier below.
+        run.events.append(event(nn, "split_offered", patch_id=patch_id, size=count, cap=cap))
+        return _stop(run, "size")
     if rank(sized) > rank(tier):
         run.events.append(event(nn, "tier_raised", **{"from": tier, "to": sized, "reason": "size",
                                                      "detail": f"{count} changed lines, over the cap of {cap}"}))
         tier = sized
-    run.size = count
 
     if gitx.read_blobs([f"{ref}:ARCHITECTURE.md"], project.root).get(f"{ref}:ARCHITECTURE.md") is None:
         run.not_run("doc-lint")
@@ -235,21 +279,13 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None):
 
 def base_fails_verify(project):
     """Run verify once more on the base branch, in a scratch worktree. Returns its output when it fails there too."""
-    import tempfile
-
-    tip = gitx.rev(project.base_ref, project.root)
-    path = tempfile.mkdtemp(prefix="rail-base-")
-    gitx.git(["worktree", "add", "--quiet", "--detach", path, tip], project.root)
-    try:
-        copy_includes(project, path)
+    with scratch(project, gitx.rev(project.base_ref, project.root)) as path:
         timeout = project.config["commands"]["timeout_secs"]
         if project.config["commands"]["setup"]:
             run_shell(project.config["commands"]["setup"], path, {"RAIL_TICKET": ""}, timeout)
         code, output, _ = run_shell(project.config["commands"]["verify"], path, {"RAIL_TICKET": ""}, timeout)
         # verify that can't start on the base proves nothing about the base: the ticket's own failure stands
         return None if code == 0 or could_not_run(code) else tail(output)
-    finally:
-        gitx.git(["worktree", "remove", "--force", path], project.root, check=False)
 
 
 def ship(project, f, run):
@@ -275,8 +311,9 @@ def ship(project, f, run):
 
     patch_id = project.patch_id(ref)
     text = gitx.read_blobs([f"{ref}:{ticket_path(t.id)}"], project.root)[f"{ref}:{ticket_path(t.id)}"]
-    tier = check(project, t.id, Ticket(text or ""), ref, wt, f.tier, run, patch_id, accepted=f.accepted)
-    if tier is None and run.failure[0] == "verify" and run.events[-1].get("status") != "could_not_run":
+    tier = check(project, t.id, Ticket(text or ""), ref, wt, f.tier, run, patch_id, accepted=f.accepted,
+                 offer=not t.last("split_offered"))
+    if tier is None and run.failure and run.failure[0] == "verify" and run.events[-1].get("status") != "could_not_run":
         # A red base spends no budget: two tickets that each pass can break main together. A verify that could
         # not start is the machine's lack, not the base's: it is never taken for a red base.
         red = base_fails_verify(project)
@@ -345,6 +382,7 @@ def describe(project, t, ticket, tier):
         f"Migrations: {ticket.get('reversibility')}; rollback: {ticket.get('rollback')}.")
     risk = (f"{tier}. Touches {', '.join(ticket.scope)}. {migrations} "
             f"Changed lockfiles: {', '.join(lockfiles) or 'none'}.")
+    risk += "".join(f"\n\nThe reviewer asked for a person: {said}" for said in ledger.asked_for_person())
     external = ticket.get("external_id", "") or ""
     body = [
         "## Why", f"{ticket.sections.get('Why', '')} (ticket {t.id})", "",

@@ -10,7 +10,7 @@ and `rail doctor` reports when they are missing.
 - ask before `rail answer ... --owner`, which records a person's decision on a finding.
 
 **The loop runs without asking.** Allow rules cover the agent's own verbs (`rail next`, `advance`, `add`,
-`answer`, `amend`, `status`, `stats`, `context`, `docs`, `doctor`, `intake`, `sweep`, `consult`, `save`,
+`adopt`, `answer`, `amend`, `status`, `stats`, `context`, `docs`, `doctor`, `intake`, `sweep`, `source`, `consult`, `save`,
 `provision`) and
 `gh run watch`.
 A matching allow rule is decided before any prompt and before auto mode's classifier, so the loop isn't

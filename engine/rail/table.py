@@ -58,8 +58,8 @@ def _size(f):
     count, _ = rules.size(f.project, None, f.worktree)
     line = f"size {count}/{cap}"
     if count >= 0.8 * cap:
-        line += (": past 80% of the cap. Split what is left into a new ticket (rail add); over the cap, the ticket"
-                 " becomes PERSON, and a person has to merge it")
+        line += (": past 80% of the cap. Split what is left into a new ticket (rail add); over the cap, ship offers"
+                 " a split once, then the ticket becomes PERSON, and a person has to merge it")
     return line
 
 
@@ -89,6 +89,30 @@ def _implement(f):
         f"When the Done Contract holds, run: rail advance {f.id}",
     ]
     return "\n".join(lines) + _save_note(f) + _findings(f, "Open review findings:") + _note(f)
+
+
+def _split(f):
+    e, nn = f.split, f.id
+    return "\n".join([
+        f"This change is {e.get('size')} lines, over [size] cap of {e.get('cap')}. A reviewer checks a change of that"
+        " size badly, so an AUTO ticket over the cap goes to a person. Before that, see whether it splits into tickets"
+        " that each stand alone.", "",
+        "It splits when you can name a first part that is under the cap, meets at least one Check: of the Done Contract"
+        " on its own, and leaves the code working. If you can:",
+        f"1. Keep the first part on this ticket's branch, {f.t.branch}. Move the rest to a branch of its own, so"
+        f" nothing is lost: git branch split/{nn}-rest, then take the rest out of {f.cwd}."
+        + (f" Push that branch (git push {f.project.remote} split/{nn}-rest): another session may work the later"
+           " tickets." if f.project.remote else ""),
+        f"2. Narrow this ticket's contract to the first part: in {f.cwd}, edit {ticket_path(nn)} (the Done Contract,"
+        f" and scope_paths if they shrink), then run rail amend {nn}. On an AUTO ticket the engine accepts the"
+        " narrowed contract at once: no person approves it.",
+        f"3. File one ticket for each remaining part with rail add: its own Check: lines, after = [\"{nn}\"] (or the"
+        f" part before it), a line in ## Request saying it was split from ticket {nn}, and under ## Look at the branch"
+        f" that holds its code, split/{nn}-rest.",
+        f"4. Run rail advance {nn}.", "",
+        f"If it does not split (the parts would not work alone, or each Check: needs all of it), change nothing and run"
+        f" rail advance {nn}: the ticket becomes PERSON and a person merges it.",
+    ]) + _note(f)
 
 
 def _assumptions(f):
@@ -130,12 +154,18 @@ def _answer(f):
             f" reviews it again." + _findings(f, "Findings:") + _note(f))
 
 
+def _stuck(f, step):
+    """Why a step waits for a person: the same failure at the budget, or the cap on failures of any kind."""
+    if f.capped_why[step] == "cap":
+        return f"'{step}' failed {f.attempts[step]} times since it last passed, whatever the output ([retry] cap)"
+    after = ", then once more after consult" if f.capped_why[step] == "consulted" else ""
+    return f"'{step}' failed the same way {f.project.config['retry']['budget']} times in a row{after} ([retry] budget)"
+
+
 def _capped(f):
-    steps = _join(f.capped)
-    return (f"Ticket {f.id} used its retry budget at '{steps}' ({f.project.config['retry']['budget']} attempts, then the"
-            f" attempt after consult).{_could_not_run(f, f.capped)} A person looks at the journal and the branch"
-            f" {f.t.name}, then continues it: rail accept {f.id} \"what to do differently\". That gives a fresh"
-            f" budget." + _go(f))
+    return (f"Ticket {f.id} is stuck: {'; '.join(_stuck(f, s) for s in f.capped)}.{_could_not_run(f, f.capped)} A person"
+            f" looks at the journal and the branch {f.t.name}, then continues it: rail accept {f.id} \"what to do"
+            f" differently\". That gives a fresh budget and a fresh cap." + _go(f))
 
 
 def _pr(f):
@@ -187,10 +217,11 @@ def _merge_stale(f):
 
 
 def _merge_by_person(f):
+    asked = "".join(f"\nThe reviewer asked for a person: {said}" for said in f.ledger.asked_for_person())
     if f.project.remote:
-        return f"Ticket {f.id} ({f.tier}) is ready: a person reviews and merges {_pr(f)}."
+        return f"Ticket {f.id} ({f.tier}) is ready: a person reviews and merges {_pr(f)}." + asked
     return (f"Ticket {f.id} ({f.tier}) is ready to merge. A person reviews branch {f.t.name} and approves the merge:"
-            f" rail accept {f.id}. The engine then merges it.")
+            f" rail accept {f.id}. The engine then merges it." + asked)
 
 
 ROWS = [
@@ -256,6 +287,10 @@ ROWS = [
      lambda f: f"rail next --ticket {f.id}"),
     ("SWEEP_RUN",          "agent", "script",      lambda f: f.state == "implementing" and f.sweep and not f.sweep_done,
      lambda f: "rail sweep"),
+    # A sweep that found nothing has no task for the agent: it ships and merges, which moves the Sweep: marker.
+    ("SWEEP_EMPTY",        "agent", "script",      lambda f: f.state == "implementing" and f.sweep and f.sweep_empty
+                                                   and not f.dirty and not f.last_fail,
+     lambda f: f"rail advance {f.id}"),
     ("SWEEP_TICKETS",      "agent", "agent_task",  lambda f: f.state == "implementing" and f.sweep and not f.dirty
                                                    and not f.last_fail,
      lambda f: f"The sweep ran: read .rail/journal/{f.id}-summary.md in {f.cwd}. Open a ticket with rail add for each"
@@ -273,6 +308,8 @@ ROWS = [
                f" resolve the conflict in {f.cwd} and run it again."),
     ("RED_CHECK",          "agent", "agent_task",  lambda f: f.state == "implementing" and f.ci == "red" and not f.dirty,
      _red_check),
+    ("SPLIT",              "agent", "agent_task",  lambda f: f.state == "implementing" and f.split and not f.dirty,
+     _split),
     ("STEP_FAILED",        "agent", "agent_task",  lambda f: f.state == "implementing" and f.last_fail and not f.dirty,
      _step_failed),
     ("IMPLEMENT",          "agent", "agent_task",  lambda f: f.state == "implementing",

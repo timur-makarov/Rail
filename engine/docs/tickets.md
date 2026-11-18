@@ -38,9 +38,10 @@ external_id = "github#123"
   its branch fails the scope check: a new ticket comes in through `rail add`, on its own branch.
 - **The tier** says who accepts the contract and who merges. On `AUTO` the engine does both, after the
   checks and the review. On `PERSON` a person approves the contract and merges. Write `PERSON` when a person
-  should see this change. The engine makes a ticket PERSON by itself in three cases: its `scope_paths` reach
-  `person_paths` or `migration_paths` (at add), it changes a file on those paths (at ship), or it changes
-  more lines than `[size] cap` (at ship). A tier never goes down. Tickets touching `migration_paths` must
+  should see this change. The engine makes a ticket PERSON by itself in four cases: its `scope_paths` reach
+  `person_paths` or `migration_paths` (at add), it changes a file on those paths (at ship), it changes
+  more lines than `[size] cap` (at ship), or the reviewer asks for a person (at review). Over the cap, the
+  first ship offers a split instead (`rail docs loop`); only the next ship over the cap raises the tier. A tier never goes down. Tickets touching `migration_paths` must
   set `reversibility` and `rollback`.
 - **The contract** (Done Contract, scope and tier) freezes at acceptance. `rail amend NN` changes it.
 - **`## Grilling`** is optional: the record of questioning the person who asked for the ticket, written by the
@@ -54,7 +55,9 @@ the same on request), and work from any other tracker with
 the `+++` line, becomes that ticket as it is, when it passes lint and its author can push to the repository:
 that is how a chat bot files what it grilled out of a person (`rail docs bots`). Anything else makes a ticket
 with the request, quoted, and an empty contract; `rail next` asks the agent to write it, and
-`rail amend NN --file FILE` saves it. Intake is idempotent by `external_id`.
+`rail amend NN --file FILE` saves it. Intake is idempotent by `external_id`. Work already done on a branch
+with no ticket comes in with `rail adopt BRANCH`: the ticket's branch starts from that branch's commits, and
+each check must fail on the base and pass on the branch before the ticket is filed (`rail docs adopt`).
 
 `add` takes the next ID, makes the branch `NN-slug`, and commits the ticket there without touching your
 checkout. With a remote, the ID is taken by moving one counter branch, `rail/ids`, a commit forward: if

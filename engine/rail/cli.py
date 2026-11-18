@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 
-from . import areas, gitx, guard, hooks, steps
+from . import areas, gitx, guard, hooks, rules, steps
 from .project import Project, event, events_path, ticket_path
 from .state import OPEN, derive, floor
 from .table import TRANSITIONS, first_match
@@ -18,8 +18,8 @@ from .ticket import Ticket, branch_name, highest, lint, rank, with_field, with_i
 from .forge import ENGINE_MARK, TRUSTED
 from .util import RailError, age, cloud, could_not_run, disposable, match_any, session_url, shell
 
-VERBS = ("init", "add", "accept", "amend", "answer", "next", "advance", "status", "context", "drop", "doctor", "ci",
-         "consult", "docs", "intake", "sweep", "provision", "save", "stats")
+VERBS = ("init", "add", "adopt", "accept", "amend", "answer", "next", "advance", "status", "context", "drop", "doctor", "ci",
+         "consult", "docs", "intake", "sweep", "source", "provision", "save", "stats")
 STALE_DAYS = 3
 
 
@@ -32,10 +32,49 @@ def answer(ticket=None, state=None, owner="none", action=None, code="NO_WORK", s
     return result
 
 
+def worker(f, action):
+    """The model and effort an agent_task for a ticket's work names: the tier's ladder, one rung per failed attempt at
+    the step the ticket is failing, capped at the last rung. The engine starts no agent; the session that runs the loop
+    may start one on them."""
+    ladder = f.project.config["worker"]["person_ladder" if f.tier == "PERSON" else "ladder"]
+    if action.get("kind") == "agent_task" and ladder:
+        model, _, effort = ladder[min(f.attempts.get(f.failing, 0), len(ladder) - 1)].rpartition(":")
+        action.update(model=model, effort=effort)
+    return action
+
+
+# The brief a [guides] situation is named in: a table row, or the init task.
+GUIDED = {"IMPLEMENT": "start", "STEP_FAILED": "stuck", "ANSWER_FINDINGS": "findings", "REBASING": "conflict",
+          "TICKET_LINT": "contract", "SPLIT": "split", "INIT_TASK": "setup"}
+
+
+def guide(project, code, action, f=None):
+    """The [guides] page for the brief's situation: a line in the brief, and the first time for a ticket a `guided`
+    event. A hint only: a page that isn't there names nothing, and `rail doctor` says so. `start` is named once per
+    ticket, and `stuck` only once the same failure has repeated. Returns {situation, path}, or None."""
+    situation = GUIDED.get(code)
+    path = project.config["guides"][situation] if situation else ""
+    given = {e.get("situation") for e in f.t.events if e.get("event") == "guided"} if f else set()
+    if not path or (situation == "start" and "start" in given) or (
+            situation == "stuck" and f.same.get(f.failing, 0) < 2):
+        return None
+    if not os.path.isfile(os.path.join(f.t.worktree if f and f.t.worktree else project.root, path)):
+        return None
+    action["brief"] += f"\n\nGuide: read {path} and follow it."
+    if f and situation not in given and not f.rebasing:  # mid-rebase the engine writes nothing to the ticket
+        ensure_local(project, f.t)
+        project.append_events(f.t, [event(f.id, "guided", situation=situation, path=path)], f"guide: {situation}")
+    return {"situation": situation, "path": path}
+
+
 def from_facts(f, steps_=None, code=None, **extra):
     row_code, owner, action = first_match(f)
+    worker(f, action)
     if owner == "human":
         label_wait(f.project, f, row_code)  # the person's inbox is this label, whichever command met the wait
+    named = guide(f.project, row_code, action, f)
+    if named:
+        extra["guide"] = named
     cwd = "." if row_code == "MERGE" else f.cwd  # the merge removes the worktree, so it runs from the project's root
     return answer(f.id, f.state, owner, action, code or row_code, steps_, cwd, tier=f.tier, **extra)
 
@@ -134,10 +173,13 @@ def make_ready(project, t, run, fresh=False):
 def contract_pr(f):
     """The title and description of a contract pull request: the ticket as it stands, for a person to approve."""
     title = f"{f.id}: [contract] {f.ticket.title}"
+    adopted = f.t.last("adopted")
+    holds = (f"It holds the contract and the work adopted from branch {adopted.get('branch')}, which no reviewer has"
+             " seen yet: the review comes after your approval, on this same pull request" if adopted else
+             "It holds only the contract: the work comes after your approval, on this same pull request")
     body = (f"The contract of ticket {f.id} ({f.tier}). Approve it with the label `rail:go`, or say \"accept {f.id}\"."
             f" To change it, comment here. To reject it, close this pull request.\n\n"
-            f"**Don't merge it.** It holds only the contract: the work comes after your approval, on this same pull"
-            f" request, and the `rail` check stays red until it ships.\n\n{f.ticket.text}")
+            f"**Don't merge it.** {holds}, and the `rail` check stays red until it ships.\n\n{f.ticket.text}")
     return title, body
 
 
@@ -375,14 +417,16 @@ def requested_event(nn, ticket, via, channel, **extra):
     fields = {"via": via, "channel": (record or {}).get("channel") or channel, "grilled": record is not None,
               "assumed": len(ticket.open_assumptions())}
     fields.update({k: v for k, v in (record or {}).items() if k != "channel" and v not in (None, "")})
+    if ticket.get("external_id"):
+        fields["external_id"] = ticket.get("external_id")  # a drop mark keeps it: rail stats counts by source
     fields.update({k: v for k, v in extra.items() if v})
     return event(nn, "requested", **fields)
 
 
-def create_ticket(project, text, via="add", channel="session", **extra):
+def create_ticket(project, text, via="add", channel="session", parent=None, **extra):
     """Take the next ID and make the ticket's branch with the ticket file, without touching any checkout. The
-    journal starts with a `requested` event; an AUTO ticket that passes lint is accepted at once. Returns (id,
-    branch, push result)."""
+    journal starts with a `requested` event; an AUTO ticket that passes lint is accepted at once. The branch starts
+    from the base branch, or from `parent` (an adopted branch's head). Returns (id, branch, push result)."""
     base_tip = gitx.rev(project.base_ref, project.root)
     if not base_tip:
         raise RailError(f"the base branch '{project.base}' has no commits yet")
@@ -403,7 +447,7 @@ def create_ticket(project, text, via="add", channel="session", **extra):
                 events.append(accepted_event(nn, ticket, tier, "engine", "lint"))
         events.insert(0, requested_event(nn, ticket, via, channel, **extra))
         files[events_path(nn)] = "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events)
-        return gitx.commit_files(project.root, base_tip, files, f"{nn}: add ticket: {ticket.title}")
+        return gitx.commit_files(project.root, parent or base_tip, files, f"{nn}: add ticket: {ticket.title}")
 
     nn, commit = project.take_id(project.max_id(tickets) + 1, build, label=Ticket(text).title or "")
     branch = branch_name(Ticket(with_id(text, nn)))
@@ -427,6 +471,11 @@ def cmd_add(project, args):
                       action={"kind": "agent_task", "brief": "Fix the ticket, then run rail add again:\n- " + "\n- ".join(errors)},
                       steps_=[{"step": "ticket-lint", "status": "ran", "result": "fail", "detail": "; ".join(errors)}])
     project.sync()
+    from . import sources
+    external = Ticket(text).get("external_id")
+    if sources.owner(project, external):  # a source's ticket: one open ticket per key, and no more than max_open
+        tickets, facts = load(project)
+        sources.check_add(project, facts, external)
     nn, branch, pushed = create_ticket(project, text)
     tickets, facts = load(project)
     f = facts[nn]
@@ -438,6 +487,72 @@ def cmd_add(project, args):
         tickets, facts = load(project)
         f = facts[nn]
     return from_facts(f, receipts, branch=branch)
+
+
+def cmd_adopt(project, args):
+    """`rail adopt [BRANCH]` reads a branch with no ticket and hands the agent a ticket draft; it creates nothing.
+    `rail adopt BRANCH FILE` runs the draft's checks on the base and on the branch, and when each is red on the
+    base and green on the branch, files the ticket with the branch's commits on its own branch, claimed by this
+    session. The adopted branch is left as it is."""
+    from . import adopt
+
+    project.sync()
+    tickets = project.tickets()
+    branch, head = adopt.resolve(project, tickets, args.branch)
+    if not args.file:
+        rows = adopt.files(project, head)
+        changed = [p for p, _, _ in rows]
+        size, _ = rules.size(project, head)
+        tier, why = adopt.tier(project, changed, size)
+        path = adopt.write_draft(branch, adopt.draft(project, tier, adopt.scope(project, head, changed)))
+        return answer(owner="agent", code="ADOPT", branch=branch, head=head, draft=path, size=size, tier=tier,
+                      files=[{"path": p, "added": a, "deleted": d} for p, a, d in rows],
+                      action={"kind": "agent_task", "brief": adopt.brief(project, branch, head, rows, size, tier, why,
+                                                                         path)})
+    with open(args.file) as f:
+        text = f.read()
+    errors = lint(Ticket(text))
+    if errors:
+        return answer(owner="agent", code="TICKET_LINT", action={"kind": "agent_task", "brief": (
+            f"Fix the ticket, then run rail adopt {branch} {args.file} again:\n- " + "\n- ".join(errors))},
+                      steps_=[{"step": "ticket-lint", "status": "ran", "result": "fail", "detail": "; ".join(errors)}])
+    receipts = [{"step": "ticket-lint", "status": "ran", "result": "pass"}]
+    # The one gate that exists only here: the work is done already, so each check must show it.
+    run = steps.Run(project, type("T", (), {"id": ""})())
+    base_tip = gitx.rev(project.base_ref, project.root)
+    found = adopt.gate(project, Ticket(text).checks(), base_tip, head, run)
+    if found is None:
+        return answer(owner="agent", code="ADOPT_SETUP_FAILED", steps_=receipts + run.steps, action={
+            "kind": "agent_task", "brief": f"{run.failure[1]}\n\nNothing was created. Fix setup, then run rail adopt"
+                                           f" {branch} {args.file} again."})
+    refused = adopt.refusal(project, branch, *found)
+    checks = [{"command": b["command"], "base": b["result"], "branch": a["result"]} for b, a in zip(*found)]
+    receipts.append({"step": "adopt-checks", "status": "ran", "result": "fail" if refused else "pass",
+                     "detail": f"{len(checks)} checks on {project.base} and {branch}"})
+    if refused:
+        return answer(owner="agent", code="ADOPT_CHECKS", steps_=receipts, checks=checks,
+                      action={"kind": "agent_task", "brief": refused})
+
+    nn, name, pushed = create_ticket(project, text, via="adopt", parent=head)
+    t = project.tickets()[nn]
+    project.append_events(t, [event(nn, "adopted", branch=branch, head=head[:12]),
+                              event(nn, "base_checks", base=base_tip[:12], checks=found[0])], "adopt")
+    claim(project, t)
+    run = steps.Run(project, t)
+    make_ready(project, t, run)  # not fresh: the branch keeps its commits as they are, and ship rebases them
+    receipts += run.steps
+    tickets, facts = load(project)
+    if ensure_pr(project, facts[nn], receipts):
+        tickets, facts = load(project)
+    f = facts[nn]
+    said = f"Ticket {nn} holds the work of branch {branch} ({head[:12]}), on its own branch {name}."
+    if first_match(f)[0] == "IMPLEMENT":
+        command = f"rail advance {nn}"
+        return answer(nn, f.state, "agent", {"kind": "script", "brief": f"{said} Next: {command}", "command": command},
+                      "ADOPTED", receipts, f.cwd, tier=f.tier, branch=name, adopted=branch, checks=checks)
+    result = from_facts(f, receipts, branch=name, adopted=branch, checks=checks)
+    result["action"]["brief"] = f"{said}\n\n{result['action']['brief']}"
+    return result
 
 
 def stub(title, request, external_id, caused_by=""):
@@ -669,20 +784,21 @@ def cmd_amend(project, args):
 
 
 def cmd_sweep(project, args):
-    """A sweep ticket over what merged without a review: the free part and one review pass."""
+    """A sweep ticket over what merged since the last sweep: the free part, the parked findings and proposed checks,
+    and one review pass over what merged without a review."""
     from . import sweep
 
     project.sync()
     tickets, facts = load(project)
-    start, commits = sweep.unreviewed(project)
+    start, commits, merged = sweep.since_last(project)
     key = f"sweep#{start[:12]}"
     existing = next((f for f in facts.values() if f.ticket and f.ticket.get("external_id") == key
                      and f.state not in ("merged", "dropped")), None)
     if not existing:
-        if not commits:
-            return answer(code="NO_WORK", action={"kind": "rest", "brief": "Nothing merged without a review since the"
-                                                                           " last sweep."})
-        nn, _, _ = create_ticket(project, sweep.ticket_text(start, len(commits)), via="sweep", channel="engine")
+        if not commits and not merged:
+            return answer(code="NO_WORK", action={"kind": "rest", "brief": "Nothing merged since the last sweep."})
+        nn, _, _ = create_ticket(project, sweep.ticket_text(start, len(commits), len(merged)), via="sweep",
+                                 channel="engine")
     else:
         nn = existing.id
     f, receipts = settle(project, nn, explicit=True)
@@ -696,6 +812,44 @@ def cmd_sweep(project, args):
         receipts += run.steps
     tickets, facts = load(project)
     return from_facts(facts[nn], receipts)
+
+
+def cmd_source(project, args):
+    """`rail source NAME`: run the source's fetch and hand the agent a brief that files tickets from its output.
+    With no name, the sources and how many of each one's tickets are open."""
+    from . import sources
+    from .util import run_shell, tail
+
+    project.sync()
+    tickets, facts = load(project)
+    if not args.name:
+        rows = []
+        for name in sources.names(project):
+            source = sources.load(project, name)
+            open_ = sum(state not in sources.ENDED for _, _, state in sources.tickets_of(facts, name))
+            rows.append({"name": name, "open": open_, "max_open": source.max_open})
+        text = "\n".join(f"{r['name']}: {r['open']}/{r['max_open']} open" for r in rows) or \
+            f"No sources: add one as {sources.DIR}/NAME.md (rail docs sources)."
+        return answer(code="SOURCES", sources=rows, text=text)
+    source = sources.load(project, args.name)
+    mine = sources.tickets_of(facts, source.name)
+    room = source.max_open - sum(state not in sources.ENDED for _, _, state in mine)
+    if room <= 0:
+        return answer(code="SOURCE_FULL", action={"kind": "rest", "brief": (
+            f"Source {source.name} has {source.max_open} open tickets, its max_open: nothing to file until one merges"
+            " or is dropped. fetch did not run.")}, source=source.name)
+    timeout = project.config["commands"]["timeout_secs"]
+    code, output, ms = run_shell(source.fetch, project.root, {"RAIL_BASE": project.base_ref}, timeout)
+    if code != 0:
+        why = "timeout" if code is None else could_not_run(code) or f"exit {code}"
+        step = {"step": "fetch", "status": "could_not_run" if code and could_not_run(code) else "ran",
+                "result": "fail", "detail": why}
+        return answer(code="SOURCE_FETCH_FAILED", steps_=[step], source=source.name, action={"kind": "rest", "brief": (
+            f"The fetch of source {source.name} failed ({why}), so nothing was filed:\n$ {source.fetch}\n"
+            + tail(output, 30))})
+    step = {"step": "fetch", "status": "ran", "result": "pass", "detail": f"{len(output)} characters"}
+    return answer(owner="agent", code="SOURCE", steps_=[step], source=source.name, room=room,
+                  action={"kind": "agent_task", "brief": sources.brief(source, output, room, mine)})
 
 
 def cmd_consult(project, args):
@@ -817,10 +971,10 @@ def cmd_next(project, args):
         return answer(owner="human", code="WAITING_HUMAN", action={"kind": "human_wait", "brief": brief},
                       steps_=took_in, **extra)
     from . import sweep
-    is_due, _, commits = sweep.due(project)
+    is_due, _, commits, merged = sweep.due(project)
     if is_due and not held:
         return answer(owner="agent", code="SWEEP", action={"kind": "script", "brief": "rail sweep", "command": "rail sweep"},
-                      steps_=took_in, **extra, unreviewed=len(commits))
+                      steps_=took_in, **extra, unreviewed=len(commits), merged=len(merged))
     if ci:
         # CI is running and there is no run to watch (another CI system, or the run hasn't started yet).
         return answer(ci[0].id, ci[0].state, "none", first_match(ci[0])[2], "CI_WAIT", took_in, **extra)
@@ -1022,8 +1176,10 @@ def cmd_advance(project, args):
                 code_, owner_, action_ = first_match(nf)
                 if owner_ == "human":
                     return from_facts(nf, receipts)
-                return answer(nn, nf.state, "agent", {"kind": "agent_task", "brief": brief}, "STEP_FAILED", receipts,
-                              nf.cwd, tier=nf.tier)
+                action = worker(nf, {"kind": "agent_task", "brief": brief})
+                named = guide(project, "STEP_FAILED", action, nf)
+                return answer(nn, nf.state, "agent", action, "STEP_FAILED", receipts, nf.cwd, tier=nf.tier,
+                              **({"guide": named} if named else {}))
             update_pr(project, nf, receipts)
             result = from_facts(nf, receipts)
             if advice:
@@ -1169,7 +1325,9 @@ def init_task(project):
         return None
     from .init import INIT_TASK, INIT_TASK_CLOUD
     brief = (INIT_TASK_CLOUD if cloud() else INIT_TASK).format(base=project.base, depth=project.config["map"]["depth"])
-    return answer(owner="agent", code="INIT_TASK", action={"kind": "agent_task", "brief": brief}, cwd=".")
+    action = {"kind": "agent_task", "brief": brief}
+    named = guide(project, "INIT_TASK", action)  # no ticket, so no event
+    return answer(owner="agent", code="INIT_TASK", action=action, cwd=".", **({"guide": named} if named else {}))
 
 
 # --- saving work in flight ---------------------------------------------------------------
@@ -1492,7 +1650,8 @@ def cmd_ci(project, args):
         return answer(nn, code="CI_FAIL", action={"kind": "rest", "brief": "not shipped yet"}, steps_=run.steps)
     if project.config["commands"]["setup"]:
         steps.run_command(project, project.root, nn, "setup", project.config["commands"]["setup"], run)
-    tier = shipped[-1].get("tier", "AUTO")
+    # A reviewer may have raised the tier after this ship.
+    tier = highest(shipped[-1].get("tier", "AUTO"), *[e.get("to") for e in events if e.get("event") == "tier_raised"])
     accepted = [e for e in events if e.get("event") == "accepted"]
     if run.ok:
         needed = steps.check(project, nn, Ticket(text), head, project.root, tier, run, patch_id,
@@ -1537,6 +1696,8 @@ def render(result):
     lines = [head]
     if result.get("cwd"):
         lines.append(f"cwd: {result['cwd']}")
+    if result["action"].get("model"):
+        lines.append(f"model: {result['action']['model']}, effort {result['action']['effort']}")
     for s in result.get("steps", []):
         lines.append(f"  {s['step']}: {s['status']}" + (f", {s['result']}" if s.get("result") else "")
                      + (f" ({s['detail']})" if s.get("detail") else ""))
@@ -1568,6 +1729,10 @@ def parser():
 
     add = verb("add", "create a ticket from a ticket file", ticket=False)
     add.add_argument("file", help="the ticket file, or - for stdin")
+    adopt_ = verb("adopt", "put work already on a branch with no ticket onto the rail: with no FILE, a ticket draft"
+                           " for it; with FILE, check it and file the ticket", ticket=False)
+    adopt_.add_argument("branch", nargs="?", help="the branch; the current one when left out")
+    adopt_.add_argument("file", nargs="?", help="the ticket draft, written from the first step's brief")
     accept = verb("accept", "approve a ticket's contract")
     accept.add_argument("note", nargs="?", help="a note for the agent's next brief")
     verb("next", "the next legal move")
@@ -1595,7 +1760,11 @@ def parser():
     intake.add_argument("--external-id")
     intake.add_argument("--title")
     intake.add_argument("--brief", help="a file with the request, verbatim")
-    verb("sweep", "review what merged without a review, and turn its findings into tickets", ticket=False)
+    verb("sweep", "review what merged without a review, gather the findings reviewers parked and the checks they"
+                  " proposed, and turn them into tickets", ticket=False)
+    source = verb("source", "run a source's fetch and file tickets from what it finds; with no name, list the sources",
+                  ticket=False)
+    source.add_argument("name", nargs="?", help="the source, .rail/sources/NAME.md")
     verb("save", "commit and push the work in flight as it is, with no checks")
     stats_ = verb("stats", "what the merged tickets' journals say: tickets by tier, failed steps, and the reviewer's"
                            " cost and hit rate", ticket=False)

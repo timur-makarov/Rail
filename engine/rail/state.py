@@ -56,6 +56,7 @@ class Facts:
         self.dirty = []
         self.shipped = None
         self.last_fail = None
+        self.split = None
         self.setup_failed = None
         self.after_open = []
         self.after_dropped = []
@@ -77,7 +78,11 @@ class Facts:
         self.merge_note = project.cache_read("merge", t.id)
         self.red_base = None
         self.sweep = bool(self.ticket) and (self.ticket.get("external_id") or "").startswith("sweep#")
-        self.sweep_done = any(r.get("role") == "sweep" for r in self.ledger.doc["runs"])
+        # A sweep is done once its review run is stored, or once its harvest step passed when nothing needed one.
+        harvest = [e for e in t.events if e.get("event") == "step" and e.get("step") == "harvest"
+                   and e.get("result") == "pass"]
+        self.sweep_done = bool(harvest) or any(r.get("role") == "sweep" for r in self.ledger.doc["runs"])
+        self.sweep_empty = bool(harvest) and harvest[-1].get("detail") == "nothing to file"
 
         author = self.ticket.tier if self.ticket and self.ticket.tier in TIERS else "AUTO"
         if self.accepted:
@@ -92,15 +97,16 @@ class Facts:
         self.state = self._state()
 
     def _budgets(self, project, events):
-        """Retry budgets and the waits derived from the journal."""
-        budget = project.config["retry"]["budget"]
-        attempts, consulted, since = {}, set(), 0
+        """Retry budgets and the waits derived from the journal. A step is stuck when it fails the same way
+        retry.budget times in a row; whatever the failures, retry.cap of them since it last passed wait for a person."""
+        budget, cap = project.config["retry"]["budget"], project.config["retry"]["cap"]
+        attempts, same, seen, consulted, since, failing = {}, {}, {}, {}, 0, None
         accepted_at = amended_at = shipped_at = continued_at = -1
         for i, e in enumerate(events):
             kind = e.get("event")
             if kind == "continued" or (kind == "accepted" and e.get("by") == "person"):
-                # A person's act gives a fresh budget, whether it continues a wait or approves.
-                attempts, consulted, since = {}, set(), i
+                # A person's act gives a fresh budget and a fresh cap, whether it continues a wait or approves.
+                attempts, same, seen, consulted, since = {}, {}, {}, {}, i
                 if kind == "continued":
                     continued_at = i
                 else:
@@ -108,12 +114,22 @@ class Facts:
             elif kind == "step" and e.get("status") in ("ran", "could_not_run"):
                 step = e.get("step")
                 if e.get("result") == "pass":
-                    attempts[step] = 0
-                    consulted.discard(step)
+                    attempts[step] = same[step] = 0
+                    seen.pop(step, None)
+                    consulted.pop(step, None)
                 elif e.get("counted", True):
+                    # The same failure as the last one at this step, or a new one, which is progress. An event with
+                    # no signature, from an older engine, is the same failure as its neighbour.
+                    sig, last = e.get("signature"), seen.get(step)
+                    repeat = attempts.get(step) and (not sig or not last or sig == last)
+                    same[step] = same.get(step, 0) + 1 if repeat else 1
                     attempts[step] = attempts.get(step, 0) + 1
+                    seen[step] = sig or last
+                    if step in consulted:
+                        consulted[step] += 1
+                    failing = step
             elif kind == "consulted" and e.get("trigger") == "retry_cap":
-                consulted.add(e.get("step"))
+                consulted[e.get("step")] = 0  # the failures since consult advised
             elif kind == "accepted":
                 accepted_at = i
             elif kind == "amended" and e.get("needs_approval"):
@@ -123,10 +139,20 @@ class Facts:
         self.consults = sum(1 for e in events if e.get("event") == "consulted")
         pack = os.path.join(project.root, ".rail", "packs", "consult", "bin", "consult")
         can_consult = os.path.exists(pack) and self.consults < 3
-        self.attempts = attempts
-        self.consult_due = next((s for s, n in attempts.items() if n >= budget and s not in consulted and can_consult), None)
-        self.capped = [s for s, n in attempts.items()
-                       if (s in consulted and n > budget) or (s not in consulted and n >= budget and not can_consult)]
+        self.attempts, self.same = attempts, same
+        self.failing = failing if attempts.get(failing) else None  # the step the ticket is failing now, if any
+        # Why each step waits for a person: the cap, the attempt after consult, or the budget with no consult to ask.
+        self.capped_why = {}
+        for s, n in attempts.items():
+            if n >= cap:
+                self.capped_why[s] = "cap"
+            elif consulted.get(s):
+                self.capped_why[s] = "consulted"
+            elif s not in consulted and same[s] >= budget and not can_consult:
+                self.capped_why[s] = "same"
+        self.capped = list(self.capped_why)
+        self.consult_due = next((s for s, n in same.items() if n >= budget and s not in consulted and can_consult
+                                 and s not in self.capped_why), None)
         runs = [e for e in events[since:] if e.get("event") == "step" and e.get("step") in ("review", "security", "refuter")]
         self.stuck_review = len(runs) >= 2 and all(e.get("detail") == "timeout" for e in runs[-2:])
         self.amend_pending = amended_at > accepted_at
@@ -228,12 +254,14 @@ class Facts:
         setups = [e for e in steps if e.get("step") == "setup"]
         if setups and setups[-1].get("result") == "fail":
             self.setup_failed = setups[-1]
-        # The last word on the current patch: a shipped event, or a ship step that failed.
+        # The last word on the current patch: a shipped event, a split offered, or a ship step that failed.
         verdicts = [e for e in t.events if e.get("patch_id") == self.patch_id and (
-            e.get("event") == "shipped" or (e.get("event") == "step" and e.get("result") == "fail"
-                                            and e.get("step") in SHIP_STEPS))]
+            e.get("event") in ("shipped", "split_offered") or (e.get("event") == "step" and e.get("result") == "fail"
+                                                              and e.get("step") in SHIP_STEPS))]
         if verdicts and verdicts[-1].get("event") == "shipped":
             self.shipped = verdicts[-1]
+        elif verdicts and verdicts[-1].get("event") == "split_offered":
+            self.split = verdicts[-1]
         elif verdicts:
             self.last_fail = verdicts[-1]
         red = project.cache_read("red-base", "base")

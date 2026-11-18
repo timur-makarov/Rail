@@ -17,32 +17,52 @@ READERS = {
     "person_paths": "add (matched against scope_paths) and ship (changed files): a ticket that touches one is"
                     " PERSON, so a person approves its contract and merges it",
     "migration_paths": "add and ship: PERSON as well; tickets touching them need reversibility and rollback",
-    "commands.setup": "the claim: runs in each new ticket worktree, with RAIL_TICKET set",
+    "commands.setup": "the claim: runs in each new ticket worktree, with RAIL_TICKET set; rail adopt: runs in the"
+                      " throwaway worktrees on the base and the branch before its checks",
     "commands.verify": "ship and CI: the whole project's checks, scanners included",
     "commands.provision": "rail provision, next in a cloud session, and CI: installs what the machine lacks, once"
                           " per machine, as root. Never run on a person's own machine",
     "commands.timeout_secs": "every command: setup, verify, provision, each check, each review run",
     "commands.base_checks": "next, at a ticket's first claim: runs each Check: line once on the untouched base and"
                             " records red or green in a base_checks event. Never a gate: it fails nothing",
-    "size.cap": "ship and CI: an AUTO change with more changed lines than this becomes PERSON",
+    "size.cap": "ship and CI: an AUTO change with more changed lines than this is offered a split at its first ship"
+                " (no attempt spent); the next ship over it, and CI, make it PERSON",
     "size.exclude": "ship and CI: globs left out of the size count, besides generated files and lockfiles",
     "review.command": "advance: the reviewer, run in the ticket's worktree with the brief on stdin",
     "review.model": "advance and sweep: the model the reviewer runs on (ANTHROPIC_MODEL and RAIL_MODEL for the"
                     " command); empty leaves the command's default",
     "review.skip_paths": "advance and CI: an AUTO change gets no reviewer when every file it changes matches one of"
                          " these globs. The sweep reviews such changes afterwards",
-    "retry.budget": "next and advance: failed attempts per step before consult, then a person",
+    "retry.budget": "next and advance: failures in a row at one step with the same signature before consult advises"
+                    " once; the attempt after that failing too waits for a person",
+    "retry.cap": "next and advance: failed attempts at one step, whatever their signatures, after which the ticket"
+                 " waits for a person",
     "consult.command": "the consult pack: a read-only model, with the brief on stdin",
     "consult.model": "the consult pack: the model consult runs on, set the same way as review.model",
     "claim.stale_minutes": "next: minutes without a journal event after which another session's work in flight is"
                            " taken to be abandoned and resumed. Keep it above your longest command",
     "claim.save_minutes": "the save hooks and advance: work in flight is saved, and shows it is alive, at least this"
                           " often while a session works",
+    "worker.ladder": "next and advance: the model and effort an agent_task names for an AUTO ticket's work, as"
+                     " model:effort, one rung per failed attempt at the step the ticket is failing. Empty names none",
+    "worker.person_ladder": "next and advance: the same ladder for a PERSON ticket, which starts higher",
     "sweep.after": "next: changes merged with no review (tickets inside review.skip_paths, and commits with no"
                    " ticket) since the last sweep before one is offered",
+    "sweep.every": "next: tickets merged since the last sweep, reviewed or not, before one is offered; it then"
+                   " gathers the findings reviewers parked and the checks they proposed. 0 switches this off",
     "map.depth": "doc-lint: the directory depth ## Areas must cover",
     "map.ignore": "doc-lint: directories that need no ## Areas row",
     "rules": "ship and CI: structure rules on added lines and files (rail docs rules)",
+    "guides.start": "next and advance: the page named in a ticket's first IMPLEMENT brief, once per ticket. Each"
+                    " guides key is a path from the repository root, or empty for none; the seed config names the"
+                    " rail-* skills, and a config with no [guides] table names none (rail docs guides)",
+    "guides.stuck": "next and advance: the page named in a STEP_FAILED brief once the same failure has repeated",
+    "guides.findings": "next and advance: the page named in the brief that asks for answers to review findings",
+    "guides.conflict": "next and advance: the page named in the brief while a rebase is stopped on a conflict",
+    "guides.contract": "next: the page named in the brief that asks for the contract of a ticket that came in as a"
+                       " request",
+    "guides.split": "advance and next: the page named in the SPLIT brief",
+    "guides.setup": "next: the page named in the init task",
 }
 
 

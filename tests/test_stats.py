@@ -105,13 +105,15 @@ class Stats(RailTest):
         p.fix_calc("1")
         p.write("src/more.py", "".join(f"x{i} = {i}\n" for i in range(12)), base=p.worktree("1"))
         p.queue_reviews(clean(), clean())
+        self.assertEqual(p.rail("advance", "1")["reason"]["code"], "SPLIT")
         self.assertEqual(p.rail("advance", "1")["reason"]["code"], "MERGE_BY_PERSON")
         p.rail("accept", "1")
         self.assertEqual(p.rail("advance", "1")["state"], "merged")
         stats = p.rail("stats")
         self.assertEqual(stats["stats"]["raised"], {"size": 1})
+        self.assertEqual(stats["stats"]["split"], {"offered": 1, "auto": 0, "person": 1})
         self.assertEqual((stats["stats"]["tiers"]["AUTO"]["merged"], stats["stats"]["tiers"]["PERSON"]["merged"]), (0, 1))
-        self.assertIn("Became PERSON at ship: 1 (size 1).", stats["text"])
+        self.assertIn("Became PERSON at ship or review: 1 (size 1).", stats["text"])
         self.assertIn("No step failed.", stats["text"])
 
     def test_with_nothing_merged_only_where_the_tickets_came_from_is_counted(self):

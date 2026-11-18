@@ -59,7 +59,9 @@ Disputes: 1. The refuter dismissed 1.
 | `reverted afterwards` | Tickets whose squash commit a later commit on the base branch reverts: one whose message says `This reverts commit <sha>.` (what `git revert` writes), or `Reverts owner/repo#N` (what GitHub's Revert button writes), where N is the ticket's pull request |
 | `median claim to merge` | From the first claim to the squash commit |
 | `Every check already green on the base` | Of the tickets with a `base_checks` event, those where every `Check:` line passed on the base before any work (`rail docs loop`) |
-| `Became PERSON at ship` | `tier_raised` events, by reason: `person_paths`, `migration_paths`, `size` |
+| `Adopted from a branch with no ticket` | Tickets with an `adopted` event: work that came in through `rail adopt` (`rail docs adopt`). In JSON, `adopted`. Shown when there is one |
+| `Offered a split over [size] cap` | Tickets with a `split_offered` event, then those that shipped AUTO afterwards and those that became PERSON for `size`. In JSON, `split`: `offered`, `auto`, `person`. Shown when there is one |
+| `Became PERSON at ship or review` | `tier_raised` events, by reason: `person_paths`, `migration_paths`, `size`, `reviewer`. Such a ticket counts under PERSON |
 | `STEPS THAT FAILED` | For each step that failed at least once: its runs, the failed ones, and the ones the shell couldn't start |
 | `Consult ran` | `consulted` events |
 | `REVIEW` | Runs, cost and time by role. Cost is what the review command reported; a command that reports none counts as $0 |
@@ -69,6 +71,23 @@ Disputes: 1. The refuter dismissed 1.
 | `Advisory findings` | How each ended: fixed, declined, parked |
 | `Parked by the reviewer` | Findings the reviewer itself reported as parked |
 | `Disputes` | Refuter runs, by what the refuter decided: dismissed, parked or upheld |
+
+## Guides
+
+Once a brief has named a [guide](guides.md), the GUIDES table sets the merged tickets that got the `start`
+guide (a `guided` event for `start`) beside the rest:
+
+| Line | Counts |
+|---|---|
+| `merged tickets` | Merged tickets in each group |
+| `failed steps per ticket` | Counted failed ship steps, divided by the tickets |
+| `review runs per ticket` | `review`, `security` and `refuter` runs, divided by the tickets |
+| `waited for a person on retries` | Tickets a person continued right after a counted failed ship, review or security step: the wait the retry budget or cap makes |
+| `Guides named` | For each situation, the tickets it was named for |
+
+In JSON it is under `guides`: `guided` and `not guided`, each with `tickets`, `failed_steps`, `review_runs`,
+`waited` and the two per-ticket numbers, and `situations`. A few tickets prove little either way: compare
+the groups over weeks, and change a guide only when the numbers move (`rail docs guides`).
 
 ## Grilling
 
@@ -94,6 +113,13 @@ deciding, and the recommendations steered them. Many acceptances with few amends
 well. A low rate means it doesn't know the project or the person yet. The grilling agent grades the answers
 itself; the ticket keeps the recommendation and the answer word for word, so the grade can be checked.
 
+## Sources
+
+The SOURCES table has one row for each [source](sources.md) with a ticket requested in the period: how many
+it filed, and how many of those merged, were reverted afterwards, were dropped, and are still open. In JSON
+it is under `sources`. A source whose tickets are mostly dropped files what isn't worth a ticket: tighten its
+prompt. One whose tickets are reverted files what is wrong.
+
 ## What to read from it
 
 - **A low hit rate with many dismissals** means the reviewer reports what isn't wrong. Try another
@@ -101,10 +127,14 @@ itself; the ticket keeps the recommendation and the answer word for word, so the
 - **A hit rate near 100%** is weaker evidence than it looks: an author who fixes a finding without disputing
   it counts as a hit, whether or not the finding was right. The disputes line shows how often the author
   pushes back at all.
-- **Many tickets under `Became PERSON at ship`** by `size` means tickets are too big: split them at add. By
-  `person_paths`, the scope at add missed a path a person wants to see.
+- **Many tickets under `Became PERSON at ship or review`** by `size` means tickets are too big: split them at
+  add. Read it with the split line: many offers that end PERSON mean the agent can't find a part that stands
+  alone, and the tickets are written too wide. By `person_paths`, the scope at add missed a path a person wants to see. By `reviewer`, read the
+  sentences in the journal: a kind that repeats belongs in `person_paths` or `REVIEW.md`.
 - **A step with many failures** is where retries go. A `could not run` count means a tool is missing on the
-  machine: `[commands] provision` or `setup` should install it.
+  machine: `[commands] provision` or `setup` should install it. `rail stats` doesn't read the failures'
+  `signature`s; to see whether a step failed the same way again and again or differently each time, compare
+  them in the ticket's journal (`rail docs journal`).
 - **`reverted afterwards`** is the guardrail on merging with nobody. When it rises on AUTO tickets, the time a
   person saved at the merge was spent later, on the revert.
 - **Every check already green on the base** means those checks couldn't show that the work was done: the

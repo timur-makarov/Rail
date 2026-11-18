@@ -25,7 +25,7 @@ class Reference(RailTest):
         p = self.fixture()
         page = p.rail("docs", "cli")["text"]
         for verb in ("init", "add", "accept", "amend", "answer", "next", "advance", "status", "context", "drop",
-                     "doctor", "ci", "consult", "docs", "stats"):
+                     "doctor", "ci", "consult", "docs", "stats", "sweep", "source", "adopt"):
             self.assertIn(f"## rail {verb}", page)
         self.assertNotIn("## rail hook", page)
 
@@ -75,8 +75,6 @@ class Operations(RailTest):
         self.assertIn("never changes ticket state", packs)
         self.assertIn("## Decision", p.rail("docs", "adr")["text"])
         self.assertIn("People keep four acts", p.rail("docs", "environments")["text"])
-        self.assertIn("/loop", p.rail("docs", "away")["text"])
-        self.assertIn("takes in issues labelled `rail`", p.rail("docs", "away")["text"])
         journal = p.rail("docs", "journal")["text"]
         for name in ("requested", "accepted", "amended", "claimed", "saved", "step", "shipped", "tier_raised", "finding",
                      "consulted", "continued", "dropped"):
@@ -85,13 +83,22 @@ class Operations(RailTest):
             self.assertIn(text, journal)
         cloud = p.rail("docs", "cloud")["text"]
         for text in ("Import a ruleset", ".rail/ruleset.json", "Automatically delete head branches", "rail provision",
-                     "rail:needs-you", "stale_minutes", "rail/ids", "several repositories"):
+                     "rail:needs-you", "stale_minutes", "rail/ids", "several repositories",
+                     "Unattended work runs in the cloud", "Answer from any device"):
             self.assertIn(text, cloud)
         self.assertIn("required check", p.rail("docs", "github")["text"])
+        self.assertNotIn("- away:", p.rail("docs")["text"])  # unattended work is the cloud page's
         self.assertIn("GITHUB_TOKEN", p.rail("docs", "github-runner")["text"])
         sweep = p.rail("docs", "sweep")["text"]
-        for text in ("Sweep:", "Review:", "skip_paths"):
+        for text in ("Sweep:", "Review:", "skip_paths", "[sweep] every", "parked"):
             self.assertIn(text, sweep)
+        sources = p.rail("docs", "sources")["text"]
+        for text in (".rail/sources/NAME.md", "max_open", "rail source NAME --json", "NAME#KEY", "weekly-review"):
+            self.assertIn(text, sources)
+        self.assertIn("rail source NAME --json", cloud)
+        adopt = p.rail("docs", "adopt")["text"]
+        for text in ("rail adopt BRANCH FILE", "fails on the base", "base_checks", "`adopted` event", "ASSUMED:"):
+            self.assertIn(text, adopt)
         self.assertIn("a stranger's ticket is only ever a request", p.rail("docs", "bots")["text"])
         self.assertIn("| Q1 | scope |", p.rail("docs", "grill")["text"])
         stats = p.rail("docs", "stats")["text"]

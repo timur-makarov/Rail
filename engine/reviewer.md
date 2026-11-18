@@ -18,8 +18,18 @@ merge as it is: a wrong result, a crash, lost data, a security hole, or a Done C
 item that isn't met. Advisory means worth fixing but safe to merge. When you can show the
 problem by running something, put the command and its output in `evidence`.
 
+When the same kind of mistake appears in more than one place in the change, report it
+once: describe the kind of mistake in the claim and name the other places, so the author
+fixes them all.
+
 On a re-review, review the whole change again. When an earlier finding still stands,
 report it with its id in `repeats` and keep its severity.
+
+Set `needs_person` when a person should see the change before it merges and no blocking
+finding already stops it: the change adds the first of something other code will copy (a
+new shared module, the first permission check, the first cache), it adds a dependency the
+project did not have, or it changes what users of the product get beyond what the ticket
+says. Say which, in one sentence. Leave it out for a change that does none of these.
 
 Return only JSON matching the schema. `summary` says what you checked and how. An empty
 list is a valid review.

@@ -11,6 +11,16 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   needed, then take the next ticket or stop.
 - `action.kind` is `agent_task` (do the brief), `script` (run `action.command`), `human_wait` (a person
   acts; the brief says what) or `rest` (nothing to do).
+- `action.model` and `action.effort` name the model and effort for an `agent_task` that is a ticket's work,
+  from `[worker] ladder` (`person_ladder` for a PERSON ticket). The rung is the number of failed attempts at
+  the step the ticket is failing, 0 when there are none, capped at the last rung; a person's act starts it
+  again at 0. With an empty ladder neither is there. A session a person is driving does the brief itself and
+  may ignore them. An unattended runner, a cloud session a scheduled task starts, starts one subagent on
+  that model and effort, gives it the brief word for word and the `cwd`, and runs `rail advance` itself when
+  the subagent returns (`rail docs cloud`). The engine starts no agent.
+- `guide` names the page `[guides]` gives for the brief's situation, such as the start of a ticket or a
+  failure that repeats; the brief's last line then says to read it (`rail docs guides`). It is a hint, and
+  part of the brief, so a subagent that gets the brief word for word gets the guide too.
 - `steps` lists what the command ran: `ran` with `pass` or `fail`, `could_not_run` with `fail` (the shell
   couldn't start the command: it isn't on the machine, or isn't executable), `not_run`, or `unavailable`. A
   skipped step never looks like a pass, and a step that couldn't start never looks like a check that ran.
@@ -36,7 +46,8 @@ Then it resets the worktree to what it was, because a check may write files. A c
 the base can't show that the work was done, and `rail stats` counts how often every check was. This is never
 a gate: the result fails nothing, spends no attempt, and changes neither the ticket's state nor its owner, and
 a failure inside it doesn't stop `next`. It runs once per ticket: not on a resume, not on a takeover, and not
-for a ticket with no `Check:` line yet. `[commands] base_checks = false` switches it off.
+for a ticket with no `Check:` line yet. `[commands] base_checks = false` switches it off. An adopted ticket
+has the event already: `rail adopt` ran its checks on the base before filing it, as a gate (`rail docs adopt`).
 
 **Work in flight is saved as it goes.** `rail save` commits a ticket's in-scope changes as they are and
 pushes them, with no checks. Two hooks run it: at the end of each agent turn, and at most every ten minutes
@@ -56,7 +67,18 @@ also takes in issues labelled `rail`, and every command that meets a wait labels
 In the ticket's worktree, `advance` commits your in-scope changes and ships: it rebases onto a moved base,
 then runs ticket lint, the ASSUMED rows, scope, structure rules, the migration fields, size, doc-lint,
 `verify` and each `Check:` line. Then it runs the review, unless every changed file is in
-`[review] skip_paths` (see [review](review.md)). With no remote, a ready AUTO ticket is merged by the next
+`[review] skip_paths` (see [review](review.md)).
+
+**Over the size cap, a split comes first.** When an AUTO ticket's change is over `[size] cap` and no file on
+`person_paths` or `migration_paths` made it PERSON, its first such ship stops at `size` with a `SPLIT` task and
+a `split_offered` event, and the ticket stays `implementing`. Nothing failed: it spends no attempt and doesn't
+move the model ladder. The brief says how to split: keep a first part that is under the cap and meets a `Check:`
+on its own, put the rest on a local branch `split/NN-rest`, narrow the contract with `rail amend` (accepted at
+once on an AUTO ticket), and file the rest with `rail add` and `after`. The offer is made once per ticket: the
+next ship goes on as AUTO under the cap, and over it the ticket becomes PERSON, so an agent that can't split
+just runs `rail advance` again. CI never offers: it checks the tier the patch shipped with.
+
+With no remote, a ready AUTO ticket is merged by the next
 `advance` (run it from the project's root: the merge removes the worktree), as a squash commit on the base
 branch; a PERSON ticket waits for `rail accept NN` first. With a remote, every ticket has a pull request;
 once its required checks are green, `advance` merges an AUTO ticket through GitHub's async merge, and a
@@ -73,6 +95,7 @@ lost.
 - `rail status`: every ticket, its state and owner, LAST (the age of its last journal event) and NOTE (what it
   waits for, a stale warning, or its pull request), then leftovers to clean up.
 - `rail context NN`: the `## Areas` rows a ticket touches, and a directory digest.
+- `rail adopt BRANCH`: put work already on a branch with no ticket onto the rail (`rail docs adopt`).
 - `rail stats`: what the tickets' journals and the base branch say: tickets by tier, how many were reverted,
   how often every check was green on the base before the work, failed steps, the reviewer's cost and hit
   rate, and how the grilling went.
