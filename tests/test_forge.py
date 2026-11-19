@@ -159,7 +159,7 @@ class Approvals(RailTest):
         a, b, github = self.github_pair()
         a.add(ticket())
         a.rail("next")
-        github.label(1, "rail:needs-you")
+        github.label(1, "rail:hold")
         held = a.rail("next")
         self.assertEqual((held["owner"], held["waits"][0]["needs"]), ("human", "HOLD"))
         github.update(lambda s: s.setdefault("comments", {}).__setitem__("1", [
@@ -176,7 +176,7 @@ class Approvals(RailTest):
         a, b, github = self.github_pair()
         a.add(ticket())
         a.rail("next")
-        github.label(1, "rail:needs-you")
+        github.label(1, "rail:hold")
         self.assertEqual(a.rail("next")["waits"][0]["needs"], "HOLD")
         said = lambda body, who, role: {"body": body, "created_at": "2099-01-01T00:00:00Z", "user": {"login": who},
                                          "author_association": role}
@@ -202,7 +202,7 @@ class Approvals(RailTest):
         a, b, github = self.github_pair()
         a.add(ticket())
         a.rail("next", session="run-1")
-        github.label(1, "rail:needs-you")
+        github.label(1, "rail:hold")
         self.assertEqual(a.rail("next", session="run-1")["waits"][0]["needs"], "HOLD")
         github.label(1, "rail:go")
         on = b.rail("next", session="run-2")
@@ -217,7 +217,7 @@ class Approvals(RailTest):
         a, b, github = self.github_pair()
         a.add(ticket())
         a.rail("next", session="run-1")
-        github.label(1, "rail:needs-you")
+        github.label(1, "rail:hold")
         self.assertEqual(a.rail("next", session="run-1")["waits"][0]["needs"], "HOLD")
         b.rail("accept", "1", "go on", session="chat-2")  # the person says it in a new conversation
         on = b.rail("next", session="chat-2")
@@ -248,7 +248,7 @@ class Approvals(RailTest):
         a, b, github = self.github_pair()
         a.add(ticket())
         a.rail("next")
-        github.label(1, "rail:needs-you")
+        github.label(1, "rail:hold")
         self.assertEqual(a.rail("next")["waits"][0]["needs"], "HOLD")
         github.label(1, "rail:go")
         on = a.rail("accept", "1", "go on")
@@ -305,6 +305,27 @@ class Merges(RailTest):
         self.assertEqual((behind["state"], behind["reason"]["code"]), ("in-ci", "CI_WAIT"), behind)
         self.assertEqual(subprocess.run(["git", "--git-dir", github.read()["bare"], "merge-base", "--is-ancestor",
                                          github.head("main"), "1-fix-add"]).returncode, 0)  # rebased and pushed
+        self.assertEqual(github.pr(1)["labels"], [])
+
+    def test_the_engines_own_label_is_not_a_hold_and_goes_when_the_wait_ends(self):
+        # A pull request waited for a person and got rail:needs-you. Then the base moved: the wait is over, the engine
+        # rebases, and its own label must neither stop it nor stay in the person's inbox.
+        a, b, github = self.github_pair()
+        github.update(lambda s: s.__setitem__("require_up_to_date", True))
+        a.add(ticket())
+        a.rail("next")
+        a.fix_calc("1")
+        a.rail("advance", "1")
+        github.ci("1-fix-add", "success")
+        github.label(1, "rail:needs-you")
+        b.write("notes.md", "news\n")
+        b.git("add", "notes.md")
+        b.git("commit", "--quiet", "-m", "base moves")
+        b.git("push", "--quiet", "origin", "main")
+        behind = a.rail("next")
+        self.assertEqual((behind["waits"], behind["reason"]["code"]), ([], "CI_WAIT"), behind)
+        self.assertEqual(subprocess.run(["git", "--git-dir", github.read()["bare"], "merge-base", "--is-ancestor",
+                                         github.head("main"), "1-fix-add"]).returncode, 0)
         self.assertEqual(github.pr(1)["labels"], [])
 
     def test_next_reads_an_approval_on_a_ticket_it_does_not_go_on_with(self):
@@ -488,7 +509,7 @@ class Doctor(RailTest):
                                                    "allow_rebase_merge": False, "squash_merge_commit_title": "PR_TITLE",
                                                    "squash_merge_commit_message": "PR_BODY",
                                                    "delete_branch_on_merge": True},
-                                         labels=["rail", "rail:go", "rail:needs-you"]))
+                                         labels=["rail", "rail:go", "rail:needs-you", "rail:hold"]))
         found = {s["step"]: s for s in a.rail("doctor", expect=None)["steps"]}
         for name in ("squash merging", "required check", "labels", "merged branches"):
             self.assertEqual(found[name]["result"], "pass", found[name])
