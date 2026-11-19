@@ -27,6 +27,18 @@ class Areas(RailTest):
         self.assertIn("docs/ is in no ## Areas row", brief)
         self.assertNotIn(".rail/", brief)
 
+    def test_next_remembers_a_ship_that_failed_at_doc_lint(self):
+        p = self.fixture()
+        p.add(ticket(scope=("src/**", "ARCHITECTURE.md")))
+        p.rail("next")
+        p.fix_calc("1")
+        p.write("ARCHITECTURE.md", "# Architecture\n\n## Areas\n| Area | Paths | Holds |\n|---|---|---|\n"
+                "| calc | src/** | the calculator |\n", base=p.worktree("1"))
+        self.assertEqual(failed_lint(p.rail("advance", "1", expect=3))[0], "doc-lint")
+        again = p.rail("next")
+        self.assertEqual(again["reason"]["code"], "STEP_FAILED")
+        self.assertIn("failed at 'doc-lint'", again["action"]["brief"])
+
     def test_a_long_file_fails_and_a_project_without_one_skips(self):
         p = self.fixture()
         p.add(ticket(scope=("src/**", "ARCHITECTURE.md")))

@@ -150,6 +150,20 @@ class Ship(RailTest):
         self.assertEqual(p.rail("next")["reason"]["code"], "IMPLEMENT")
         self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")
 
+    def test_an_assumed_row_nobody_can_check_is_decided_not_asked(self):
+        # The row is the agent's: a worker that stops to ask leaves no label for the person and blocks the queue.
+        p = self.fixture()
+        p.add(ticket(tier="PERSON", body="\n## Assumptions\n- ASSUMED: finance wants the new column last.\n"))
+        p.rail("accept", "1")
+        brief = p.rail("next")
+        self.assertEqual((brief["reason"]["code"], brief["owner"]), ("VERIFY_ASSUMPTIONS", "agent"))
+        self.assertNotIn("ask the person", brief["action"]["brief"])
+        self.assertIn("decided, not checked:", brief["action"]["brief"])
+        path = os.path.join(p.worktree("1"), ".rail", "tickets", "1.md")
+        text = read(path).replace("ASSUMED: finance", "VERIFIED: decided, not checked: finance")
+        p.write(".rail/tickets/1.md", text, base=p.worktree("1"))
+        self.assertEqual(p.rail("next")["reason"]["code"], "IMPLEMENT")
+
     def test_a_change_to_a_person_path_makes_the_ticket_person_at_ship(self):
         p = self.fixture(config='person_paths = ["**/*.sql"]\n' + CONFIG)
         self.assertEqual(p.add(ticket())["tier"], "AUTO")
@@ -225,18 +239,28 @@ class Ship(RailTest):
         self.assertEqual(merged["steps"][0], {"step": "rebase", "status": "ran", "result": "pass", "detail": "onto main"})
         self.assertEqual(p.git("log", "--format=%s", "main").splitlines()[:2], ["2: add a status code", "1: fix add"])
 
+    def test_a_change_with_no_file_in_it_does_not_ship(self):
+        # A second ticket for work already on the base: its check passes before any edit, and it must not merge empty.
+        p = self.fixture()
+        p.write("src/calc.py", "def add(a, b):\n    return a + b\n")
+        p.git("commit", "--quiet", "-am", "fix add by hand")
+        p.add(ticket())
+        p.rail("next")
+        empty = p.rail("advance", "1", expect=3)
+        self.assertEqual(failed_step(empty), ("change", "no file changed"))
+        self.assertIn("rail drop 1 --reason", empty["action"]["brief"])
+        self.assertEqual(p.rail("drop", "1", "--reason", "already done: on main")["state"], "dropped")
+
     def test_rebase_conflict_returns_the_ticket_to_implementing(self):
         p = self.fixture()
-        p.add(ticket())
-        p.rail("next", session="a")
-        p.fix_calc("1")
-        p.rail("advance", "1", session="a")
         p.add(ticket(title="Rewrite add"))
-        p.rail("next", "--ticket", "2", session="b")  # a bare next would merge ticket 1 first: it is shipped
-        p.write("src/calc.py", "def add(a, b):\n    return sum((a, b))\n", base=p.worktree("2"))
-        p.rail("advance", "2", session="b")
-        p.rail("advance", "1", session="a")
-        failed = p.rail("advance", "2", session="b", expect=3)
+        p.rail("next", session="b")
+        p.write("src/calc.py", "def add(a, b):\n    return sum((a, b))\n", base=p.worktree("1"))
+        p.rail("advance", "1", session="b")
+        # Another person's change to the same line lands on the base: two tickets can't be on these paths at once.
+        p.write("src/calc.py", "def add(a, b):\n    return a + b\n")
+        p.git("commit", "--quiet", "-am", "fix add by hand")
+        failed = p.rail("advance", "1", session="b", expect=3)
         self.assertEqual((failed["steps"][0]["step"], failed["steps"][0]["result"]), ("rebase", "fail"))
         self.assertIn("src/calc.py", failed["steps"][0]["detail"])
         self.assertEqual(failed["state"], "implementing")
@@ -426,6 +450,17 @@ class Parallel(RailTest):
         self.assertEqual([h["ticket"] for h in other["held"]], ["1"])
         self.assertEqual(p.rail("next", "--ticket", "2", session="b")["reason"]["code"], "SCOPE_OVERLAP")
         self.assertEqual(p.rail("next", session="a")["ticket"], "1")
+
+    def test_a_ticket_in_review_or_ci_still_blocks_one_on_the_same_paths(self):
+        # Shipped is not merged: the second ticket would start from a base the first is about to change.
+        p = self.fixture()
+        p.add(ticket())
+        p.add(ticket(title="Add subtract"))
+        p.rail("next")
+        p.fix_calc("1")
+        p.rail("advance", "1")
+        self.assertNotEqual(p.rail("status")["tickets"][0]["state"], "implementing")
+        self.assertEqual(p.rail("next", "--ticket", "2", session="b")["reason"]["code"], "SCOPE_OVERLAP")
 
     def test_takeover_records_the_new_session(self):
         p = self.fixture()

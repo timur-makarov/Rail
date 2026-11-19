@@ -106,6 +106,21 @@ class Situations(RailTest):
         self.assertIn(line("setup"), task["action"]["brief"])
         self.assertEqual(task["guide"], {"situation": "setup", "path": SKILL.format("rail-verify")})
 
+    def test_conflict_is_named_by_the_ship_that_met_the_conflict(self):
+        # The agent starts the rebase from this brief, so the page for it is named here and not only mid-rebase.
+        a, b = self.remote_pair(config=guides())
+        a.add(ticket())
+        a.rail("next")
+        a.fix_calc("1")
+        b.git("pull", "--quiet")
+        b.write("src/calc.py", "def add(a, b):\n    return b + a  # theirs\n")
+        b.git("commit", "--quiet", "-am", "theirs")
+        b.git("push", "--quiet", "origin", "main")
+        failed = a.rail("advance", "1", expect=3)
+        self.assertEqual((failed["steps"][0]["step"], failed["steps"][0]["result"]), ("rebase", "fail"))
+        self.assertIn(line("conflict"), failed["action"]["brief"])
+        self.assertEqual(failed["guide"]["situation"], "conflict")
+
     def test_conflict_is_named_while_a_rebase_is_stopped_and_nothing_is_written(self):
         a, b = self.remote_pair(config=guides())
         a.add(ticket())

@@ -38,6 +38,49 @@ class Intake(RailTest):
         a.rail("advance", "1")
         self.assertIn("Closes #12", github.pr(1)["body"])
 
+    def test_two_sessions_that_take_an_issue_in_at_once_make_one_ticket(self):
+        # The ID is taken before the ticket's branch is pushed. In that gap a second session sees no ticket for the
+        # issue: the counter branch must refuse it, or every run a label starts makes its own copy.
+        a, b, github = self.github_pair()
+        github.update(lambda s: s["issues"].append({"number": 12, "title": "Add can't add", "body": "add(2, 3) gives -1.",
+                                                    "labels": ["rail"], "state": "open"}))
+        self.assertEqual(a.rail("intake", "github")["created"], ["1"])
+        bare = github.read()["bare"]
+        subprocess.run(["git", "--git-dir", bare, "update-ref", "-d", "refs/heads/1-github-12-add-can-t-add"], check=True)
+        again = b.rail("intake", "github")  # b sees the counter, and no branch yet
+        self.assertEqual((again["created"], again["skipped"]), ([], ["github#12"]))
+        self.assertEqual(b.git("ls-remote", "origin", "refs/heads/2-*"), "")
+
+    def test_one_session_writes_a_contract_and_the_others_leave_it(self):
+        a, b, github = self.github_pair()
+        github.update(lambda s: s["issues"].append({"number": 12, "title": "Add can't add", "body": "add(2, 3) gives -1.",
+                                                    "labels": ["rail"], "state": "open"}))
+        first = a.rail("next")
+        self.assertEqual((first["ticket"], first["reason"]["code"]), ("1", "TICKET_LINT"))
+        self.assertEqual(a.rail("next")["reason"]["code"], "TICKET_LINT")  # its own: asked again, it gets it again
+        other = b.rail("next", session="b")
+        self.assertEqual(other["reason"]["code"], "NO_WORK", other)
+        taken = b.rail("next", "--ticket", "1", session="b")  # asked for by number: taken over
+        self.assertEqual(taken["reason"]["code"], "TICKET_LINT")
+        self.assertEqual(a.rail("next")["reason"]["code"], "NO_WORK")
+
+    def test_a_ticket_narrowed_to_the_first_part_of_its_issue_leaves_the_issue_open(self):
+        a, b, github = self.github_pair()
+        github.update(lambda s: s["issues"].append({"number": 12, "title": "Add can't add", "body": "add(2, 3) gives -1.",
+                                                    "labels": ["rail"], "state": "open"}))
+        a.rail("intake", "github")
+        a.rail("next")
+        written = os.path.join(self.tmp, "1.md")
+        with open(written, "w") as f:
+            f.write(ticket(title="Add can't add", front=('external_id = "github#12"',),
+                           body="\n## Request\nadd(2, 3) gives -1.\n\n## Split\nThis is part 1 of 2. Part 2: subtract.\n"))
+        a.rail("amend", "1", "--file", written)
+        a.rail("next")
+        a.fix_calc("1")
+        a.rail("advance", "1")
+        self.assertIn("Part of #12", github.pr(1)["body"])
+        self.assertNotIn("Closes #12", github.pr(1)["body"])
+
         a.rail("drop", "1", "--reason", "a duplicate")
         issue = github.read()["issues"][0]
         self.assertNotIn("rail", issue["labels"])

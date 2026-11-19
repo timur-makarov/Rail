@@ -288,6 +288,39 @@ class Merges(RailTest):
         self.assertEqual(subprocess.run(["git", "--git-dir", github.read()["bare"], "merge-base", "--is-ancestor", base,
                                          "1-fix-add"]).returncode, 0)
 
+    def test_a_green_pr_behind_its_base_is_rebased_and_not_sent_to_merge(self):
+        # CI went green, then another ticket merged: GitHub refuses the merge until the branch is up to date.
+        a, b, github = self.github_pair()
+        github.update(lambda s: s.__setitem__("require_up_to_date", True))
+        a.add(ticket())
+        a.rail("next")
+        a.fix_calc("1")
+        a.rail("advance", "1")
+        github.ci("1-fix-add", "success")
+        b.write("notes.md", "news\n")
+        b.git("add", "notes.md")
+        b.git("commit", "--quiet", "-m", "base moves")
+        b.git("push", "--quiet", "origin", "main")
+        behind = a.rail("next")
+        self.assertEqual((behind["state"], behind["reason"]["code"]), ("in-ci", "CI_WAIT"), behind)
+        self.assertEqual(subprocess.run(["git", "--git-dir", github.read()["bare"], "merge-base", "--is-ancestor",
+                                         github.head("main"), "1-fix-add"]).returncode, 0)  # rebased and pushed
+        self.assertEqual(github.pr(1)["labels"], [])
+
+    def test_next_reads_an_approval_on_a_ticket_it_does_not_go_on_with(self):
+        # The run goes on with its own ticket 1; ticket 2's rail:go must not read as "waits for approval" meanwhile.
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        a.add(ticket(title="Add subtract", tier="PERSON", scope=("docs/**",)))
+        self.assertEqual(a.rail("next")["ticket"], "1")
+        waiting = [t for t in a.rail("status")["tickets"] if t["ticket"] == "2"][0]
+        self.assertEqual(waiting["state"], "new")
+        github.label(1, "rail:go")
+        self.assertEqual(a.rail("next")["ticket"], "1")
+        approved = [t for t in a.rail("status")["tickets"] if t["ticket"] == "2"][0]
+        self.assertEqual(approved["state"], "accepted")
+        self.assertNotIn("rail:go", github.pr(1)["labels"])
+
     def test_a_refused_merge_waits_for_a_person(self):
         a, b, github = self.github_pair()
         a.add(ticket())

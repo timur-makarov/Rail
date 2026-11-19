@@ -18,6 +18,13 @@ def keyed(key, title="Fix add", scope=("src/**",)):
 
 
 class Source(RailTest):
+    def test_a_fetch_that_prints_nothing_starts_no_agent_task(self):
+        p = self.fixture()
+        p.write(".rail/sources/ci.md", source("true"))
+        quiet = p.rail("source", "ci")
+        self.assertEqual((quiet["reason"]["code"], quiet["owner"], quiet["action"]["kind"]),
+                         ("SOURCE_EMPTY", "none", "rest"))
+
     def test_a_source_hands_the_agent_its_prompt_and_signal_and_caps_what_it_files(self):
         p = self.fixture()
         marker = os.path.join(self.tmp, "fetched")

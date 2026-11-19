@@ -21,7 +21,7 @@ rail advance    the engine checks the work and moves the ticket on, or says what
 
 For a ticket's work, `rail next` also names a model and effort: a cheaper one for a fresh ticket, one rung
 higher after each failed attempt. An unattended runner, a cloud session a scheduled task starts, hands each
-brief to a fresh subagent on that model and runs `rail advance` itself.
+ticket to a subagent on that model and runs `rail advance` itself.
 
 A ticket goes through these states. The engine derives the state each time; the agent can't set it.
 
@@ -36,13 +36,13 @@ new -> accepted -> implementing -> reviewing -> in-ci -> merge-ready -> merged
 - a tier, `AUTO` or `PERSON`: who accepts the contract and who merges.
 
 The contract freezes when the ticket is accepted. From then on the agent can't weaken a check or widen the
-scope quietly: a change goes through `rail amend`, which is recorded, and on a PERSON ticket waits for a
-person.
+scope quietly: a change goes through `rail amend`, which is recorded, and a changed Done Contract on a
+PERSON ticket waits for a person.
 
 **The engine decides what "done" means.** `rail advance` commits the change and runs the ship checks in
-order: a rebase onto the base branch, ticket lint, open assumptions, scope, structure rules, migration
-fields, size, the architecture map, the project's own `verify` command (tests, lint, scans), and each
-`Check:` line. A failure sends the ticket back with the output. A failure counts as stuck only when it
+order: a rebase onto the base branch, ticket lint, open assumptions, scope, structure rules, the migration
+fields of a migration ticket (`reversibility` and `rollback`), size, the architecture map (the `## Areas`
+table in `ARCHITECTURE.md`), the project's own `verify` command (tests, lint, scans), and each `Check:` line. A failure sends the ticket back with the output. A failure counts as stuck only when it
 repeats: when a step fails the same way twice in a row, a second opinion (`rail consult`) advises once, and
 after one more failure the ticket waits for a person. Five failures at one step wait for a person whatever
 they were.
@@ -61,6 +61,9 @@ author's argument. The only changes that skip the reviewer are those to paths yo
 | Accepts the contract | The engine, once the ticket is well formed | A person |
 | Review | The reviewer, with a security checklist | The reviewer and a security seat |
 | Merges | The engine, once CI is green | A person |
+
+In a project with no remote there is no CI and no pull request: the engine merges both tiers, and a PERSON
+ticket waits for a person's `rail accept NN` first.
 
 A ticket is PERSON when its author says so, when it touches `person_paths` (the paths you name, such as
 auth, payments and infrastructure, plus Rail's own files and the CI workflows) or a migration, or when the
@@ -99,7 +102,8 @@ that merged with no review, and turns what it finds into tickets. A source does 
 signal, such as failed CI runs or last week's merges: a prompt in `.rail/sources/` that files tickets and
 never edits.
 
-**What Rail leaves to others.** It starts no agents: a session or a cloud scheduled task does. It doesn't say how
+**What Rail leaves to others.** It starts no agents: a session or a cloud scheduled task does, and one
+person owns that task for a repository (`rail docs cloud` says why). It doesn't say how
 to write, test or debug code: that is the agent's craft. It doesn't deploy: a ticket ends at its merge.
 
 ## Start in a Claude Code cloud session
@@ -149,7 +153,7 @@ with `rail adopt BRANCH`: the agent writes its ticket, and its checks must fail 
 branch.
 
 **Guides and skills.** `rail init` adds Claude Code skills to `.claude/skills/`: some help a person turn
-an idea into a ticket (`rail-clarity`, `rail-deepen`, `rail-blast-radius`, `rail-grill`, `rail-slice`), and
+an idea into a ticket (`rail-blast-radius`, `rail-grill`, `rail-slice`), and
 some are craft for the work itself, such as building a ticket, debugging a repeated failure or answering
 review findings. The `[guides]` table in `.rail/config.toml` names the right one in the brief when its
 situation comes up. A guide is a hint: nothing fails when an agent ignores it, and `rail stats` shows whether
