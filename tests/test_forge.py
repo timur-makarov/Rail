@@ -328,6 +328,25 @@ class Merges(RailTest):
                                          github.head("main"), "1-fix-add"]).returncode, 0)
         self.assertEqual(github.pr(1)["labels"], [])
 
+    def test_a_rebased_branch_is_not_rebased_again_while_github_still_says_behind(self):
+        # GitHub answers "behind" for a while after the push that fixed it.
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        a.rail("next")
+        a.fix_calc("1")
+        a.rail("advance", "1")
+        github.ci("1-fix-add", "success")
+        b.write("notes.md", "news\n")
+        b.git("add", "notes.md")
+        b.git("commit", "--quiet", "-m", "base moves")
+        b.git("push", "--quiet", "origin", "main")
+        github.update(lambda s: s["pulls"][0].__setitem__("mergeable_state", "behind"))
+        self.assertEqual(a.rail("next")["reason"]["code"], "CI_WAIT")
+        self.assertEqual(a.rail("next")["reason"]["code"], "CI_WAIT")
+        journal = a.git("show", "1-fix-add:.rail/journal/1-events.jsonl")
+        self.assertEqual(journal.count('"step":"rebase"'), 1, journal)
+        self.assertEqual(a.git("rev-parse", "origin/1-fix-add"), a.git("rev-parse", "1-fix-add"))
+
     def test_next_reads_an_approval_on_a_ticket_it_does_not_go_on_with(self):
         # The run goes on with its own ticket 1; ticket 2's rail:go must not read as "waits for approval" meanwhile.
         a, b, github = self.github_pair()
