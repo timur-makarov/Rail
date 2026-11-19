@@ -31,9 +31,7 @@ Run each `Check:` line before you change anything, and read the output.
 
 ## 3. Orient cheaply
 
-Run `rail context NN`. Read the code the change touches and the tests that call it. For reading across many
-files, start a read-only subagent on a cheaper model and ask for conclusions with `file:line`. Keep the
-edits and the decisions in your own context.
+Run `rail context NN`. Read the code the change touches and the tests that call it.
 
 Verify the `ASSUMED:` rows now. They are the cheapest things to be wrong about.
 
@@ -96,5 +94,3 @@ Each review round costs a full review of the change. A problem you remove now co
    state. It is **confirmed** when you saw it in this session: give the command and what it printed, or the
    `file:line`. It is **inferred** when it only follows from what you saw: give the reason. When you are not
    sure which, write inferred.
-
-`rail-self-check` is the long form of these steps, for a large or risky change.
