@@ -204,3 +204,5 @@ One line for each change, saying why.
 - rail-grill: when a request is about data, look at the real data before asking. In a test where the data held the cause, old 2 of 4 runs got it, new 4 of 4, with no questions the data could answer.
 - When every `Check:` already passed on the base, the IMPLEMENT brief says the contract cannot tell done from not done and asks for a check that fails now, added with `rail amend`. In real runs 4 of 4 workers amended the contract with this line, against 0 of 4 before.
 - Writing a ticket's contract (`TICKET_LINT`) names `[worker] contract`, Opus 5.5 by default, instead of the first rung of the ladder. In real runs on 3 intake cases, Opus contracts held a check that rejected every held-out wrong implementation in 8 of 12, Sonnet in 2 of 12; tier and scope were right 12 of 12 for both.
+- The engine takes `rail:needs-you` off only when the agent is to act on the ticket. Before, a session whose clone held an old copy of another session's ticket branch took the label off a pull request that waited for a person.
+- The comment on the issue of a dropped ticket gives the reason, such as "already done: where".

@@ -85,7 +85,8 @@ class Intake(RailTest):
         a.rail("drop", "1", "--reason", "a duplicate")
         issue = github.read()["issues"][0]
         self.assertNotIn("rail", issue["labels"])
-        self.assertIn("Label this issue `rail` again to retry", github.read()["comments"]["12"][0]["body"])
+        self.assertIn("Reason: a duplicate.", github.read()["comments"]["12"][0]["body"])
+        self.assertIn("Label this issue `rail` again to retry", " ".join(github.read()["comments"]["12"][0]["body"].split()))
 
     def test_a_failed_deploy_names_the_ticket_that_caused_it(self):
         a, b, github = self.github_pair()
