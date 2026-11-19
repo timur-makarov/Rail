@@ -37,7 +37,8 @@ failing step's raw output, plus one question; your own story is left out. It ans
 or `stop`, and the engine keeps the advice in `.rail/journal/NN-advice.md`. It is read-only and never
 checks the change, and at most three run per ticket. One verdict changes who acts: when consult, asked at
 the retry budget, answers `stop`, the ticket waits for a person at once, with no further attempt. A `stop`
-to a question you asked yourself is advice only. Ask it yourself with `rail consult NN "question"`.
+to a question you asked yourself is advice only. The advice given at the budget is in the answer of
+`rail advance` and, until the next attempt, in the brief of `rail next`, so a fresh worker gets it too. Ask it yourself with `rail consult NN "question"`.
 
 ## Waits
 

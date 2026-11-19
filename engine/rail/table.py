@@ -4,7 +4,8 @@ Rows whose code is in TRANSITIONS are moves `next` makes itself (accepting an AU
 consult); `next` makes the move, derives the facts again, and reads the table once more.
 """
 
-from .project import ticket_path
+from . import gitx
+from .project import advice_path, ticket_path
 from .util import MISSING_HELP
 
 TRANSITIONS = {"ACCEPT_AUTO", "CLAIM", "RESUME", "CONSULT", "GO", "REBASE_BEHIND", "CONTRACT_MERGED"}
@@ -128,7 +129,19 @@ def _step_failed(f):
         return (f"The last ship of ticket {f.id} could not run '{e.get('step')}': {e.get('detail', '')}. {MISSING_HELP}"
                 f" Then run: rail advance {f.id}") + _findings(f, "Open review findings:") + _note(f)
     return (f"The last ship of ticket {f.id} failed at '{e.get('step')}': {e.get('detail', '')}. Nothing has changed"
-            f" since. Fix the cause in {f.cwd}, then run: rail advance {f.id}") + _findings(f, "Open review findings:") + _note(f)
+            f" since. Fix the cause in {f.cwd}, then run: rail advance {f.id}") + _advice(f, e.get("step")) \
+        + _findings(f, "Open review findings:") + _note(f)
+
+
+def _advice(f, step):
+    """Consult's latest advice, while the attempt it was given for is still to come. `rail advance` shows it once;
+    a fresh worker gets its brief from `rail next` and would otherwise never see it."""
+    if step not in f.advised:
+        return ""
+    ref = f"{f.t.ref}:{advice_path(f.id)}"
+    text = gitx.read_blobs([ref], f.project.root).get(ref) or ""
+    last = text.strip().rsplit("\n## ", 1)[-1].strip()
+    return f"\n\nConsult advised on this failure:\n## {last.removeprefix('## ')}" if last else ""
 
 
 def _could_not_run(f, steps):

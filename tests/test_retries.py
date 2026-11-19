@@ -39,6 +39,18 @@ class Consult(RailTest):
                       stuck["action"]["brief"])
         self.assertEqual(len(events(p, "consulted")), 1)
 
+    def test_next_repeats_consults_advice_until_the_attempt_it_was_given_for(self):
+        # A runner hands the brief of `rail next` to a fresh worker, who never saw what `rail advance` printed.
+        p = self.fixture()
+        p.add(ticket())
+        p.rail("next")
+        p.rail("advance", "1", expect=3)
+        advised = p.rail("advance", "1", expect=3)  # the same failure again: consult advises
+        self.assertIn("The check expects a + b.", advised["action"]["brief"])
+        brief = p.rail("next", "--ticket", "1")["action"]["brief"]
+        self.assertIn("Consult advised on this failure:", brief)
+        self.assertIn("The check expects a + b.", brief)
+
     def test_with_no_consult_pack_the_budget_goes_straight_to_a_person(self):
         p = self.fixture()
         shutil.rmtree(p.path(".rail", "packs", "consult"))

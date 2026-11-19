@@ -164,3 +164,5 @@ One line for each change, saying why.
 - Count doc-lint among the ship steps, so `rail next` remembers a ship that failed there and names the stuck guide, as `rail advance` already did.
 - Let `rail amend NN "why"` take a reason, keep it in the `amended` event and show it in the wait for approval. Two skills told the worker to give the reason, and the command had no place for it.
 - Answer with a plain error when the shell's folder no longer exists. `rail advance 1; rail next` from a ticket's worktree crashed with a Python traceback after the merge removed that worktree (6 of 8 real runs).
+- Repeat consult's advice in the brief of `rail next` until the attempt it was given for. It was only in the answer of `rail advance`, and a runner hands the `rail next` brief to a fresh worker: in 40 real runs no worker read the advice file.
+- Write `Part of #N` and not `Closes #N` in the pull request of a ticket that has a `## Split` section. In a real cloud run an issue that asked for four pieces was closed when the first one merged, and nothing tracked the rest.

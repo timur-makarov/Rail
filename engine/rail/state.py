@@ -176,6 +176,7 @@ class Facts:
             elif s not in consulted and same[s] >= budget and not can_consult:
                 self.capped_why[s] = "same"
         self.capped = list(self.capped_why)
+        self.advised = [s for s, n in consulted.items() if n == 0]  # consult advised, and no attempt followed yet
         self.consult_due = next((s for s, n in same.items() if n >= budget and s not in consulted and can_consult
                                  and s not in self.capped_why), None)
         runs = [e for e in events[since:] if e.get("event") == "step" and e.get("step") in ("review", "security", "refuter")]

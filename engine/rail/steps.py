@@ -396,7 +396,9 @@ def describe(project, t, ticket, tier):
         "Review: " + (("reviewer, security seat" if tier == "PERSON" else "reviewer") if reviewed else "none"),
     ]
     if external.startswith("github#"):
-        body.append(f"Closes #{external.split('#', 1)[1]}")
+        # A ticket narrowed to the first part of its request leaves the issue open for the rest.
+        word = "Part of" if ticket.sections.get("Split") else "Closes"
+        body.append(f"{word} #{external.split('#', 1)[1]}")
     if external.startswith("sweep#"):
         body.append(f"Sweep: since {external.split('#', 1)[1]}")  # where the next sweep starts
     sessions = [e["session_url"] for e in t.events if e.get("event") == "claimed" and e.get("session_url")]
