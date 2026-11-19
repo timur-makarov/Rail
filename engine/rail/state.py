@@ -302,15 +302,16 @@ class Facts:
                 return "implementing"  # a red required check or a conflict with base returns the ticket
         if self.needs_review and not self.ledger.complete(self.patch_id, self.tier):
             return "reviewing"
-        if project.remote and not (self.pr_open and self.pushed and self.ci == "green"):
-            return "in-ci"
+        if project.remote and (self.behind or not (self.pr_open and self.pushed and self.ci == "green")):
+            return "in-ci"  # also green and behind its base: GitHub refuses that merge, so it is rebased first
         return "merge-ready"
 
 
 def derive(project, tickets):
     """Facts for every ticket, with the cross-ticket facts: `after` and scope overlap."""
     facts = {nn: Facts(project, t) for nn, t in tickets.items()}
-    implementing = [f for f in facts.values() if f.state == "implementing"]
+    # In flight until it merges: a ticket in review or CI still conflicts with one that starts on the same paths.
+    implementing = [f for f in facts.values() if f.state in OPEN]
     for f in facts.values():
         if f.state != "accepted" or not f.ticket:
             continue

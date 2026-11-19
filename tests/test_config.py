@@ -57,6 +57,7 @@ class Rules(RailTest):
         p.write("src/fixtures/rows.sql", "insert into t values (1);\n", base=p.worktree("1"))
         shipped = p.rail("advance", "1")
         self.assertEqual((shipped["state"], step(shipped, "rules")["result"]), ("merge-ready", "pass"))
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")  # ticket 2 has the same scope: it waits for this
 
         p.add(ticket(title="Silence a warning", scope=("src/**",)))
         p.rail("next", "--ticket", "2", session="b")

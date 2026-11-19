@@ -169,3 +169,6 @@ One line for each change, saying why.
 - Name the conflict guide in the brief of the ship that met the conflict, not only once the agent has started the rebase by hand.
 - Poll a CI run every 30 seconds and not every 3: `gh run watch` shares GitHub's hourly request limit with the engine's own calls.
 - Push a ticket branch the agent rebased by hand after a conflict: the failed ship's journal commit had used up the engine's lease note, so the rewritten branch was refused, nothing said so, and the ticket answered CONFLICT for ever (issue 20, from a cloud run).
+- Rebase a pull request that is green and behind its base instead of asking GitHub to merge it: with "require up to date" the merge never landed, the ticket went to a person as a failed merge, and the engine's own `rail:needs-you` then read as a person's hold in the next session (seen in a cloud run).
+- Read every `rail:go` on a contract at the start of `rail next`, whichever ticket the run goes on with: three approved tickets read as "waits for approval" for an hour while the session worked another.
+- Keep a ticket from being claimed while another on the same paths is in review, in CI or ready to merge, not only while it is being implemented: three of eight tickets in a cloud run met a conflict this way.

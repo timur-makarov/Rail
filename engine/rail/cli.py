@@ -931,6 +931,13 @@ def cmd_next(project, args):
         return from_facts(f, took_in + receipts, leftovers=leftovers)
 
     tickets, facts = load(project)
+    # A person's rail:go on a contract is read now, whichever ticket this run goes on with: until then the ticket
+    # reads as waiting for an approval it already has.
+    approved = [f for f in facts.values() if f.state == "new" and first_match(f)[0] == "GO"]
+    for f in approved:
+        took_in += transition(project, f, "GO")[1].steps
+    if approved:
+        tickets, facts = load(project)
     # A person's inbox is the label: every wait gets it now, not only when the agent runs dry.
     for f in facts.values():
         code, owner, _ = first_match(f)
