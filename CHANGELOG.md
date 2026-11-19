@@ -197,3 +197,4 @@ One line for each change, saying why.
 - When another session rebases a ticket first, this one takes the remote's copy instead of keeping its own. A note of the remote tip that a refused push proved stale is removed, so later pushes from that clone are not refused too.
 - A cloud session no longer tries to delete a merged ticket's remote branch: its git access can't, and GitHub's own setting does it.
 - README: how to run with no session open, with the runner prompt and the three triggers to copy.
+- `rail stats` no longer sets tickets with the `start` guide beside tickets without it. Every ticket gets that guide, so the second group held only tickets from before a guide was named, a different kind of work. The line that counts the tickets each guide was named for stays.

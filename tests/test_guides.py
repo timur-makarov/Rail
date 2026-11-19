@@ -181,7 +181,7 @@ class Stats(RailTest):
         self.assertEqual(p.rail("advance", nn)["state"], "merge-ready")
         self.assertEqual(p.rail("advance", nn)["state"], "merged")
 
-    def test_stats_counts_tickets_with_the_start_guide_beside_the_rest(self):
+    def test_stats_counts_the_tickets_each_guide_was_named_for(self):
         p = self.fixture(config=guides(start=None).replace("[consult]", "[retry]\nbudget = 1\n\n[consult]"))
         p.add(ticket())
         p.rail("next")
@@ -190,20 +190,13 @@ class Stats(RailTest):
         p.rail("accept", "1", "fix add")
         self.merge(p, "1", "src/calc.py", "def add(a, b):\n    return a + b\n")
         stats = p.rail("stats")
-        self.assertNotIn("GUIDES", stats["text"])  # nothing was guided yet
+        self.assertNotIn("Guides named", stats["text"])  # nothing was guided yet
         p.write(".rail/config.toml", guides())
         p.git("commit", "--quiet", "-am", "name the start guide")
         p.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
         self.merge(p, "2", "api/handlers.py", "def handle():\n    return 201\n")
         stats = p.rail("stats")
-        found = stats["stats"]["guides"]
-        self.assertEqual({k: found["guided"][k] for k in ("tickets", "failed_steps", "review_runs", "waited")},
-                         {"tickets": 1, "failed_steps": 0, "review_runs": 1, "waited": 0})
-        self.assertEqual({k: found["not guided"][k] for k in ("tickets", "failed_steps_per_ticket", "review_runs_per_ticket")},
-                         {"tickets": 1, "failed_steps_per_ticket": 2.0, "review_runs_per_ticket": 1.0})
-        self.assertEqual(found["not guided"]["waited"], 1)
-        self.assertEqual(found["situations"], {"start": 1})
-        self.assertIn("GUIDES", stats["text"])
+        self.assertEqual(stats["stats"]["guides"], {"situations": {"start": 1}})
         self.assertIn("Guides named: start 1.", stats["text"])
 
 
