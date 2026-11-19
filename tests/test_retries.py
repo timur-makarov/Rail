@@ -85,7 +85,7 @@ class Consult(RailTest):
         self.assertIn("'checks' failed the same way 2 times in a row ([retry] budget)", stuck["action"]["brief"])
         self.assertEqual(len(events(p, "consulted")), 3)
 
-    def test_when_consult_says_stop_the_ticket_waits_for_a_person_at_once(self):
+    def test_when_consult_says_stop_the_agent_still_gets_its_one_attempt(self):
         p = self.fixture()
         p.write(".rail/packs/consult/bin/consult",
                 '#!/bin/sh\ncat > /dev/null\necho \'{"verdict": "stop", "advice": "The check contradicts the Why."}\'\n')
@@ -97,11 +97,12 @@ class Consult(RailTest):
         p.rail("advance", "1", expect=3)
         second = p.rail("advance", "1", expect=3)  # the same failure again: the budget, and consult is asked
         self.assertEqual([e["verdict"] for e in events(p, "consulted")], ["stop"])
-        self.assertEqual((second["owner"], second["reason"]["code"]), ("human", "RETRY_CAP"))
-        self.assertIn("'checks' failed the same way 2 times in a row, and consult said a person must decide"
-                      " (its advice is in .rail/journal/1-advice.md) ([retry] budget)", second["action"]["brief"])
+        self.assertEqual((second["owner"], second["reason"]["code"]), ("agent", "STEP_FAILED"))
+        self.assertIn("consult says stop: The check contradicts the Why.", second["action"]["brief"])
         self.assertIn("The check contradicts the Why.", p.git("show", "1-fix-add:.rail/journal/1-advice.md"))
-        self.assertEqual(p.rail("next")["owner"], "human")  # no further attempt is offered
+        third = p.rail("advance", "1", expect=3)  # the attempt after consult fails too
+        self.assertEqual((third["owner"], third["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertIn("then once more after consult", third["action"]["brief"])
 
     def test_a_consult_pack_that_answers_nothing_readable_counts_as_stop(self):
         p = self.fixture()
@@ -112,12 +113,11 @@ class Consult(RailTest):
         p.add(ticket())
         p.rail("next")
         p.rail("advance", "1", expect=3)
-        stuck = p.rail("advance", "1", expect=3)
+        second = p.rail("advance", "1", expect=3)
+        self.assertEqual((second["owner"], second["reason"]["code"]), ("agent", "STEP_FAILED"))
+        self.assertIn("consult says stop: The consult pack failed: consult: no model is configured",
+                      second["action"]["brief"])
         self.assertEqual([e["verdict"] for e in events(p, "consulted")], ["stop"])
-        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "RETRY_CAP"))
-        self.assertIn("consult said a person must decide", stuck["action"]["brief"])
-        self.assertIn("The consult pack failed: consult: no model is configured",
-                      p.git("show", "1-fix-add:.rail/journal/1-advice.md"))
 
     def test_consults_brief_leaves_out_the_workers_own_story(self):
         # The worker writes ## Look at; consult judges from the ticket and the diff, not from the worker's account.

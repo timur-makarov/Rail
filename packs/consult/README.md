@@ -8,9 +8,8 @@ A different model advises the agent when it is stuck: at the retry cap, or on re
 - **Brief:** the ticket, the diff and the raw output of the failing step, plus one question. The
   agent's own story is left out.
 - **Answer:** `proceed`, `change` or `stop`, with a few sentences of advice.
-- **Rules:** read-only, never counted as review, at most three per ticket. It never checks the change. A
-  `stop` given at the retry cap sends the ticket to a person at once; a `stop` to a question the agent
-  asked is advice only.
+- **Rules:** read-only, never counted as review, at most three per ticket. It never checks the change, and
+  every verdict is advice: after a `stop` the agent still gets its one attempt.
 - **Settings:** `[consult] command` in `.rail/config.toml`, run with the brief on stdin. Point it at
   another vendor's CLI when you have one. A consult by the author's own model (`claude`) is
   labelled same-model.

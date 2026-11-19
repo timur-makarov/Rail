@@ -171,9 +171,7 @@ def _stuck(f, step):
     """Why a step waits for a person: the same failure at the budget, or the cap on failures of any kind."""
     if f.capped_why[step] == "cap":
         return f"'{step}' failed {f.attempts[step]} times since it last passed, whatever the output ([retry] cap)"
-    after = (", then once more after consult" if f.capped_why[step] == "consulted" else
-             f", and consult said a person must decide (its advice is in .rail/journal/{f.id}-advice.md)"
-             if f.capped_why[step] == "stop" else "")
+    after = ", then once more after consult" if f.capped_why[step] == "consulted" else ""
     return f"'{step}' failed the same way {f.project.config['retry']['budget']} times in a row{after} ([retry] budget)"
 
 

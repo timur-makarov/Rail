@@ -158,7 +158,6 @@ One line for each change, saying why.
 - Count a `verify` that fails on the base branch and prints nothing as a red base. Its empty output read as "green on the base", so the ticket spent its retry budget on a failure it did not cause. A `verify` that times out on the base still proves nothing.
 - Say in the security step how many blocking findings went to the refuter. It read "0 blocking" while the seat's finding was blocking.
 - Leave the ticket's `## Look at` out of consult's brief. The worker writes that section, and the docs promise that the worker's own story is left out.
-- Send a ticket to a person at once when consult, asked at the retry budget, answers `stop`. The pack's prompt says `stop` means a person must decide, but the agent still got one more attempt.
 - Correct three doc passages that said more than the code does: `[claim] save_minutes` does not set how often the save hook runs (the hook's command holds that number), `[[rules]] why` is a note the engine prints nowhere, and the refuter's brief leaves the author's argument out but the journal in its worktree holds it.
 - Reset a step's failure count on a pass only when no failure follows it at the same step. Each `Check:` line is its own event at the step `checks`, so a first line that passed reset the count before a later line failed: such a ticket failed for ever, with no consult and no person.
 - Count doc-lint among the ship steps, so `rail next` remembers a ship that failed there and names the stuck guide, as `rail advance` already did.

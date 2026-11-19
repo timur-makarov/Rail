@@ -102,7 +102,6 @@ class Facts:
         retry.budget times in a row; whatever the failures, retry.cap of them since it last passed wait for a person."""
         budget, cap = project.config["retry"]["budget"], project.config["retry"]["cap"]
         attempts, same, seen, consulted, since, failing = {}, {}, {}, {}, 0, None
-        stopped = set()  # steps where consult, asked at the budget, said that a person must decide
         passed = None    # a step whose last event passed: its counts reset once the run leaves that step
 
         def settle():
@@ -112,7 +111,6 @@ class Facts:
                 attempts[passed] = same[passed] = 0
                 seen.pop(passed, None)
                 consulted.pop(passed, None)
-                stopped.discard(passed)
 
         accepted_at = amended_at = shipped_at = continued_at = -1
         self.amend_reason = ""
@@ -124,7 +122,6 @@ class Facts:
             if kind == "continued" or (kind == "accepted" and e.get("by") == "person"):
                 # A person's act gives a fresh budget and a fresh cap, whether it continues a wait or approves.
                 attempts, same, seen, consulted, since = {}, {}, {}, {}, i
-                stopped = set()
                 if kind == "continued":
                     continued_at = i
                 else:
@@ -148,8 +145,6 @@ class Facts:
                     failing = step
             elif kind == "consulted" and e.get("trigger") == "retry_cap":
                 consulted[e.get("step")] = 0  # the failures since consult advised
-                if e.get("verdict") == "stop":
-                    stopped.add(e.get("step"))
             elif kind == "accepted":
                 accepted_at = i
             elif kind == "amended" and e.get("needs_approval"):
@@ -163,14 +158,12 @@ class Facts:
         can_consult = os.path.exists(pack) and self.consults < 3
         self.attempts, self.same = attempts, same
         self.failing = failing if attempts.get(failing) else None  # the step the ticket is failing now, if any
-        # Why each step waits for a person: the cap, consult's stop, the attempt after consult, or the budget with
+        # Why each step waits for a person: the cap, the attempt after consult, or the budget with
         # no consult to ask.
         self.capped_why = {}
         for s, n in attempts.items():
             if n >= cap:
                 self.capped_why[s] = "cap"
-            elif s in stopped:
-                self.capped_why[s] = "stop"
             elif consulted.get(s):
                 self.capped_why[s] = "consulted"
             elif s not in consulted and same[s] >= budget and not can_consult:
