@@ -53,6 +53,7 @@ class Review(RailTest):
         self.assertIn("Prefer small functions.", brief)
         self.assertNotIn("rail next --json", brief)  # the ## Rail section stays out of the brief
         self.assertIn("This run's job: Review this change.", brief)
+        self.assertNotIn("## The contract as first accepted", brief)  # no amend: the contract is the accepted one
         self.assertIn("Security. This list is a checklist", brief)  # AUTO: the security section is in the one review
 
         p.write("src/calc.py", "def add(a, b):\n    return b + a\n", base=p.worktree("1"))
@@ -327,6 +328,10 @@ class Contract(RailTest):
         self.assertEqual([s["step"] for s in empty["steps"] if s.get("result") == "fail"], ["change"])
         p.fix_calc("1")
         self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")
+        # Nobody approved the amend, so the reviewer also gets the contract as first accepted.
+        brief = p.briefs()[0]["brief"]
+        self.assertIn("## The contract as first accepted\nAn amend nobody approved changed", brief)
+        self.assertIn("assert calc.add(2, 3) == 5", brief.split("## The contract as first accepted")[1].split("## The diff")[0])
 
     def test_lowering_the_tier_after_claim_fails(self):
         p = self.fixture()
