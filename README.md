@@ -99,7 +99,8 @@ that merged with no review, and turns what it finds into tickets. A source does 
 signal, such as failed CI runs or last week's merges: a prompt in `.rail/sources/` that files tickets and
 never edits.
 
-**What Rail leaves to others.** It starts no agents: a session or a cloud scheduled task does. It doesn't say how
+**What Rail leaves to others.** It starts no agents: a session or a cloud scheduled task does, and one
+person owns that task for a repository (`rail docs cloud` says why). It doesn't say how
 to write, test or debug code: that is the agent's craft. It doesn't deploy: a ticket ends at its merge.
 
 ## Start in a Claude Code cloud session

@@ -82,11 +82,26 @@ Each ticket gets a fresh context and the model its tier and its failed attempts 
 nothing and keeps a small context, so one run can move many tickets. A failed attempt goes to a new worker
 one rung up, with the failure in its brief. A guide line (`rail docs guides`) is part of the brief, so the worker gets it.
 
-Give it these triggers:
+Give it these triggers. Where a task takes only one GitHub event, make one task for each event, all with
+the same prompt:
 
-- **GitHub events:** an issue labelled, a pull request labelled, and a pull request closed. They cover new
-  work, your `rail:go`, and a merge that unblocks the next ticket.
+- **An issue labelled.** New work: the label `rail` starts it. "Issue opened" misses an issue that gets the
+  label later.
+- **A pull request labelled,** with the filter "Labels contains `rail:go`". Your approval. Without the
+  filter the engine's own `rail:needs-you` starts a run too.
+- **A pull request closed,** with the filter "Is merged". A merge unblocks the next ticket, and it is what
+  puts another open pull request behind its base.
 - **A schedule,** hourly or nightly, as a net for anything an event missed.
+
+Don't use "edited" or "synchronized": the engine writes each pull request's title, body and branch, so its
+own work would start run after run.
+
+**One runner for a repository.** A scheduled task belongs to one person's Claude account: its runs are that
+person's usage, and its commits and pull requests carry that person's GitHub login. When two people each
+make these tasks for the same repository, every event starts a run for each of them. Claims keep the two
+off the same ticket, but each event costs twice, and nothing decides whose name a ticket's work carries.
+Until Rail has a way to share the work out (`proposals/team.md`), one person owns the runner, and the
+others hand work over and answer waits on GitHub.
 
 Each run is a fresh session, and the section above is why that is enough. For more work at once, start
 more sessions: claims are taken on the remote, so two never take the same ticket. `rail status --json`

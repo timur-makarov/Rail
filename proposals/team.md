@@ -50,6 +50,35 @@ on, that person could never approve the runner's work.
 - **Not verified:** how a Claude Code cloud session chooses its GitHub identity, and whether a scheduled
   task can use a different one from the person who made it. Check this before building anything.
 
+### 3a. Who owns the runner
+
+Checked on 2026-11-19 against Claude Code's page on scheduled tasks, and seen in one cloud run:
+
+- A scheduled task belongs to one claude.ai account. It is not shared with teammates, its runs count against
+  that account, and its commits and pull requests carry that person's GitHub login.
+- A GitHub trigger starts a new session for every matching event. Events over an hourly cap are dropped.
+- Filters are documented for pull request triggers only: author, title, body, base branch, head branch,
+  labels, draft, merged. None is documented for issue triggers.
+- Not documented: whether the event (which issue, which label) reaches the session, and whether a task's
+  own acts start it again. In the cloud run a "pull request edited" trigger did start runs from the
+  engine's own edits.
+
+So when two people each set the runner up, every event starts two sessions. Claims keep them off the same
+ticket, but the cost doubles and the winner of each claim decides whose login the work carries.
+
+- **One runner (works today):** one account owns the tasks, best a machine account (see 3). Everyone else
+  files issues, labels `rail:go` and merges. Nothing to build. The cost: one account's limits carry the
+  whole team's work.
+- **A runner for each person:** each person's runner works only that person's tickets. Trigger filters
+  can't do this alone, because new work arrives as issues and issue triggers have no documented filter.
+  The engine has to share the work out: the journal already records who filed each ticket (`filed_by`), and
+  `gh api user` says whose session this is, so `rail next` could take only the tickets its own login filed,
+  plus tickets nobody's runner has taken after a while. A run started by someone else's event then finds no
+  work and ends in one command. A pull request filter such as "Labels contains `owner:<login>`" would only
+  save those empty runs.
+- **Cost:** the second is one comparison in `next`'s ordering and a rule for orphaned tickets, and it is the
+  same mechanism as 4. Start with one runner; build the second when one account's limits are reached.
+
 ### 4. A ticket a person keeps
 
 An engineer who wants to drive a ticket in their own session has no way to tell the runner to leave it.
@@ -109,5 +138,6 @@ Each person's sessions run on their own account. A shared runner runs on one acc
 1. A ticket a person keeps (4).
 2. Priority (5).
 3. Addressed waits (1), with `CODEOWNERS` as the source of owners (2).
-4. The machine identity (3), once it is verified what a cloud session allows.
+4. The machine identity (3) as the one runner's owner (3a), once it is verified what a cloud session
+   allows. A runner for each person only when one account's limits are reached.
 5. The overlap warning (6), if conflicts show up in `rail stats`.
