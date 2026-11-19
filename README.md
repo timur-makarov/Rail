@@ -21,7 +21,7 @@ rail advance    the engine checks the work and moves the ticket on, or says what
 
 For a ticket's work, `rail next` also names a model and effort: a cheaper one for a fresh ticket, one rung
 higher after each failed attempt. An unattended runner, a cloud session a scheduled task starts, hands each
-brief to a fresh subagent on that model and runs `rail advance` itself.
+ticket to a subagent on that model and runs `rail advance` itself.
 
 A ticket goes through these states. The engine derives the state each time; the agent can't set it.
 
