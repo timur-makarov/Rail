@@ -198,3 +198,4 @@ One line for each change, saying why.
 - A cloud session no longer tries to delete a merged ticket's remote branch: its git access can't, and GitHub's own setting does it.
 - README: how to run with no session open, with the runner prompt and the three triggers to copy.
 - rail-debug and rail-conflict: drop the debug tag, "keep it as a test" and the `git diff :1:` commands, which almost no run followed; 20 runs per arm showed nothing lost.
+- rail-grill: when a request is about data, look at the real data before asking. In a test where the data held the cause, old 2 of 4 runs got it, new 4 of 4, with no questions the data could answer.
