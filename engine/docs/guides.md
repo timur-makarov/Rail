@@ -13,7 +13,7 @@ situation and the path.
 
 | Situation | When | Default guide |
 |---|---|---|
-| `start` | The first `IMPLEMENT` brief of a claimed ticket, once per ticket | `rail-build`, which ends with `rail-self-check` |
+| `start` | The first `IMPLEMENT` brief of a claimed ticket, once per ticket | `rail-build` |
 | `stuck` | A step failed the same way twice in a row (the same `signature`) | `rail-debug` |
 | `findings` | A review left findings to answer | `rail-findings` |
 | `conflict` | A ship failed at `rebase`, or a rebase is stopped on a conflict in the ticket's worktree (`REBASING`) | `rail-conflict` |

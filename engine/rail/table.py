@@ -316,7 +316,9 @@ ROWS = [
     ("SWEEP_TICKETS",      "agent", "agent_task",  lambda f: f.state == "implementing" and f.sweep and not f.dirty
                                                    and not f.last_fail,
      lambda f: f"The sweep ran: read .rail/journal/{f.id}-summary.md in {f.cwd}. Open a ticket with rail add for each"
-               f" finding worth one (set caused_by when a ticket caused it), and one ticket \"make it a check: ...\" for"
+               f" finding that names something wrong: an input or a sequence that fails, or a doc that no longer"
+               f" matches the code (set caused_by when a ticket caused it); a finding about style, naming or where a"
+               f" test lives gets no ticket. Open one ticket \"make it a check: ...\" for"
                f" each kind of proposed check. Drop duplicates. Change no code here. Then run: rail advance {f.id}"),
     ("SETUP_FAILED",       "agent", "agent_task",  lambda f: f.state == "implementing" and f.setup_failed,
      _setup_failed),
