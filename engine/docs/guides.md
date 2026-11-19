@@ -16,7 +16,7 @@ situation and the path.
 | `start` | The first `IMPLEMENT` brief of a claimed ticket, once per ticket | `rail-build`, which ends with `rail-self-check` |
 | `stuck` | A step failed the same way twice in a row (the same `signature`) | `rail-debug` |
 | `findings` | A review left findings to answer | `rail-findings` |
-| `conflict` | A rebase stopped on a conflict in the ticket's worktree (`REBASING`) | `rail-conflict` |
+| `conflict` | A ship failed at `rebase`, or a rebase is stopped on a conflict in the ticket's worktree (`REBASING`) | `rail-conflict` |
 | `contract` | A ticket came in as a request and needs its contract | `rail-blast-radius` |
 | `split` | Ship offered a split: an AUTO change is over `[size] cap` | `rail-slice` |
 | `setup` | The init task | `rail-verify` |

@@ -166,3 +166,6 @@ One line for each change, saying why.
 - Answer with a plain error when the shell's folder no longer exists. `rail advance 1; rail next` from a ticket's worktree crashed with a Python traceback after the merge removed that worktree (6 of 8 real runs).
 - Repeat consult's advice in the brief of `rail next` until the attempt it was given for. It was only in the answer of `rail advance`, and a runner hands the `rail next` brief to a fresh worker: in 40 real runs no worker read the advice file.
 - Write `Part of #N` and not `Closes #N` in the pull request of a ticket that has a `## Split` section. In a real cloud run an issue that asked for four pieces was closed when the first one merged, and nothing tracked the rest.
+- Give no agent task when a source's `fetch` prints nothing or an empty JSON list. A quiet week still started a model run, and in real runs a worker with a harmless signal invented tickets.
+- Name the conflict guide in the brief of the ship that met the conflict, not only once the agent has started the rebase by hand.
+- Poll a CI run every 30 seconds and not every 3: `gh run watch` shares GitHub's hourly request limit with the engine's own calls.

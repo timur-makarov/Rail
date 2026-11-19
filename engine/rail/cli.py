@@ -847,6 +847,11 @@ def cmd_source(project, args):
         return answer(code="SOURCE_FETCH_FAILED", steps_=[step], source=source.name, action={"kind": "rest", "brief": (
             f"The fetch of source {source.name} failed ({why}), so nothing was filed:\n$ {source.fetch}\n"
             + tail(output, 30))})
+    if output.strip() in ("", "[]"):  # an empty JSON list is what `gh ... --json` prints for nothing
+        # Nothing to read is nothing to file: no model run is started to find work in an empty signal.
+        step = {"step": "fetch", "status": "ran", "result": "pass", "detail": "no output"}
+        return answer(code="SOURCE_EMPTY", steps_=[step], source=source.name, action={"kind": "rest", "brief": (
+            f"The fetch of source {source.name} printed nothing, so there is nothing to file.")})
     step = {"step": "fetch", "status": "ran", "result": "pass", "detail": f"{len(output)} characters"}
     return answer(owner="agent", code="SOURCE", steps_=[step], source=source.name, room=room,
                   action={"kind": "agent_task", "brief": sources.brief(source, output, room, mine)})
@@ -963,7 +968,7 @@ def cmd_next(project, args):
     if ci:
         run_id = ci_run(project, ci[0])
         if run_id:
-            command = f"gh run watch {run_id} --exit-status; rail next"
+            command = f"gh run watch {run_id} --interval 30 --exit-status; rail next"
             return answer(ci[0].id, ci[0].state, "agent", {"kind": "script", "brief": command, "command": command},
                           "CI_WAIT", took_in, **extra)
     if waits:
@@ -1177,7 +1182,9 @@ def cmd_advance(project, args):
                 if owner_ == "human":
                     return from_facts(nf, receipts)
                 action = worker(nf, {"kind": "agent_task", "brief": brief})
-                named = guide(project, "STEP_FAILED", action, nf)
+                # A rebase that stopped on a conflict has its own page; any other failure gets one once it repeats.
+                named = guide(project, "REBASING" if run.failure and run.failure[0] == "rebase" else "STEP_FAILED",
+                              action, nf)
                 return answer(nn, nf.state, "agent", action, "STEP_FAILED", receipts, nf.cwd, tier=nf.tier,
                               **({"guide": named} if named else {}))
             update_pr(project, nf, receipts)
