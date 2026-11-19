@@ -168,3 +168,4 @@ One line for each change, saying why.
 - Give no agent task when a source's `fetch` prints nothing or an empty JSON list. A quiet week still started a model run, and in real runs a worker with a harmless signal invented tickets.
 - Name the conflict guide in the brief of the ship that met the conflict, not only once the agent has started the rebase by hand.
 - Poll a CI run every 30 seconds and not every 3: `gh run watch` shares GitHub's hourly request limit with the engine's own calls.
+- Push a ticket branch the agent rebased by hand after a conflict: the failed ship's journal commit had used up the engine's lease note, so the rewritten branch was refused, nothing said so, and the ticket answered CONFLICT for ever (issue 20, from a cloud run).

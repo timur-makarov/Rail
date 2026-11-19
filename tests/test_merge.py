@@ -168,6 +168,25 @@ class Conflicts(RailTest):
         self.assertIn("src/calc.py", failed["steps"][0]["detail"])
         self.assertEqual((failed["state"], failed["owner"]), ("implementing", "agent"))
 
+    def test_a_branch_rebased_by_hand_after_a_conflict_reaches_the_pull_request(self):
+        # The failed ship's journal commit was pushed as a fast-forward, which used up the engine's lease note.
+        a, b, github = self.github_pair()
+        shipped(a)
+        github.ci("1-fix-add", "success")
+        push_to_main(b, "src/calc.py", "def add(a, b):\n    return sum((a, b))\n")
+        a.rail("next")
+        a.rail("advance", "1", expect=3)  # the engine's rebase meets the conflict and is undone
+        tree = a.path(".claude", "worktrees", "1")
+        subprocess.run(["git", "rebase", "origin/main"], cwd=tree, capture_output=True, text=True)
+        a.fix_calc("1")
+        a.git("add", "src/calc.py", cwd=tree)
+        subprocess.run(["git", "-c", "core.editor=true", "rebase", "--continue"], cwd=tree, capture_output=True, text=True,
+                       check=True)
+        a.rail("advance", "1")
+        self.assertEqual(a.git("rev-parse", "origin/1-fix-add"), a.git("rev-parse", "1-fix-add"))
+        self.assertEqual(a.git("ls-remote", "origin", "refs/heads/1-fix-add").split()[0],
+                         a.git("rev-parse", "1-fix-add").strip())
+
     def test_a_pull_request_behind_its_base_that_conflicts_on_the_rebase_goes_back_to_the_agent(self):
         # GitHub said behind, and the engine's own rebase meets a conflict: the agent rebases by hand.
         a, b, github = self.github_pair()

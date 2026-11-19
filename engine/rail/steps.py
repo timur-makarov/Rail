@@ -295,6 +295,10 @@ def ship(project, f, run):
     t, ref = f.t, f.t.ref
     wt = t.worktree
     base_tip = gitx.rev(project.base_ref, project.root)
+    remote_tip = gitx.rev(f"refs/remotes/{project.remote}/{t.branch}", project.root) if project.remote else None
+    if remote_tip and not gitx.ok(["merge-base", "--is-ancestor", remote_tip, "HEAD"], wt):
+        # The agent rebased by hand after a conflict: the push needs the lease the engine notes for its own rebase.
+        project.note_rewrite(t.branch)
     if base_tip and not gitx.ok(["merge-base", "--is-ancestor", base_tip, "HEAD"], wt):
         before = project.patch_id(ref)
         project.note_rewrite(t.branch)
