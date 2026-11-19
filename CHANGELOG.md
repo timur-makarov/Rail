@@ -202,3 +202,4 @@ One line for each change, saying why.
 - Consult's `stop` line now says a plainly wrong check is not a person's decision, since the agent can amend it. In 4 real runs per arm consult answered `change` on a wrong check 4 of 4 (was `stop` 4 of 4), and still `stop` 4 of 4 on a real product decision.
 - rail-debug and rail-conflict: drop the debug tag, "keep it as a test" and the `git diff :1:` commands, which almost no run followed; 20 runs per arm showed nothing lost.
 - rail-grill: when a request is about data, look at the real data before asking. In a test where the data held the cause, old 2 of 4 runs got it, new 4 of 4, with no questions the data could answer.
+- When every `Check:` already passed on the base, the IMPLEMENT brief says the contract cannot tell done from not done and asks for a check that fails now, added with `rail amend`. In real runs 4 of 4 workers amended the contract with this line, against 0 of 4 before.
