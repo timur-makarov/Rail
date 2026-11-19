@@ -149,7 +149,7 @@ with `rail adopt BRANCH`: the agent writes its ticket, and its checks must fail 
 branch.
 
 **Guides and skills.** `rail init` adds Claude Code skills to `.claude/skills/`: some help a person turn
-an idea into a ticket (`rail-clarity`, `rail-deepen`, `rail-blast-radius`, `rail-grill`, `rail-slice`), and
+an idea into a ticket (`rail-blast-radius`, `rail-grill`, `rail-slice`), and
 some are craft for the work itself, such as building a ticket, debugging a repeated failure or answering
 review findings. The `[guides]` table in `.rail/config.toml` names the right one in the brief when its
 situation comes up. A guide is a hint: nothing fails when an agent ignores it, and `rail stats` shows whether
