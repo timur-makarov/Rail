@@ -197,3 +197,4 @@ One line for each change, saying why.
 - When another session rebases a ticket first, this one takes the remote's copy instead of keeping its own. A note of the remote tip that a refused push proved stale is removed, so later pushes from that clone are not refused too.
 - A cloud session no longer tries to delete a merged ticket's remote branch: its git access can't, and GitHub's own setting does it.
 - README: how to run with no session open, with the runner prompt and the three triggers to copy.
+- rail-debug and rail-conflict: drop the debug tag, "keep it as a test" and the `git diff :1:` commands, which almost no run followed; 20 runs per arm showed nothing lost.
