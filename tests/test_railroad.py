@@ -150,6 +150,20 @@ class Ship(RailTest):
         self.assertEqual(p.rail("next")["reason"]["code"], "IMPLEMENT")
         self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")
 
+    def test_an_assumed_row_nobody_can_check_is_decided_not_asked(self):
+        # The row is the agent's: a worker that stops to ask leaves no label for the person and blocks the queue.
+        p = self.fixture()
+        p.add(ticket(tier="PERSON", body="\n## Assumptions\n- ASSUMED: finance wants the new column last.\n"))
+        p.rail("accept", "1")
+        brief = p.rail("next")
+        self.assertEqual((brief["reason"]["code"], brief["owner"]), ("VERIFY_ASSUMPTIONS", "agent"))
+        self.assertNotIn("ask the person", brief["action"]["brief"])
+        self.assertIn("decided, not checked:", brief["action"]["brief"])
+        path = os.path.join(p.worktree("1"), ".rail", "tickets", "1.md")
+        text = read(path).replace("ASSUMED: finance", "VERIFIED: decided, not checked: finance")
+        p.write(".rail/tickets/1.md", text, base=p.worktree("1"))
+        self.assertEqual(p.rail("next")["reason"]["code"], "IMPLEMENT")
+
     def test_a_change_to_a_person_path_makes_the_ticket_person_at_ship(self):
         p = self.fixture(config='person_paths = ["**/*.sql"]\n' + CONFIG)
         self.assertEqual(p.add(ticket())["tier"], "AUTO")
