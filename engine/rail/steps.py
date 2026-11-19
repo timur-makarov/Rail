@@ -333,6 +333,14 @@ def ship(project, f, run):
                                      " opens one ticket that fixes the base; this ticket's ship waits until it merges.")
     if tier is None:
         return run
+    # Every check passed and no file changed: the checks passed before the ticket too, so there is nothing to ship
+    # or merge. A sweep ticket is the one exception: it merges to move the sweep's marker.
+    if not project.changed_files(ref) and not (f.ticket.get("external_id") or "").startswith("sweep#"):
+        run.record("change", False, patch_id, "no file changed",
+                   output=f"Ticket {t.id} changes no file, so there is nothing to ship. If the work is already on the"
+                          f" base branch, say so and close the ticket: rail drop {t.id} --reason \"already done:"
+                          f" where\". If it is not, make the change, then run: rail advance {t.id}")
+        return run
     head = gitx.rev(ref, project.root)
     run.events.append(event(t.id, "shipped", patch_id=patch_id, head=head[:12], tier=tier, size=run.size))
     return run

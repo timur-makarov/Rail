@@ -8,7 +8,7 @@ from .ticket import TIERS, Ticket, highest, lint
 from .util import globs_overlap, match_any, minutes_since
 
 OPEN = ("implementing", "reviewing", "in-ci", "merge-ready")  # claimed and not finished
-SHIP_STEPS = ("rebase", "ticket-lint", "assumptions", "scope", "rules", "migration", "size", "doc-lint", "verify",
+SHIP_STEPS = ("rebase", "ticket-lint", "assumptions", "scope", "change", "rules", "migration", "size", "doc-lint", "verify",
               "checks")
 
 
@@ -212,6 +212,15 @@ class Facts:
         times = [e.get("at", "") for e in list(self.t.events) + list(self.t.remote_events) if e.get("at") and not (
             e.get("event") == "continued" or (e.get("event") == "accepted" and e.get("by") == "person"))]
         return minutes_since(max(times)) if times else None
+
+    @property
+    def drafted_elsewhere(self):
+        """Another session is writing this ticket's contract: it noted so less than claim.stale_minutes ago."""
+        notes = sorted((e for e in list(self.t.events) + list(self.t.remote_events) if e.get("event") == "drafting"),
+                       key=lambda e: e.get("at", ""))  # the remote's too: this clone's branch may be behind
+        if self.state != "new" or not notes or notes[-1].get("session") == self.project.session:
+            return False
+        return minutes_since(notes[-1].get("at", "")) < self.project.config["claim"]["stale_minutes"]
 
     @property
     def taken_from_me(self):

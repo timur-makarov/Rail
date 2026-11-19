@@ -323,6 +323,9 @@ class Contract(RailTest):
         self.assertEqual(amended["state"], "implementing")
         record = events(p, "1-fix-add", "amended")[0]
         self.assertEqual((record["changed"], record["needs_approval"]), (["done_contract"], False))
+        empty = p.rail("advance", "1", expect=3)  # the weaker check passes with no work done: nothing to ship
+        self.assertEqual([s["step"] for s in empty["steps"] if s.get("result") == "fail"], ["change"])
+        p.fix_calc("1")
         self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")
 
     def test_lowering_the_tier_after_claim_fails(self):

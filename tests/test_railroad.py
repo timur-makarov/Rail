@@ -225,6 +225,18 @@ class Ship(RailTest):
         self.assertEqual(merged["steps"][0], {"step": "rebase", "status": "ran", "result": "pass", "detail": "onto main"})
         self.assertEqual(p.git("log", "--format=%s", "main").splitlines()[:2], ["2: add a status code", "1: fix add"])
 
+    def test_a_change_with_no_file_in_it_does_not_ship(self):
+        # A second ticket for work already on the base: its check passes before any edit, and it must not merge empty.
+        p = self.fixture()
+        p.write("src/calc.py", "def add(a, b):\n    return a + b\n")
+        p.git("commit", "--quiet", "-am", "fix add by hand")
+        p.add(ticket())
+        p.rail("next")
+        empty = p.rail("advance", "1", expect=3)
+        self.assertEqual(failed_step(empty), ("change", "no file changed"))
+        self.assertIn("rail drop 1 --reason", empty["action"]["brief"])
+        self.assertEqual(p.rail("drop", "1", "--reason", "already done: on main")["state"], "dropped")
+
     def test_rebase_conflict_returns_the_ticket_to_implementing(self):
         p = self.fixture()
         p.add(ticket(title="Rewrite add"))

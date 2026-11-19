@@ -25,6 +25,7 @@ stores state. Never edit it by hand: the guard denies it.
 | `accepted` | Ticket lint first passes on an AUTO ticket; a person approves; an amend takes effect | `by` (`engine`, `person`), `via` (`lint`, `label`, `accept`, `amend`, `merge`), `tier`, `contract`, `done`, `scope_paths`, `note` | The `accepted` state. Ship and CI compare `contract` and `tier` with the ticket: that is the freeze. `via: merge` is a contract pull request that a person merged |
 | `amended` | `rail amend NN` | `contract` (the new hash), `changed` (any of `done_contract`, `scope`, `tier`), `added_paths`, `needs_approval`, `reason` (when one was given) | When `needs_approval` is true, the ticket waits until a later `accepted` |
 | `adopted` | `rail adopt BRANCH FILE` filed the ticket with a branch's work on it | `branch` (the adopted branch), `head` (its head commit, 12 characters) | `rail stats` |
+| `drafting` | `next`, when it hands a session the brief to write an unfinished ticket's contract | `session` | Other sessions leave that contract alone for `[claim] stale_minutes`; `rail next --ticket NN` takes it over |
 | `claimed` | A claim or a takeover inside `next`, or `rail adopt` | `session`, `takeover`, and in a cloud session `session_url` | The `implementing` state. `next` finds this session's ticket by it, and the pull request ends with the last `session_url` |
 | `base_checks` | `next`, at a ticket's first claim, once setup has passed, unless `[commands] base_checks` is false. Not for a ticket with no `Check:` line. `rail adopt` writes it from its gate, where every check was red | `base` (the base branch's commit, 12 characters), `checks`: each check's `command` and `result` (`red`: it ran and failed; `green`: it ran and passed; `could_not_run`: exit 127 or 126; `timed_out`: past `timeout_secs`) | `rail stats`. Nothing else: it is no step, no attempt and no state |
 | `saved` | `rail save`, the save hooks, and `advance` before a long command | `via` (`save`, `stop`, `pulse`, `advance`), `files` | Shows the ticket is alive: its `at` is what `[claim] stale_minutes` is measured from |
@@ -65,6 +66,7 @@ A sample:
 | `ticket-lint` | Ship, CI | The ticket is malformed, its contract differs from the accepted one, or its tier is below the accepted one |
 | `assumptions` | Ship, CI | An ASSUMED row is open |
 | `scope` | Ship, CI | A changed product file is outside `scope_paths` |
+| `change` | Ship, after every other check has passed | The ticket changes no file (a sweep ticket may). Recorded only when it fails |
 | `rules` | Ship, CI | A structure rule matches an added line or file |
 | `migration` | Ship, CI | A ticket on `migration_paths` lacks `reversibility` or `rollback` |
 | `size` | Ship, CI | Never. On an AUTO ticket, a count over `[size] cap` writes `split_offered` at the first ship that meets it and stops there; after that, and in CI, `tier_raised` |

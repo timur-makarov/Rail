@@ -423,7 +423,7 @@ def requested_event(nn, ticket, via, channel, **extra):
     return event(nn, "requested", **fields)
 
 
-def create_ticket(project, text, via="add", channel="session", parent=None, **extra):
+def create_ticket(project, text, via="add", channel="session", parent=None, key=None, **extra):
     """Take the next ID and make the ticket's branch with the ticket file, without touching any checkout. The
     journal starts with a `requested` event; an AUTO ticket that passes lint is accepted at once. The branch starts
     from the base branch, or from `parent` (an adopted branch's head). Returns (id, branch, push result)."""
@@ -449,7 +449,9 @@ def create_ticket(project, text, via="add", channel="session", parent=None, **ex
         files[events_path(nn)] = "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events)
         return gitx.commit_files(project.root, parent or base_tip, files, f"{nn}: add ticket: {ticket.title}")
 
-    nn, commit = project.take_id(project.max_id(tickets) + 1, build, label=Ticket(text).title or "")
+    nn, commit = project.take_id(project.max_id(tickets) + 1, build, label=Ticket(text).title or "", key=key)
+    if nn is None:
+        return None, None, None  # another session took this request in a moment ago
     branch = branch_name(Ticket(with_id(text, nn)))
     if not gitx.update_ref(project.root, f"refs/heads/{branch}", commit, None):
         raise RailError(f"branch {branch} already exists")
@@ -592,13 +594,13 @@ def intake_one(project, facts, title, request, external_id, channel, trusted=Fal
         except StopIteration:
             errors = ["the front matter has no closing '+++' line"]
         if not errors:
-            nn, _, _ = create_ticket(project, text, via="intake", channel=channel, filed_by=filed_by)
+            nn, _, _ = create_ticket(project, text, via="intake", channel=channel, filed_by=filed_by, key=external_id)
             return nn
         extra = {"filed_by": filed_by, "not_taken": "; ".join(errors)}  # why the ticket became a request
     else:
         extra = {"filed_by": filed_by}
     nn, _, _ = create_ticket(project, stub(title, request, external_id, caused_by(project, request)), via="intake",
-                             channel=channel, **extra)
+                             channel=channel, key=external_id, **extra)
     return nn
 
 
@@ -928,6 +930,8 @@ def cmd_next(project, args):
         if f is None:
             return answer(nn, None, "none", {"kind": "rest", "brief": f"Another session claimed ticket {nn} first."},
                           "CLAIMED_ELSEWHERE", receipts)
+        if first_match(f)[0] == "TICKET_LINT":
+            note_drafting(project, f)  # asked for by number: this session writes the contract now
         return from_facts(f, took_in + receipts, leftovers=leftovers)
 
     tickets, facts = load(project)
@@ -957,6 +961,8 @@ def cmd_next(project, args):
             continue
         f, receipts = settle(project, candidate.id, explicit=False)
         if f is not None and first_match(f)[1] == "agent":
+            if first_match(f)[0] == "TICKET_LINT" and not note_drafting(project, f):
+                continue  # another session noted it first: it writes this contract
             return from_facts(f, took_in + receipts, leftovers=leftovers)
 
     tickets, facts = load(project)
@@ -997,6 +1003,20 @@ def cmd_next(project, args):
             f"{h['ticket']} (quiet {h['quiet_minutes']} min)" for h in held)
             + f". A ticket quiet for {limit} min is resumed by the next rail next; rail next --ticket NN takes one now.")
     return answer(code="NO_WORK", action={"kind": "rest", "brief": brief}, steps_=took_in, **extra)
+
+
+def note_drafting(project, f):
+    """Note on the ticket's branch that this session writes its contract. The push decides between two sessions
+    that look at once: False when another session's note got there first."""
+    if not project.remote or any(e.get("event") == "drafting" and e.get("session") == project.session for e in f.t.events):
+        return True
+    ensure_local(project, f.t)
+    if project.append_events(f.t, [event(f.id, "drafting", session=project.session)], "write the contract") != "rejected":
+        return True
+    project.sync()
+    remote_tip = gitx.rev(f"refs/remotes/{project.remote}/{f.t.remote_branch or f.t.branch}", project.root)
+    gitx.update_ref(project.root, f.t.ref, remote_tip, gitx.rev(f.t.ref, project.root))
+    return False
 
 
 def label_wait(project, f, code):
