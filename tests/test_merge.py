@@ -299,10 +299,11 @@ class RemoteMerge(RailTest):
                          ("1", "in-ci", "agent", "CI_WAIT"))
         self.assertEqual(watch["action"], {"kind": "script", "brief": "gh run watch 4242 --interval 30 --exit-status; rail next",
                                            "command": "gh run watch 4242 --interval 30 --exit-status; rail next"})
-        github.update(lambda s: s.__setitem__("workflow_runs", []))  # no Actions run yet: nothing to watch
-        resting = a.rail("next")
-        self.assertEqual((resting["owner"], resting["reason"]["code"], resting["action"]["kind"]),
-                         ("none", "CI_WAIT", "rest"))
+        # Pushed a moment ago and no Actions run yet: the runner waits and asks again, it is not sent away.
+        github.update(lambda s: s.__setitem__("workflow_runs", []))
+        soon = a.rail("next")
+        self.assertEqual((soon["owner"], soon["reason"]["code"], soon["action"]["command"]),
+                         ("agent", "CI_WAIT", "sleep 20; rail next"))
 
 
 class LocalMerge(RailTest):
