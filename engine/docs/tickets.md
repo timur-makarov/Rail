@@ -6,6 +6,8 @@ it sets the ID and commits the ticket on its own branch, so the draft can go. `#
 optional sections. A ticket made from a GitHub issue closes the issue when it merges; with a `## Split`
 section it is one part of the issue, and its pull request says `Part of #N` and leaves the issue open.
 
+Ticket lint requires the front matter, `## Why` and `## Done Contract`. Every other section may be left out.
+
 ```markdown
 +++
 title = "Rotate refresh tokens on use"
@@ -42,8 +44,14 @@ external_id = "github#123"
   should see this change. The engine makes a ticket PERSON by itself in four cases: its `scope_paths` reach
   `person_paths` or `migration_paths` (at add), it changes a file on those paths (at ship), it changes
   more lines than `[size] cap` (at ship), or the reviewer asks for a person (at review). Over the cap, the
-  first ship offers a split instead (`rail docs loop`); only the next ship over the cap raises the tier. A tier never goes down. Tickets touching `migration_paths` must
-  set `reversibility` and `rollback`.
+  first ship offers a split instead (`rail docs loop`); only the next ship over the cap raises the tier. A tier never goes down.
+- **A migration ticket**, one whose change touches `migration_paths`, sets two more keys in the front
+  matter, each a sentence: `reversibility` (how old and new code both run against the change, such as expand
+  then contract) and `rollback` (the down step, and what it loses). Ship fails at `migration` without them,
+  and the pull request's Risk section shows both.
+- **Two tickets never work the same paths at once.** A ticket whose `scope_paths` overlap those of a ticket
+  being implemented is accepted and then waits (`SCOPE_OVERLAP`) until that one leaves `implementing`. Give
+  such tickets an order with `after` when one needs the other's result.
 - **The contract** (Done Contract, scope and tier) freezes at acceptance. `rail amend NN` changes it.
 - **`## Grilling`** is optional: the record of questioning the person who asked for the ticket, written by the
   agent that did it (`rail docs grill`). Ticket lint checks its shape, and `rail stats` counts it.
