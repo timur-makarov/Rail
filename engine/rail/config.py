@@ -26,7 +26,7 @@ DEFAULTS = {
     "claim": {"stale_minutes": 30, "save_minutes": 10},
     "worker": {"ladder": ["claude-sonnet-5-5:medium", "claude-sonnet-5-5:high", "claude-opus-5-5:medium"],
                "person_ladder": ["claude-opus-5-5:medium", "claude-opus-5-5:high"],
-               "contract": "claude-opus-5-5:medium"},
+               "contract": "claude-opus-5-5:high"},
     "sweep": {"after": 20, "every": 20},
     "map": {"depth": 1, "ignore": []},
     # A page named in the brief when its situation applies. The pages come with the seed config only: a project

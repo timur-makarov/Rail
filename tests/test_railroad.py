@@ -619,7 +619,7 @@ class Worker(RailTest):
         p.rail("intake", "--external-id", "PROJ-7", "--title", "Fix add", "--brief", request)
         drafting = p.rail("next")
         self.assertEqual((drafting["reason"]["code"], drafting["action"]["model"], drafting["action"]["effort"]),
-                         ("TICKET_LINT", "claude-opus-5-5", "medium"))
+                         ("TICKET_LINT", "claude-opus-5-5", "high"))
         p.write(".rail/config.toml", CONFIG + '\n[worker]\ncontract = ""\n')
         self.assertEqual(p.rail("next")["action"]["model"], "claude-sonnet-5-5")  # empty: the ladder's rung
         p.write(".rail/config.toml", CONFIG + '\n[worker]\ncontract = "claude-opus-5-5"\n')
