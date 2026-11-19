@@ -307,6 +307,9 @@ class Retry(RailTest):
         p.rail("next")
         asked = p.rail("consult", "1", "Is a + b the right fix?")
         self.assertIn("consult says change", asked["advice"])
+        # A wrong check the agent can amend is not a "stop": the pack's brief says so.
+        self.assertIn("a check that is plainly wrong is not\n                    one: the agent amends it with rail amend",
+                      [b for b in p.briefs() if b["consult"]][0]["brief"])
         self.assertEqual(events(p, "1-fix-add", "consulted")[0]["trigger"], "request")
 
 

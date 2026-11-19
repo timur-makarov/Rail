@@ -198,3 +198,4 @@ One line for each change, saying why.
 - A cloud session no longer tries to delete a merged ticket's remote branch: its git access can't, and GitHub's own setting does it.
 - README: how to run with no session open, with the runner prompt and the three triggers to copy.
 - After an AUTO amend nobody approved, the reviewer's brief also holds the contract as first accepted, so a check the agent dropped or weakened is seen. In 4 real runs per arm the reviewer blocked the hidden fault 4 of 4 with it and 0 of 4 without.
+- Consult's `stop` line now says a plainly wrong check is not a person's decision, since the agent can amend it. In 4 real runs per arm consult answered `change` on a wrong check 4 of 4 (was `stop` 4 of 4), and still `stop` 4 of 4 on a real product decision.
