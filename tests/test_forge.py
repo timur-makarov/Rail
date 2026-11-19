@@ -142,6 +142,8 @@ class Approvals(RailTest):
 
         a.write("src/config/app.toml", "mode = 'fast'\n", base=a.worktree("3"))
         a.rail("advance", "3")
+        # Labelled at the ship: the session may be gone when CI ends, and nothing starts a run then.
+        self.assertIn("rail:needs-you", github.pr(1)["labels"])
         github.ci("3-change-the-config", "success")
         ready = a.rail("next")
         self.assertEqual((ready["owner"], ready["waits"][0]["needs"]), ("human", "MERGE_BY_PERSON"))
@@ -346,6 +348,38 @@ class Merges(RailTest):
         journal = a.git("show", "1-fix-add:.rail/journal/1-events.jsonl")
         self.assertEqual(journal.count('"step":"rebase"'), 1, journal)
         self.assertEqual(a.git("rev-parse", "origin/1-fix-add"), a.git("rev-parse", "1-fix-add"))
+
+    def test_when_another_session_rebases_the_ticket_first_this_one_takes_its_copy(self):
+        # Two runs start on the same merge and both rebase ticket 1. The second push is refused: its clone must end
+        # on the remote's copy, with no note left that would refuse its later pushes.
+        a, b, github = self.github_pair()
+        github.update(lambda s: s.__setitem__("require_up_to_date", True))
+        a.add(ticket())
+        a.rail("next")
+        a.fix_calc("1")
+        a.rail("advance", "1")
+        github.ci("1-fix-add", "success")
+        b.write("notes.md", "news\n")
+        b.git("add", "notes.md")
+        b.git("commit", "--quiet", "-m", "base moves")
+        b.git("push", "--quiet", "origin", "main")
+        b.git("fetch", "--quiet", "origin")
+        b.git("checkout", "--quiet", "-b", "theirs", "origin/1-fix-add")
+        b.git("rebase", "--quiet", "origin/main")
+        b.git("push", "--quiet", "origin", "theirs:refs/heads/theirs")
+        bare = github.read()["bare"]
+        hook = os.path.join(bare, "hooks", "pre-receive")
+        os.makedirs(os.path.dirname(hook), exist_ok=True)
+        with open(hook, "w") as f:  # the other session's push lands a moment before ours
+            f.write('#!/bin/sh\nunset GIT_QUARANTINE_PATH\ngit update-ref refs/heads/1-fix-add refs/heads/theirs\n'
+                    'rm -- "$0"\nexit 1\n')
+        os.chmod(hook, 0o755)
+        ans = a.rail("next")
+        self.assertFalse(os.path.exists(hook), ans)  # the refusal happened
+        self.assertEqual(a.rail("status")["tickets"][0]["state"], "in-ci", ans)
+        self.assertEqual(ans["reason"]["code"], "CI_WAIT", ans)
+        self.assertEqual(a.git("rev-parse", "1-fix-add"), b.git("rev-parse", "theirs"))
+        self.assertEqual(os.listdir(os.path.join(a.root, ".git", "rail", "cache", "leases")), [])
 
     def test_next_reads_an_approval_on_a_ticket_it_does_not_go_on_with(self):
         # The run goes on with its own ticket 1; ticket 2's rail:go must not read as "waits for approval" meanwhile.
