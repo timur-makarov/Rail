@@ -115,6 +115,7 @@ class Facts:
                 stopped.discard(passed)
 
         accepted_at = amended_at = shipped_at = continued_at = -1
+        self.amend_reason = ""
         for i, e in enumerate(events):
             kind = e.get("event")
             if passed is not None and not (kind == "step" and e.get("step") == passed):
@@ -153,6 +154,7 @@ class Facts:
                 accepted_at = i
             elif kind == "amended" and e.get("needs_approval"):
                 amended_at = i
+                self.amend_reason = e.get("reason", "")
             elif kind == "shipped":
                 shipped_at = i
         settle()

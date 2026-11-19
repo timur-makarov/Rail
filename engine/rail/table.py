@@ -264,7 +264,8 @@ ROWS = [
     ("CLAIM",              "agent", "script",      lambda f: f.state == "accepted",
      lambda f: f"rail next --ticket {f.id}"),
     ("APPROVE_AMEND",      "human", "human_wait",  lambda f: f.amend_pending,
-     lambda f: f"The Done Contract of ticket {f.id} changed (rail amend). Read {ticket_path(f.id)} on branch {f.t.name},"
+     lambda f: f"The Done Contract of ticket {f.id} changed (rail amend)."
+               + (f" The agent's reason: {f.amend_reason}" if f.amend_reason else "") + f" Read {ticket_path(f.id)} on branch {f.t.name},"
                f" then approve it: rail accept {f.id}." + _go(f)),
     ("RETRY_CAP",          "human", "human_wait",  lambda f: f.state in OPEN and f.capped,
      _capped),

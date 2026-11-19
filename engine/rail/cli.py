@@ -745,7 +745,7 @@ def cmd_amend(project, args):
         needs = "done_contract" in changed and tier != "AUTO"  # a person approved the old one, so approves the new
         added_paths = [p for p in new.scope if p not in (last.get("scope_paths") or [])]
         events.append(event(t.id, "amended", contract=new.contract_hash(), changed=changed, added_paths=added_paths,
-                            needs_approval=needs))
+                            needs_approval=needs, **({"reason": args.reason} if args.reason else {})))
         if not needs:
             events.append(accepted_event(t.id, new, tier, "engine", "amend"))
     ensure_local(project, t)
@@ -1749,6 +1749,7 @@ def parser():
     answer_.add_argument("reason", nargs="?", default="", help="what changed, or why")
     answer_.add_argument("--owner", action="store_true", help="the project's owner decides (a person)")
     amend = verb("amend", "change a ticket's frozen contract: Done Contract, scope or tier")
+    amend.add_argument("reason", nargs="?", default="", help="why the contract changes")
     amend.add_argument("--file", help="the new ticket file, when the ticket has no worktree here")
     consult_ = verb("consult", "ask the consult pack for advice on one question", ticket=False)
     consult_.add_argument("ticket", help="ticket ID")

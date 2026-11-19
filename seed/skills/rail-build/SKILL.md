@@ -79,7 +79,7 @@ When a choice comes up and no person is present, decide. Record what you chose, 
 you are wrong: as a `VERIFIED:` row when you could check it, in `## Look at` when you could not.
 
 Leave a decision to a person in two cases only: the act can't be undone and reaches outside the repository,
-or the contract can't be met as written. For the second, amend the contract and say why.
+or the contract can't be met as written. For the second, amend the contract and say why: `rail amend NN "why"`.
 
 ## 7. Before `rail advance`
 

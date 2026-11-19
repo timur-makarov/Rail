@@ -229,6 +229,18 @@ class Amend(RailTest):
         self.assertIn('tier = "PERSON"', read(path))
         self.assertIn('tier = "PERSON"', p.git("show", "1-fix-add:.rail/tickets/1.md"))
 
+    def test_an_amend_keeps_its_reason_and_shows_it_to_the_person_who_approves(self):
+        p = self.fixture()
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")
+        p.rail("next")
+        path = os.path.join(p.worktree("1"), ".rail", "tickets", "1.md")
+        p.write(".rail/tickets/1.md", read(path).replace("== 5", "== 5 and calc.add(0, 0) == 0"), base=p.worktree("1"))
+        amended = p.rail("amend", "1", "the check ran the wrong file")
+        self.assertEqual(amended["reason"]["code"], "APPROVE_AMEND")
+        self.assertIn("The agent's reason: the check ran the wrong file", amended["action"]["brief"])
+        self.assertEqual([e for e in events(p) if e["event"] == "amended"][-1]["reason"], "the check ran the wrong file")
+
 
 class Drop(RailTest):
     def test_a_drop_records_who_dropped_it_and_why(self):
