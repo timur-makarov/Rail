@@ -163,3 +163,4 @@ One line for each change, saying why.
 - Reset a step's failure count on a pass only when no failure follows it at the same step. Each `Check:` line is its own event at the step `checks`, so a first line that passed reset the count before a later line failed: such a ticket failed for ever, with no consult and no person.
 - Count doc-lint among the ship steps, so `rail next` remembers a ship that failed there and names the stuck guide, as `rail advance` already did.
 - Let `rail amend NN "why"` take a reason, keep it in the `amended` event and show it in the wait for approval. Two skills told the worker to give the reason, and the command had no place for it.
+- Answer with a plain error when the shell's folder no longer exists. `rail advance 1; rail next` from a ticket's worktree crashed with a Python traceback after the merge removed that worktree (6 of 8 real runs).

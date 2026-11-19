@@ -1813,7 +1813,13 @@ def main(argv=None):
         elif args.verb == "docs":
             result = cmd_docs(args)
         else:
-            result = globals()[f"cmd_{args.verb}"](Project(os.getcwd()), args)
+            try:
+                here = os.getcwd()
+            except FileNotFoundError:
+                # A merge removes the ticket's worktree, and a shell that stood in it has no folder any more.
+                raise RailError("the folder this shell is in no longer exists (a merge removes the ticket's worktree);"
+                                " cd to the project's root and run the command again", code="NO_FOLDER") from None
+            result = globals()[f"cmd_{args.verb}"](Project(here), args)
         code = 3 if any(s.get("result") == "fail" for s in result.get("steps", [])) else 0
     except RailError as e:
         result = {"schema_version": 1, "ok": False, "reason": {"code": e.code, "message": str(e)}}

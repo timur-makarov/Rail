@@ -4,6 +4,7 @@ stats."""
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 
@@ -272,3 +273,16 @@ class Stats(RailTest):
         self.assertEqual(stats["stats"]["review"]["roles"], {})
         self.assertIn("\n\nNo review ran.", stats["text"])
         self.assertNotIn("REVIEW", stats["text"])
+
+
+class GoneFolder(RailTest):
+    def test_a_shell_whose_folder_was_removed_gets_a_plain_error(self):
+        # A merge removes the ticket's worktree; `rail advance 1; rail next` from inside it runs next with no folder.
+        p = self.fixture()
+        gone = os.path.join(p.root, "gone")
+        os.mkdir(gone)
+        local = os.path.join(p.root, ".rail", "bin", "rail")  # the project's own launcher, as a hook or a path call
+        script = f'cd "{gone}" && rmdir "{gone}" && "{sys.executable}" "{local}" next --json'
+        result = subprocess.run(["sh", "-c", script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["reason"]["code"], "NO_FOLDER")
