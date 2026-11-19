@@ -110,6 +110,15 @@
     ]
   },
   "sandbox": {
-    "enabled": true
+    "enabled": true,
+    "excludedCommands": [
+      "rail advance *",
+      "rail next *"
+    ],
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com"
+      ]
+    }
   }
 }
