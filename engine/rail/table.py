@@ -119,7 +119,10 @@ def _assumptions(f):
     rows = "\n".join(f"- {r}" for r in f.open_assumptions)
     return (f"Ticket {f.id} has open ASSUMED rows. Verify each one in the code or the docs before you implement,"
             f" then change \"ASSUMED:\" to \"VERIFIED:\" in {ticket_path(f.id)} and say how you checked."
-            f" If you can't verify one, ask the person and stop.\n{rows}\nWork in {f.cwd}.")
+            f" A row you can't verify is a choice, not a fact, and nobody is here to ask. Decide it: keep the reading"
+            f" the ticket's `## Why` supports, change the row to `VERIFIED:` and start it with `decided, not checked:`,"
+            f" then your reason and what it costs if you are wrong. On a PERSON ticket the person approved the contract"
+            f" with these rows in it.\n{rows}\nWork in {f.cwd}.")
 
 
 def _step_failed(f):

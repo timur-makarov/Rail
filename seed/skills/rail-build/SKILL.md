@@ -76,7 +76,8 @@ Only then write it, and only as much as the contract needs. A new dependency com
 ## 6. Decide and record
 
 When a choice comes up and no person is present, decide. Record what you chose, why, and what it costs if
-you are wrong: as a `VERIFIED:` row when you could check it, in `## Look at` when you could not.
+you are wrong: as a `VERIFIED:` row when you could check it, in `## Look at` when you could not. An
+`ASSUMED:` row you could not check becomes `VERIFIED: decided, not checked:` with the same three things.
 
 Leave a decision to a person in two cases only: the act can't be undone and reaches outside the repository,
 or the contract can't be met as written. For the second, amend the contract and say why.

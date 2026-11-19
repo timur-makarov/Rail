@@ -31,7 +31,7 @@ write the check for that problem; if the mechanism does not fit it, say so in yo
 ## 3. Ask only what changes the contract
 
 A question is worth asking when its answer changes a `Check:` line, `scope_paths`, the tier, or what is out
-of scope. Anything else you can't settle becomes an `ASSUMED:` row, which the working agent verifies.
+of scope. Anything else you can't settle becomes an `ASSUMED:` row, which the working agent verifies, or decides when nobody can check it.
 
 - At most five questions in all, one to three at a time.
 - Each question carries your recommendation and one line of why, so the person can answer "yes".
