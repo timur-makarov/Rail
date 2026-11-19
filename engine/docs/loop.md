@@ -14,7 +14,8 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
 - `action.model` and `action.effort` name the model and effort for an `agent_task` that is a ticket's work,
   from `[worker] ladder` (`person_ladder` for a PERSON ticket). The rung is the number of failed attempts at
   the step the ticket is failing, 0 when there are none, capped at the last rung; a person's act starts it
-  again at 0. With an empty ladder neither is there. A session a person is driving does the brief itself and
+  again at 0. Writing a ticket's contract (`TICKET_LINT`) names `[worker] contract` instead, when it is set.
+  With an empty ladder neither is there. A session a person is driving does the brief itself and
   may ignore them. An unattended runner, a cloud session a scheduled task starts, starts one subagent on
   that model and effort, gives it the brief word for word and the `cwd`, and runs `rail advance` itself when
   the subagent returns (`rail docs cloud`). The engine starts no agent.

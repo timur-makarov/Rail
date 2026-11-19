@@ -48,6 +48,8 @@ READERS = {
     "worker.ladder": "next and advance: the model and effort an agent_task names for an AUTO ticket's work, as"
                      " model:effort, one rung per failed attempt at the step the ticket is failing. Empty names none",
     "worker.person_ladder": "next and advance: the same ladder for a PERSON ticket, which starts higher",
+    "worker.contract": "next: the model:effort the task that writes a ticket's contract (TICKET_LINT) names. An AUTO"
+                       " contract is accepted with nobody looking, so it gets a stronger model. Empty: the ladder's",
     "sweep.after": "next: changes merged with no review (tickets inside review.skip_paths, and commits with no"
                    " ticket) since the last sweep before one is offered",
     "sweep.every": "next: tickets merged since the last sweep, reviewed or not, before one is offered; it then"

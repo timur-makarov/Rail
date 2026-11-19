@@ -33,6 +33,7 @@ cap = 5                                   # reader: next and advance; failures a
                                           # one rung per failed attempt at the current step. Empty: none is named
 ladder = ["claude-sonnet-5-5:medium", "claude-sonnet-5-5:high", "claude-opus-5-5:medium"]
 person_ladder = ["claude-opus-5-5:medium", "claude-opus-5-5:high"]   # a PERSON ticket starts higher
+contract = "claude-opus-5-5:medium"       # writing a ticket's contract (TICKET_LINT); empty: the ladder's rung
 
 [sweep]
 after = 20                                # reader: next; changes merged with no review since the last sweep:

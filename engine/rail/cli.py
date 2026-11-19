@@ -32,11 +32,13 @@ def answer(ticket=None, state=None, owner="none", action=None, code="NO_WORK", s
     return result
 
 
-def worker(f, action):
+def worker(f, action, code=None):
     """The model and effort an agent_task for a ticket's work names: the tier's ladder, one rung per failed attempt at
-    the step the ticket is failing, capped at the last rung. The engine starts no agent; the session that runs the loop
-    may start one on them."""
+    the step the ticket is failing, capped at the last rung. Writing a contract (TICKET_LINT) names worker.contract
+    when it is set. The engine starts no agent; the session that runs the loop may start one on them."""
     ladder = f.project.config["worker"]["person_ladder" if f.tier == "PERSON" else "ladder"]
+    if code == "TICKET_LINT" and f.project.config["worker"]["contract"]:
+        ladder = [f.project.config["worker"]["contract"]]
     if action.get("kind") == "agent_task" and ladder:
         model, _, effort = ladder[min(f.attempts.get(f.failing, 0), len(ladder) - 1)].rpartition(":")
         action.update(model=model, effort=effort)
@@ -69,7 +71,7 @@ def guide(project, code, action, f=None):
 
 def from_facts(f, steps_=None, code=None, **extra):
     row_code, owner, action = first_match(f)
-    worker(f, action)
+    worker(f, action, row_code)
     if owner == "human" or person_next(f):
         label_wait(f.project, f, row_code)  # the person's inbox is this label, whichever command met the wait
     named = guide(f.project, row_code, action, f)
