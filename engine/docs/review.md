@@ -69,6 +69,11 @@ is PERSON from then on: the security seat runs next, and a person merges. A late
 never lowers it. On a PERSON ticket the sentence is only recorded. Either way the sentence is kept with the
 run and shown in the pull request's Risk section and in the wait for a person. A refuter's is ignored.
 
+Don't rely on it for a path you already know a person must see. In test runs the reviewer asked for a
+person on about half of the changes that added a project's first cache or first permission check, and on
+every change that added a dependency. Put such paths (the auth code, the dependency manifests) in
+`person_paths`: that rule is a path match and always fires.
+
 ## What the reviewer costs and finds
 
 `rail stats` counts, over the merged tickets, the review runs, their cost and time by role and by model, how
