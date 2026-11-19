@@ -1,6 +1,6 @@
 # Review
 
-Every ticket gets a review after ship. The engine launches it, so it can't be skipped or written by hand:
+Every ticket gets a review after ship. The engine launches it, so the agent can't skip it or write it by hand:
 `advance` runs `[review] command` in the ticket's worktree with a brief on stdin, reads the `review/v1`
 output, binds the run to the patch, and resets the worktree afterwards. The reviewer may run commands and
 write scratch files to test an idea; all of it is thrown away.

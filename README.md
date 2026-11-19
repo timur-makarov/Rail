@@ -36,13 +36,13 @@ new -> accepted -> implementing -> reviewing -> in-ci -> merge-ready -> merged
 - a tier, `AUTO` or `PERSON`: who accepts the contract and who merges.
 
 The contract freezes when the ticket is accepted. From then on the agent can't weaken a check or widen the
-scope quietly: a change goes through `rail amend`, which is recorded, and on a PERSON ticket waits for a
-person.
+scope quietly: a change goes through `rail amend`, which is recorded, and a changed Done Contract on a
+PERSON ticket waits for a person.
 
 **The engine decides what "done" means.** `rail advance` commits the change and runs the ship checks in
-order: a rebase onto the base branch, ticket lint, open assumptions, scope, structure rules, migration
-fields, size, the architecture map, the project's own `verify` command (tests, lint, scans), and each
-`Check:` line. A failure sends the ticket back with the output. A failure counts as stuck only when it
+order: a rebase onto the base branch, ticket lint, open assumptions, scope, structure rules, the migration
+fields of a migration ticket (`reversibility` and `rollback`), size, the architecture map (the `## Areas`
+table in `ARCHITECTURE.md`), the project's own `verify` command (tests, lint, scans), and each `Check:` line. A failure sends the ticket back with the output. A failure counts as stuck only when it
 repeats: when a step fails the same way twice in a row, a second opinion (`rail consult`) advises once, and
 after one more failure the ticket waits for a person. Five failures at one step wait for a person whatever
 they were.
@@ -61,6 +61,9 @@ author's argument. The only changes that skip the reviewer are those to paths yo
 | Accepts the contract | The engine, once the ticket is well formed | A person |
 | Review | The reviewer, with a security checklist | The reviewer and a security seat |
 | Merges | The engine, once CI is green | A person |
+
+In a project with no remote there is no CI and no pull request: the engine merges both tiers, and a PERSON
+ticket waits for a person's `rail accept NN` first.
 
 A ticket is PERSON when its author says so, when it touches `person_paths` (the paths you name, such as
 auth, payments and infrastructure, plus Rail's own files and the CI workflows) or a migration, or when the
