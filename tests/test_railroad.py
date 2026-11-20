@@ -611,6 +611,20 @@ class Worker(RailTest):
         claimed = p.rail("next")
         self.assertEqual((claimed["action"]["model"], claimed["action"]["effort"]), ("claude-opus-5-5", "medium"))
 
+    def test_writing_a_contract_names_the_contract_model(self):
+        p = self.fixture()
+        request = os.path.join(self.tmp, "request.md")
+        with open(request, "w") as f:
+            f.write("add(2, 3) gives -1.\n")
+        p.rail("intake", "--external-id", "PROJ-7", "--title", "Fix add", "--brief", request)
+        drafting = p.rail("next")
+        self.assertEqual((drafting["reason"]["code"], drafting["action"]["model"], drafting["action"]["effort"]),
+                         ("TICKET_LINT", "claude-opus-5-5", "high"))
+        p.write(".rail/config.toml", CONFIG + '\n[worker]\ncontract = ""\n')
+        self.assertEqual(p.rail("next")["action"]["model"], "claude-sonnet-5-5")  # empty: the ladder's rung
+        p.write(".rail/config.toml", CONFIG + '\n[worker]\ncontract = "claude-opus-5-5"\n')
+        self.assertIn("worker.contract must be model:effort", p.rail("status", expect=2)["reason"]["message"])
+
     def test_an_empty_ladder_names_no_model(self):
         p = self.fixture(config=CONFIG + "\n[worker]\nladder = []\n")
         p.add(ticket())

@@ -25,7 +25,8 @@ DEFAULTS = {
     "consult": {"command": "claude -p --safe-mode --tools Read,Grep,Glob", "model": ""},
     "claim": {"stale_minutes": 30, "save_minutes": 10},
     "worker": {"ladder": ["claude-sonnet-5-5:medium", "claude-sonnet-5-5:high", "claude-opus-5-5:medium"],
-               "person_ladder": ["claude-opus-5-5:medium", "claude-opus-5-5:high"]},
+               "person_ladder": ["claude-opus-5-5:medium", "claude-opus-5-5:high"],
+               "contract": "claude-opus-5-5:high"},
     "sweep": {"after": 20, "every": 20},
     "map": {"depth": 1, "ignore": []},
     # A page named in the brief when its situation applies. The pages come with the seed config only: a project
@@ -75,13 +76,16 @@ def _check_rule(rule, n):
 
 
 def _check_ladder(config):
-    """Each rung of a worker ladder is model:effort."""
-    for key in ("ladder", "person_ladder"):
-        for n, rung in enumerate(config["worker"][key]):
-            model, _, effort = rung.rpartition(":")
-            if not model.strip() or effort not in EFFORTS:
-                raise RailError(f"config: worker.{key}[{n}] must be model:effort, such as \"claude-sonnet-5-5:medium\","
-                                f" with an effort of {', '.join(EFFORTS)}; got \"{rung}\"")
+    """Each rung of a worker ladder, and worker.contract when it is set, is model:effort."""
+    rungs = [(f"worker.{key}[{n}]", rung) for key in ("ladder", "person_ladder")
+             for n, rung in enumerate(config["worker"][key])]
+    if config["worker"]["contract"]:
+        rungs.append(("worker.contract", config["worker"]["contract"]))
+    for name, rung in rungs:
+        model, _, effort = rung.rpartition(":")
+        if not model.strip() or effort not in EFFORTS:
+            raise RailError(f"config: {name} must be model:effort, such as \"claude-sonnet-5-5:medium\","
+                            f" with an effort of {', '.join(EFFORTS)}; got \"{rung}\"")
 
 
 def load(root):
