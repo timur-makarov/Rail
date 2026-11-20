@@ -197,3 +197,11 @@ One line for each change, saying why.
 - When another session rebases a ticket first, this one takes the remote's copy instead of keeping its own. A note of the remote tip that a refused push proved stale is removed, so later pushes from that clone are not refused too.
 - A cloud session no longer tries to delete a merged ticket's remote branch: its git access can't, and GitHub's own setting does it.
 - README: how to run with no session open, with the runner prompt and the three triggers to copy.
+- `rail stats` no longer sets tickets with the `start` guide beside tickets without it. Every ticket gets that guide, so the second group held only tickets from before a guide was named, a different kind of work. The line that counts the tickets each guide was named for stays.
+- After an AUTO amend nobody approved, the reviewer's brief also holds the contract as first accepted, so a check the agent dropped or weakened is seen. In 4 real runs per arm the reviewer blocked the hidden fault 4 of 4 with it and 0 of 4 without.
+- Consult's `stop` line now says a plainly wrong check is not a person's decision, since the agent can amend it. In 4 real runs per arm consult answered `change` on a wrong check 4 of 4 (was `stop` 4 of 4), and still `stop` 4 of 4 on a real product decision.
+- rail-debug and rail-conflict: drop the debug tag, "keep it as a test" and the `git diff :1:` commands, which almost no run followed; 20 runs per arm showed nothing lost.
+- rail-grill: when a request is about data, look at the real data before asking. In a test where the data held the cause, old 2 of 4 runs got it, new 4 of 4, with no questions the data could answer.
+- When every `Check:` already passed on the base, the IMPLEMENT brief says the contract cannot tell done from not done and asks for a check that fails now, added with `rail amend`. In real runs 4 of 4 workers amended the contract with this line, against 0 of 4 before.
+- The engine takes `rail:needs-you` off only when the agent is to act on the ticket. Before, a session whose clone held an old copy of another session's ticket branch took the label off a pull request that waited for a person.
+- The comment on the issue of a dropped ticket gives the reason, such as "already done: where".
