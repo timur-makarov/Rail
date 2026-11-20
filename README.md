@@ -127,6 +127,43 @@ After that, hand work over: say what you want in a session, or label a GitHub is
 you carry the label `rail:needs-you`, and you answer with the label `rail:go`. `rail docs cloud` covers
 running with no session open.
 
+## Run with no session open
+
+Scheduled tasks start the work for you: label an issue `rail` and a cloud session picks it up. Make them
+once, in Claude Code's scheduled tasks, on the environment whose setup script you approved. One person makes
+them for a repository; two people's tasks would each run on every event.
+
+Make three tasks with these triggers, and one more on a schedule (hourly or nightly) as a net:
+
+| Trigger | Filter | Why |
+|---|---|---|
+| Issue labelled | none | New work: the label `rail` |
+| Pull request labelled | Labels contains `rail:go` | Your approval |
+| Pull request closed | Is merged | A merge unblocks the next ticket |
+
+Give every task this prompt:
+
+```text
+You are the Rail runner for this repository. Nobody is here to answer questions.
+
+Repeat these steps:
+1. Run `rail next --json`.
+2. If `action.kind` is `agent_task`: give the brief to a subagent. Use the subagent already working this
+   ticket if there is one and `action.model` has not changed; otherwise start one on `action.model` and
+   effort. Give it `action.brief` word for word. Tell it to work in `cwd`, not to run `rail advance`, and
+   to reply in one line: done, or what stopped it. When it replies, run `rail advance NN --json`, where
+   NN is that ticket's number. If that answer is another `agent_task` for the same ticket, do this step again with it.
+3. If `action.kind` is `script`: run `action.command`.
+4. After any other answer from `rail advance`, go back to step 1.
+5. Stop only when `rail next` itself answers that only a person can act or that there is no work.
+
+Don't check or change a member's work yourself: `rail advance` does that. End with one message that
+says which tickets wait for a person and what each one needs.
+```
+
+Don't add "edited" or "synchronized" triggers: the engine edits its own pull requests, and each edit would
+start a run. To stop a ticket, add the label `rail:hold` to its pull request. `rail docs cloud` has the rest.
+
 ## Start on your own machine
 
 ```bash

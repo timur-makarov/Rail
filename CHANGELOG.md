@@ -193,3 +193,7 @@ One line for each change, saying why.
 - `rail next` waits for CI that has not started: for three minutes after a push with no Actions run to watch, it answers `sleep 20; rail next`. Before, it answered "only a person can act" when another ticket waited for a person, and the runner left with its own ticket about to go green.
 - When `rail next` offers no ticket, its answer lists each ticket that rests and why: another session writes its contract, another ticket changes the same paths, its merge is requested, CI runs.
 - The runner prompt names the ticket: `rail advance NN --json`. With no number the command failed once in each session that used it.
+- A PERSON ticket gets `rail:needs-you` when it ships, not when CI ends: the session that shipped it may be gone by then, and nothing starts a run when CI goes green.
+- When another session rebases a ticket first, this one takes the remote's copy instead of keeping its own. A note of the remote tip that a refused push proved stale is removed, so later pushes from that clone are not refused too.
+- A cloud session no longer tries to delete a merged ticket's remote branch: its git access can't, and GitHub's own setting does it.
+- README: how to run with no session open, with the runner prompt and the three triggers to copy.

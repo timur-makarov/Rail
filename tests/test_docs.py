@@ -21,6 +21,16 @@ class Reference(RailTest):
         self.assertIn("## Default `review.command`\n\n```text\nclaude -p --safe-mode", page)
         self.assertNotIn("seed/", page)
 
+    def test_the_runner_prompt_in_the_readme_is_the_one_in_the_cloud_docs(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "README.md")) as f:
+            readme = f.read()
+        with open(os.path.join(root, "engine", "docs", "cloud.md")) as f:
+            cloud = f.read()
+        start, end = "You are the Rail runner", "what each one needs."
+        cut = lambda text: " ".join(text[text.index(start):text.index(end)].split())
+        self.assertEqual(cut(readme), cut(cloud))
+
     def test_the_cli_reference_lists_every_verb(self):
         p = self.fixture()
         page = p.rail("docs", "cli")["text"]
