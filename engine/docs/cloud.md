@@ -78,8 +78,8 @@ Make one scheduled task for the repository, on the environment from step 4, with
     2. If `action.kind` is `agent_task`: give the brief to a subagent. Use the subagent already working this
        ticket if there is one and `action.model` has not changed; otherwise start one on `action.model` and
        effort. Give it `action.brief` word for word. Tell it to work in `cwd`, not to run `rail advance`, and
-       to reply in one line: done, or what stopped it. When it replies, run `rail advance --json` for that
-       ticket. If that answer is another `agent_task` for the same ticket, do this step again with it.
+       to reply in one line: done, or what stopped it. When it replies, run `rail advance NN --json`, where
+       NN is that ticket's number. If that answer is another `agent_task` for the same ticket, do this step again with it.
     3. If `action.kind` is `script`: run `action.command`.
     4. After any other answer from `rail advance`, go back to step 1.
     5. Stop only when `rail next` itself answers that only a person can act or that there is no work.
@@ -144,6 +144,8 @@ The source only files tickets. The runner above picks them up on its own schedul
   the agent as your note. Don't merge a contract pull request: it holds only the contract. If you do, Rail
   takes it as your approval and opens a new pull request for the work.
 - **Change a contract:** comment on its pull request. **Reject it:** close the pull request.
+- **Stop a ticket:** add the label `rail:hold` to its pull request. Nothing moves it until you add `rail:go`.
+  `rail:needs-you` is the engine's own label: adding or removing it by hand changes nothing.
 - **Merge a PERSON ticket:** the merge button.
 - Each pull request ends with `Claude-Session:` and a link to the session that worked the ticket.
 

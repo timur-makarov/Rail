@@ -187,6 +187,22 @@ class Conflicts(RailTest):
         self.assertEqual(a.git("ls-remote", "origin", "refs/heads/1-fix-add").split()[0],
                          a.git("rev-parse", "1-fix-add").strip())
 
+    def test_a_push_the_remote_refuses_is_named_in_the_answer(self):
+        # Whatever the reason the remote says no, the answer must not read as if the command had done its work.
+        a, b, github = self.github_pair()
+        shipped(a)
+        hook = os.path.join(github.read()["bare"], "hooks", "pre-receive")
+        os.makedirs(os.path.dirname(hook), exist_ok=True)
+        with open(hook, "w") as f:
+            f.write("#!/bin/sh\nexit 1\n")
+        os.chmod(hook, 0o755)
+        a.write(".claude/worktrees/1/src/calc.py", "def add(a, b):\n    return a + b  # again\n")
+        answer = a.rail("advance", "1", expect=None)
+        refused = [s for s in answer["steps"] if s["step"] == "push"]
+        self.assertTrue(refused and all(s["result"] == "fail" for s in refused), answer)
+        self.assertIn("refused the push of 1-fix-add", refused[0]["detail"])
+        self.assertIn("a `push` step that failed", answer["action"]["brief"])
+
     def test_a_pull_request_behind_its_base_that_conflicts_on_the_rebase_goes_back_to_the_agent(self):
         # GitHub said behind, and the engine's own rebase meets a conflict: the agent rebases by hand.
         a, b, github = self.github_pair()
@@ -241,7 +257,7 @@ class RemoteMerge(RailTest):
         self.assertEqual(a.rail("status")["tickets"][0]["state"], "merged")
 
     def test_a_merge_that_never_lands_keeps_its_own_reason_once_the_wait_is_labelled(self):
-        # The engine labels every wait rail:needs-you; the label must not turn the failed merge into a person's hold.
+        # The engine labels every wait rail:needs-you; its own label must never read as a person's hold.
         a, b, github = self.github_pair()
         more_github(github)
         github.update(lambda s: s.__setitem__("merge_lands_later", True))
@@ -283,10 +299,11 @@ class RemoteMerge(RailTest):
                          ("1", "in-ci", "agent", "CI_WAIT"))
         self.assertEqual(watch["action"], {"kind": "script", "brief": "gh run watch 4242 --interval 30 --exit-status; rail next",
                                            "command": "gh run watch 4242 --interval 30 --exit-status; rail next"})
-        github.update(lambda s: s.__setitem__("workflow_runs", []))  # no Actions run yet: nothing to watch
-        resting = a.rail("next")
-        self.assertEqual((resting["owner"], resting["reason"]["code"], resting["action"]["kind"]),
-                         ("none", "CI_WAIT", "rest"))
+        # Pushed a moment ago and no Actions run yet: the runner waits and asks again, it is not sent away.
+        github.update(lambda s: s.__setitem__("workflow_runs", []))
+        soon = a.rail("next")
+        self.assertEqual((soon["owner"], soon["reason"]["code"], soon["action"]["command"]),
+                         ("agent", "CI_WAIT", "sleep 20; rail next"))
 
 
 class LocalMerge(RailTest):

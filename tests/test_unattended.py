@@ -60,6 +60,7 @@ class Intake(RailTest):
         self.assertEqual(a.rail("next")["reason"]["code"], "TICKET_LINT")  # its own: asked again, it gets it again
         other = b.rail("next", session="b")
         self.assertEqual(other["reason"]["code"], "NO_WORK", other)
+        self.assertIn("- 1: Another session is writing the contract of ticket 1. Leave it", other["action"]["brief"])
         taken = b.rail("next", "--ticket", "1", session="b")  # asked for by number: taken over
         self.assertEqual(taken["reason"]["code"], "TICKET_LINT")
         self.assertEqual(a.rail("next")["reason"]["code"], "NO_WORK")

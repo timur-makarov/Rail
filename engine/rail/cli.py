@@ -15,7 +15,7 @@ from .project import Project, event, events_path, ticket_path
 from .state import OPEN, derive, floor
 from .table import TRANSITIONS, first_match
 from .ticket import Ticket, branch_name, highest, lint, rank, with_field, with_id, with_tier
-from .forge import ENGINE_MARK, TRUSTED
+from .forge import ENGINE_MARK, TRUSTED, ForgeError
 from .util import RailError, age, cloud, could_not_run, disposable, match_any, session_url, shell
 
 VERBS = ("init", "add", "adopt", "accept", "amend", "answer", "next", "advance", "status", "context", "drop", "doctor", "ci",
@@ -331,7 +331,7 @@ def transition(project, f, code):
         else:
             record = event(t.id, "continued", via="label", **({"note": note} if note else {}))
         project.append_events(t, [record], "continue")
-        for label in ("rail:go", "rail:needs-you"):
+        for label in ("rail:go", "rail:needs-you", "rail:hold"):
             project.forge.remove_label(f.pr["number"], label)
         if waited and f.in_flight and f.claimed_elsewhere and not claim(project, t, takeover=True):
             # The session that claimed it was waiting for this answer, not working. The run that reads the answer
@@ -671,7 +671,7 @@ def cmd_accept(project, args):
     ensure_local(project, f.t)
     project.append_events(f.t, events, "accept")
     if f.pr_open:
-        for label in ("rail:go", "rail:needs-you"):
+        for label in ("rail:go", "rail:needs-you", "rail:hold"):
             if label in f.labels:
                 project.forge.remove_label(f.pr["number"], label)
     if f.in_flight and f.claimed_elsewhere:
@@ -947,6 +947,13 @@ def cmd_next(project, args):
         code, owner, _ = first_match(f)
         if owner == "human":
             label_wait(project, f, code)
+        elif f.pr_open and "rail:needs-you" in f.labels:
+            # The wait ended without a rail:go (the base moved under a pull request that waited for its merge, say):
+            # the inbox search must not keep showing it.
+            try:
+                project.forge.remove_label(f.pr["number"], "rail:needs-you")
+            except ForgeError:
+                pass
 
     # Any ticket the agent can act on comes first: this session's own, then tickets no session holds (shipped ones,
     # which the engine moves from anywhere, and work an ended session left), then new work in ID order.
@@ -966,9 +973,11 @@ def cmd_next(project, args):
             return from_facts(f, took_in + receipts, leftovers=leftovers)
 
     tickets, facts = load(project)
-    waits, held, ci = [], [], []
+    waits, held, ci, resting = [], [], [], []
     for f in facts.values():
         code, owner, action = first_match(f)
+        if owner == "none" and f.state in ("new", "accepted") + OPEN and code != "CLAIMED_ELSEWHERE":
+            resting.append(f"- {f.id}: {action['brief']}")  # so a runner offered none of them knows why
         if owner == "human":
             waits.append({"ticket": f.id, "needs": code, "brief": action["brief"],
                           **({"pr": f.pr["html_url"]} if f.pr else {})})
@@ -984,8 +993,16 @@ def cmd_next(project, args):
             command = f"gh run watch {run_id} --interval 30 --exit-status; rail next"
             return answer(ci[0].id, ci[0].state, "agent", {"kind": "script", "brief": command, "command": command},
                           "CI_WAIT", took_in, **extra)
+        fresh_push = [f for f in ci if f.forge and f.quiet_minutes < CI_START_MINUTES]
+        if fresh_push:
+            # Pushed a moment ago and GitHub shows no run yet. Answering "only a person can act" here ends the runner
+            # with its own ticket about to go green and nobody left to merge or label it.
+            command = "sleep 20; rail next"
+            return answer(fresh_push[0].id, fresh_push[0].state, "agent",
+                          {"kind": "script", "brief": command, "command": command}, "CI_WAIT", took_in, **extra)
+    others = ("\nNothing for an agent on these now:\n" + "\n".join(resting)) if resting else ""
     if waits:
-        brief = "Tickets wait for a person:\n" + "\n".join(f"- {w['ticket']}: {w['brief']}" for w in waits)
+        brief = "Tickets wait for a person:\n" + "\n".join(f"- {w['ticket']}: {w['brief']}" for w in waits) + others
         return answer(owner="human", code="WAITING_HUMAN", action={"kind": "human_wait", "brief": brief},
                       steps_=took_in, **extra)
     from . import sweep
@@ -996,13 +1013,16 @@ def cmd_next(project, args):
     if ci:
         # CI is running and there is no run to watch (another CI system, or the run hasn't started yet).
         return answer(ci[0].id, ci[0].state, "none", first_match(ci[0])[2], "CI_WAIT", took_in, **extra)
-    brief = "No ticket to work on. New work starts with: rail add <ticket file>"
+    brief = "No ticket to work on. New work starts with: rail add <ticket file>" + others
     if held:
         limit = project.config["claim"]["stale_minutes"]
         brief += ("\nOther sessions are at work on: " + ", ".join(
             f"{h['ticket']} (quiet {h['quiet_minutes']} min)" for h in held)
             + f". A ticket quiet for {limit} min is resumed by the next rail next; rail next --ticket NN takes one now.")
     return answer(code="NO_WORK", action={"kind": "rest", "brief": brief}, steps_=took_in, **extra)
+
+
+CI_START_MINUTES = 3  # how long after a push GitHub may take to show its run
 
 
 def note_drafting(project, f):
@@ -1020,10 +1040,11 @@ def note_drafting(project, f):
 
 
 def label_wait(project, f, code):
-    """The inbox is one saved search, is:open label:rail:needs-you: label each wait's PR."""
+    """The inbox is one saved search, is:open label:rail:needs-you: label each wait's PR. The engine only ever sets
+    and removes this label. It never reads it as a person's word: that is rail:hold."""
     from .forge import ForgeError
 
-    if f.pr_open and code != "HOLD" and "rail:needs-you" not in f.labels:
+    if f.pr_open and "rail:needs-you" not in f.labels:
         try:
             project.forge.add_labels(f.pr["number"], ["rail:needs-you"])
         except ForgeError:
@@ -1063,11 +1084,20 @@ def commit_work(project, f, run):
 def commit(project, f, run, message):
     """Commit a run's events and journal files to the ticket branch, and push."""
     t = f.t
+    pushed = None
     if run.events or run.files:
-        project.append_events(t, run.events, message, files=run.files)
+        pushed = project.append_events(t, run.events, message, files=run.files)
         run.events, run.files, run.rebased = [], {}, False
     elif project.remote:
-        project.push_branch(t.branch)
+        pushed = project.push_branch(t.branch)
+    if pushed == "rejected":
+        # Say it: a push the remote refuses leaves the pull request on its old commit, and the next answer would
+        # otherwise read as if this command had done nothing.
+        run.steps.append({"step": "push", "status": "ran", "result": "fail",
+                          "detail": f"{project.remote} refused the push of {t.branch}: its copy has commits this one"
+                                    f" lacks, so the pull request still shows the old commit. Compare the two (git log"
+                                    f" {t.branch}...{project.remote}/{t.branch}); if you can't bring them together,"
+                                    " this is for a person"})
 
 
 def after_failure(project, nn, run):

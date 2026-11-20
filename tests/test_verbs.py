@@ -11,7 +11,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from railtest import ARCHITECTURE, CONFIG, Fixture, RailTest, ticket  # noqa: E402
 
-LABELS = ["rail", "rail:go", "rail:needs-you"]
+LABELS = ["rail", "rail:go", "rail:needs-you", "rail:hold"]
 
 
 def read(path):
@@ -28,15 +28,15 @@ def notes(p, session="session-a"):
 
 
 class Init(RailTest):
-    def test_init_in_a_clone_of_a_github_repository_creates_the_three_labels_once(self):
+    def test_init_in_a_clone_of_a_github_repository_creates_the_labels_once(self):
         a, b, github = self.github_pair(init=False)
         done = a.rail("init")
         self.assertEqual(steps(done)["labels"], {"step": "labels", "status": "ran", "result": "pass",
-                                                 "detail": "created rail, rail:go, rail:needs-you"})
-        self.assertEqual(sorted(github.read()["labels"]), LABELS)
+                                                 "detail": "created rail, rail:go, rail:needs-you, rail:hold"})
+        self.assertEqual(sorted(github.read()["labels"]), sorted(LABELS))
         again = a.rail("init")
         self.assertEqual(steps(again)["labels"]["detail"], "all three exist")
-        self.assertEqual(sorted(github.read()["labels"]), LABELS)
+        self.assertEqual(sorted(github.read()["labels"]), sorted(LABELS))
 
     def test_settings_that_are_not_json_are_left_alone_and_doctor_says_the_hooks_are_missing(self):
         p = Fixture(os.path.join(self.tmp, "broken"), init=False, files={".claude/settings.json": '{"hooks": {\n'})
