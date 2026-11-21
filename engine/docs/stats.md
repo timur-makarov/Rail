@@ -68,7 +68,7 @@ Disputes: 1. The refuter dismissed 1.
 | `BY MODEL` | Runs and cost by the model that answered, the blocking findings its review and security runs first reported, and how many of those were fixed |
 | `Blocking findings` | How each ended: fixed, dismissed by the refuter, declined by a person, parked, or still open |
 | `Hit rate` | Blocking findings fixed, divided by the blocking findings that were decided |
-| `Advisory findings` | How each ended: fixed, declined, parked |
+| `Advisory findings` | How each ended: fixed, declined, parked, or still open (an open one holds nothing; the sweep gathers it) |
 | `Parked by the reviewer` | Findings the reviewer itself reported as parked |
 | `Disputes` | Refuter runs, by what the refuter decided: dismissed, parked or upheld |
 

@@ -86,10 +86,14 @@ class Ledger:
         return self.last(fid).get("outcome")
 
     def unanswered(self):
-        """Open findings the author must answer: fix and mark fixed, decline, or park."""
+        """Open blocking findings the author must answer: fix and mark fixed, decline, or park. An advisory finding
+        holds nothing: it stays open until answered, and the sweep gathers it once the ticket merged."""
         waiting = set(self.disputed())
         return [fid for fid in self.findings if self.outcome(fid) == "open" and not self.last(fid).get("disputed")
-                and fid not in waiting]
+                and fid not in waiting and self.findings[fid].get("severity") == "blocking"]
+
+    def open_advisory(self):
+        return [fid for fid, f in self.findings.items() if self.outcome(fid) == "open" and f.get("severity") == "advisory"]
 
     def upheld_before(self, fid):
         return any(e.get("by") == "refuter" and e.get("outcome") == "open" for _, e in self.findings[fid]["history"])
