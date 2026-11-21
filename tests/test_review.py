@@ -187,15 +187,31 @@ class Review(RailTest):
                 security = [s for s in ready["steps"] if s["step"] == "security"][-1]
                 self.assertEqual((security["result"], security["detail"]), ("pass", detail))
 
-    def test_invalid_output_fails_the_step(self):
+    def test_invalid_output_twice_waits_for_a_person_and_counts_against_no_one(self):
         p = self.fixture()
         self.medium(p)
         ghost = {"severity": "blocking", "file": "src/missing.py", "claim": "x"}
         p.queue_reviews(found(ghost), {"raw": "not json at all"})
+        stuck = p.rail("advance", "1", expect=3)  # the invalid run is started once more at once, like a timeout
+        details = [s.get("detail") for s in review_steps(stuck)]
+        self.assertIn("src/missing.py isn't a tracked file", details[0])
+        self.assertEqual(details[1], "invalid output: the output is not JSON")
+        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "STUCK_REVIEW"))
+        self.assertIn("its output was invalid", stuck["action"]["brief"])
+        runs = [e for e in events(p, "1-fix-add", "step") if e["step"] == "review"]
+        self.assertEqual([e.get("counted") for e in runs], [False, False])  # the worker ladder reads only counted ones
+        self.assertEqual(p.rail("accept", "1", "the reviewer's schema was out of date")["reason"]["code"], "REVIEW")
+
+    def test_invalid_output_once_then_a_valid_review_carries_on_with_the_ladder_where_it_was(self):
+        p = self.fixture()
+        self.medium(p)
+        p.queue_reviews({"raw": "garbage"}, found(BLOCKING))
         failed = p.rail("advance", "1", expect=3)
-        self.assertIn("src/missing.py isn't a tracked file", review_steps(failed)[-1]["detail"])
-        failed = p.rail("advance", "1", expect=3)
-        self.assertEqual(review_steps(failed)[-1]["detail"], "invalid output: the output is not JSON")
+        self.assertEqual([s.get("detail") for s in review_steps(failed)],
+                         ["invalid output: the output is not JSON", "run 1: 1 blocking, 1 findings"])
+        self.assertEqual(failed["reason"]["code"], "ANSWER_FINDINGS")
+        # One counted failure, the blocking run: the ladder's second rung, as without the invalid run.
+        self.assertEqual((failed["action"]["model"], failed["action"]["effort"]), ("claude-sonnet-5-5", "high"))
 
     def test_the_worktree_is_reset_after_each_run(self):
         p = self.fixture()

@@ -1242,10 +1242,13 @@ def cmd_advance(project, args):
                                                                                   " the merge wait"})
             break
         first = False
+        # A review run that timed out or gave invalid output: the reviewer's fault, so not counted.
+        no_verdict = bool(run.failure) and run.failure[0] in steps.REVIEW_STEPS and any(
+            e.get("event") == "step" and e.get("counted") is False for e in run.events)
         commit(project, f, run, stage if run.ok else f"{stage} failed")
         receipts += run.steps
-        if run.failure and run.failure[1] and run.steps[-1].get("detail") == "timeout":
-            continue  # a review run that timed out is started once more; two in a row wait for a person
+        if no_verdict:
+            continue  # a review run that timed out or gave invalid output is started once more; two in a row wait for a person
         if run.failure:
             advice = after_failure(project, nn, run)
             receipts += [s for s in run.steps if s["step"] == "consult"]
