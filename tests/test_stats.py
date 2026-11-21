@@ -2,13 +2,15 @@
 
 import os
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from railtest import ARCHITECTURE, CONFIG, RailTest, ticket
 
 BLOCKING = {"severity": "blocking", "file": "src/calc.py", "line": 1, "claim": "add breaks on None."}
 ADVISORY = {"severity": "advisory", "file": "src/calc.py", "claim": "add has no docstring."}
-LEAK = {"severity": "blocking", "file": "api/handlers.py", "line": 1, "claim": "201 leaks the row count."}
+LEAK = {"severity": "blocking", "file": "api/handlers.py", "line": 1, "claim": "201 leaks the row count.",
+        "evidence": {"command": "echo no leak", "output": "rows: 3 leaked"}}  # the re-run doesn't show it
 
 
 def clean():
@@ -27,7 +29,8 @@ class Stats(RailTest):
         p.rail("next")
         p.rail("advance", "1", expect=3)
         p.fix_calc("1")
-        p.queue_reviews({"summary": "Found two.", "findings": [BLOCKING, ADVISORY]}, clean())
+        shown = BLOCKING | {"evidence": {"command": "echo 'add(None, 1) raised at 0x1f'", "output": "add(None, 2) raised"}}
+        p.queue_reviews({"summary": "Found two.", "findings": [shown, ADVISORY]}, clean())
         p.rail("advance", "1", expect=3)
         p.write("src/calc.py", "def add(a, b):\n    return (a or 0) + (b or 0)\n", base=p.worktree("1"))
         p.rail("answer", "1", "F1", "fixed", "None counts as 0.")
@@ -73,6 +76,10 @@ class Stats(RailTest):
         self.assertEqual(review["advisory"], {"total": 1, "declined": 1})
         self.assertEqual(review["disputes"], {"dismissed": 1})
         self.assertEqual(review["hit_rate"], 0.5)
+        self.assertEqual(review["refuter_overturns"], 1.0)
+        self.assertEqual(review["rounds"], {"tickets": 2, "median": 1.5, "one_run": 0.5})  # 1 ran twice, 3 once
+        self.assertEqual(review["evidence"], {"rerun": 2, "reproduced": 1, "share": 0.5})
+        self.assertEqual(stats["person_changed_nothing"], {"at add": {"tickets": 1, "changed_nothing": 1}})
 
         text = p.rail("stats", raw=True).stdout
         for line in ("Rail stats: 3 merged tickets. Not counted: 1 not merged.",
@@ -85,7 +92,10 @@ class Stats(RailTest):
                      "Blocking findings: 2. Fixed 1, dismissed by the refuter 1.",
                      "Hit rate: 50% of the decided ones ended in a fix.",
                      "Advisory findings: 1. Declined 1.",
-                     "Disputes: 1. The refuter dismissed 1."):
+                     "Disputes: 1. The refuter dismissed 1. Refuter overturns: 100%.",
+                     "Rounds to pass: median 1.5 review runs for each ticket the reviewer read; 50% merged after one run.",
+                     "Evidence reproduced: 1 of 2 blocking findings whose evidence the engine ran again (50%).",
+                     "PERSON tickets where the person changed nothing, by why they were PERSON: at add 1 of 1."):
             self.assertIn(line, text)
         self.assertEqual(p.git("status", "--porcelain"), "")  # stats only reads
 
@@ -126,6 +136,51 @@ class Stats(RailTest):
         self.assertEqual(answer["stats"]["grilling"]["groups"]["not grilled"]["open"], 1)
         self.assertEqual(list(answer["stats"]["grilling"]["channels"]), ["session"])
         self.assertIn("GRILLING", answer["text"])
+
+
+def engine_stats():
+    """The stats module of the engine the launcher under test runs."""
+    import railtest
+    engine = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(railtest.RAIL))), "engine")
+    if engine not in sys.path:
+        sys.path.insert(0, engine)
+    from rail import stats
+    return stats
+
+
+def journal(*events):
+    return SimpleNamespace(events=[{"event": kind, **fields} for kind, fields in events])
+
+
+APPROVED = ("accepted", {"by": "person", "tier": "PERSON"})
+
+
+class PersonChangedNothing(RailTest):
+    def test_why_a_ticket_was_person_and_whether_the_person_changed_anything(self):
+        stats = engine_stats()
+        cases = {
+            # The contract approved before the work and the merge approved with no note: nothing changed, although
+            # the agent shipped twice after the approval.
+            "approved and merged": (journal(APPROVED, ("shipped", {"patch_id": "a"}), ("shipped", {"patch_id": "b"}),
+                                            ("continued", {"via": "accept"})), True, ["at add"]),
+            "a note": (journal(("accepted", {"by": "engine", "tier": "AUTO"}), ("shipped", {"patch_id": "a"}),
+                               ("tier_raised", {"reason": "person_paths"}), ("continued", {"note": "rename it"})),
+                       False, ["person_paths"]),
+            "a commit after": (journal(("accepted", {"by": "engine", "tier": "AUTO"}), ("shipped", {"patch_id": "a"}),
+                                       ("tier_raised", {"reason": "size"}), ("continued", {}),
+                                       ("shipped", {"patch_id": "b"})), False, ["size"]),
+            "a rebase after": (journal(("accepted", {"by": "engine", "tier": "AUTO"}), ("shipped", {"patch_id": "a"}),
+                                       ("tier_raised", {"reason": "reviewer"}), ("continued", {}),
+                                       ("shipped", {"patch_id": "a"})), True, ["reviewer"]),
+            "an owner answer": (journal(APPROVED, ("shipped", {"patch_id": "a"}),
+                                        ("finding", {"id": "F1", "outcome": "declined", "by": "owner"})), False, ["at add"]),
+            "an amend": (journal(APPROVED, ("amended", {"changed": ["done_contract"]}), ("shipped", {"patch_id": "a"})),
+                         False, ["at add"]),
+        }
+        for name, (t, nothing, reasons) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(stats._person_changed_nothing(t), nothing)
+                self.assertEqual(stats._person_reasons(t), reasons)
 
 
 MUL_CHECK = "python3 -c \"import sys; sys.path.insert(0, 'src'); import mul; assert mul.mul(2, 3) == 6\""

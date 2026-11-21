@@ -204,6 +204,52 @@ class Review(RailTest):
         p.rail("advance", "1")
         self.assertEqual(p.git("status", "--porcelain", cwd=p.worktree("1")), "")
 
+    PROBE = "grep -c 'reviewer was here' src/calc.py\necho \"probe ran at $(date +%s)\"\n"
+
+    def test_the_engine_reruns_evidence_with_the_scratch_file_and_without_the_tracked_edit(self):
+        p = self.fixture()
+        self.medium(p)
+        quoted = {"command": "sh probe.sh", "output": "probe ran at 1700000000"}
+        p.queue_reviews({"touch": "probe.sh", "script": self.PROBE, **found(BLOCKING | {"evidence": quoted})})
+        failed = p.rail("advance", "1", expect=3)
+        evidence = json.loads(p.git("show", "1-fix-add:.rail/journal/1-review.json"))["runs"][0]["findings"][0]["evidence"]
+        self.assertEqual(evidence["rerun"]["exit"], 0)
+        self.assertTrue(evidence["rerun"]["output_tail"].startswith("0\n"))  # the reviewer's edit to calc.py is gone
+        self.assertTrue(evidence["reproduced"])  # the number differs, and normalises away
+        self.assertEqual(evidence["scripts"], {"probe.sh": self.PROBE})
+        self.assertIn("probe.sh, the reviewer's scratch file", failed["action"]["brief"])
+        self.assertIn("grep -c 'reviewer was here' src/calc.py", failed["action"]["brief"])
+        self.assertEqual(p.git("status", "--porcelain", cwd=p.worktree("1")), "")
+
+    def test_evidence_that_does_not_reproduce_is_recorded_and_the_finding_stays(self):
+        p = self.fixture()
+        self.medium(p)
+        quoted = {"command": "sh probe.sh", "output": "add(-1, 1) == 2"}
+        p.queue_reviews({"touch": "probe.sh", "script": self.PROBE, **found(BLOCKING | {"evidence": quoted})})
+        failed = p.rail("advance", "1", expect=3)
+        self.assertEqual(failed["reason"]["code"], "ANSWER_FINDINGS")
+        doc = json.loads(p.git("show", "1-fix-add:.rail/journal/1-review.json"))
+        self.assertFalse(doc["runs"][0]["findings"][0]["evidence"]["reproduced"])
+        self.assertEqual(doc["runs"][0]["findings"][0]["severity"], "blocking")
+
+    def test_an_evidence_rerun_past_the_timeout_is_recorded_and_the_review_stands(self):
+        p = self.fixture(config=CONFIG.replace("timeout_secs = 60", "timeout_secs = 2"))
+        self.medium(p)
+        slow = ADVISORY | {"evidence": {"command": "echo started; sleep 30", "output": "started"}}
+        p.queue_reviews(found(slow))
+        answer = p.rail("advance", "1")
+        self.assertEqual((review_steps(answer)[-1]["result"], answer["reason"]["code"]), ("pass", "ANSWER_FINDINGS"))
+        evidence = json.loads(p.git("show", "1-fix-add:.rail/journal/1-review.json"))["runs"][0]["findings"][0]["evidence"]
+        self.assertEqual((evidence["rerun"]["exit"], evidence["reproduced"]), (None, False))
+        self.assertIn("started", evidence["rerun"]["output_tail"])
+
+    def test_invalid_output_still_resets_the_worktree(self):
+        p = self.fixture()
+        self.medium(p)
+        p.queue_reviews({"touch": "probe.sh", **found({"severity": "blocking", "file": "src/missing.py", "claim": "x"})})
+        p.rail("advance", "1", expect=3)
+        self.assertEqual(p.git("status", "--porcelain", cwd=p.worktree("1")), "")
+
     def test_two_timeouts_wait_for_a_person(self):
         p = self.fixture(config=CONFIG.replace("timeout_secs = 60", "timeout_secs = 2"))
         self.medium(p)

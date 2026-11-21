@@ -2,7 +2,8 @@
 """A stand-in for `claude -p` in tests: it answers review briefs from a queue the test writes, and logs each brief.
 
 Queue items: a review/v1 object; "timeout" (sleep past timeout_secs); {"raw": text} (print text as is);
-{"touch": path, ...} (write a scratch file first, to test the reset). With --consult it answers as the consult pack's
+{"touch": path, ...} (write a scratch file first, with the text of "script" when given, and edit a tracked file, to
+test the reset and the evidence re-run). With --consult it answers as the consult pack's
 command does: advice text ending in a VERDICT line.
 """
 import json
@@ -35,7 +36,7 @@ if isinstance(response, dict) and "raw" in response:
     sys.exit(0)
 if isinstance(response, dict) and "touch" in response:
     with open(response.pop("touch"), "w") as f:
-        f.write("scratch\n")
+        f.write(response.pop("script", "scratch\n"))
     with open("src/calc.py", "a") as f:
         f.write("# the reviewer was here\n")
 if isinstance(response, dict) and "sleep" in response:

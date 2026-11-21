@@ -44,7 +44,10 @@ claude-opus-5-5     5  $1.73         2      1
 Blocking findings: 2. Fixed 1, dismissed by the refuter 1.
 Hit rate: 50% of the decided ones ended in a fix. A finding the author fixed without disputing it counts as a hit, so read this as an upper bound.
 Advisory findings: 1. Declined 1.
-Disputes: 1. The refuter dismissed 1.
+Disputes: 1. The refuter dismissed 1. Refuter overturns: 100%.
+Rounds to pass: median 1.5 review runs for each ticket the reviewer read; 50% merged after one run.
+Evidence reproduced: 1 of 2 blocking findings whose evidence the engine ran again (50%).
+PERSON tickets where the person changed nothing, by why they were PERSON: at add 1 of 1.
 ```
 
 ## What each line counts
@@ -71,6 +74,22 @@ Disputes: 1. The refuter dismissed 1.
 | `Advisory findings` | How each ended: fixed, declined, parked |
 | `Parked by the reviewer` | Findings the reviewer itself reported as parked |
 | `Disputes` | Refuter runs, by what the refuter decided: dismissed, parked or upheld |
+| `Refuter overturns` | Disputes the refuter dismissed or parked, divided by all disputes. In JSON, `review.refuter_overturns` |
+| `Rounds to pass` | `review` runs stored in the journal (runs with a verdict; a timeout or invalid output is not one) for each merged ticket the reviewer read: the median, and the share of those tickets merged after one run. In JSON, `review.rounds`: `tickets`, `median`, `one_run` |
+| `Evidence reproduced` | Blocking findings (review and security) whose evidence, as the run that first reported them gave it, the engine ran again after the review (`evidence.reproduced` in the journal, `rail docs journal`), and how many of those re-runs showed every line the reviewer quoted. Findings from before the engine ran evidence again are left out. In JSON, `review.evidence`: `rerun`, `reproduced`, `share` |
+| `PERSON tickets where the person changed nothing` | For each reason a merged PERSON ticket was PERSON (`at add` when its first acceptance was already PERSON, else the `tier_raised` reasons; a ticket counts under each of its reasons): its tickets, and those where the person changed nothing. That is: no `accept` or `rail:go` with a note, no finding the person decided, no amend after the person's first act, and no new patch shipped after the person's first act once the work had shipped. A contract approval before the work is not that act, since every commit follows it. In JSON, `person_changed_nothing` |
+
+## When a line says to remove something
+
+Four lines measure parts of the review that are kept only while they pay. Each says when to take the part
+out; read them over the stated number of tickets, not fewer.
+
+| Line | Remove when |
+|---|---|
+| `Evidence reproduced` | Under 5% over 50 or more blocking findings with re-run evidence: the engine's re-run of the evidence buys nothing |
+| `Refuter overturns` | 0% over 50 or more disputes: the refuter always upholds, so it only costs a run |
+| `PERSON tickets where the person changed nothing` | 95% or more over 20 or more tickets of one reason, and none of them reverted or named in a later ticket's `caused_by`: that reason may stop making a ticket PERSON. It is policy, so the owner decides |
+| `Rounds to pass` | No removal test: it reads as convergence, and a rise after a change to the reviewer or the worker shows the change cost rounds |
 
 ## Guides
 
