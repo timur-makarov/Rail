@@ -94,8 +94,9 @@ def free_part(project):
 
 
 def history(project, merged):
-    """The parked findings and the proposed checks of fixed findings, from the journals of every ticket merged since
-    the last sweep, reviewed or not: a reviewed ticket is where a reviewer parks a finding."""
+    """The parked findings, the advisory findings left open, and the proposed checks of fixed findings, from the
+    journals of every ticket merged since the last sweep, reviewed or not: a reviewed ticket is where a reviewer parks
+    a finding."""
     ids = sorted(set(merged), key=int)
     blobs = gitx.read_blobs([f"{project.base_ref}:{events_path(nn)}" for nn in ids], project.root)
     parked, checks = [], defaultdict(list)
@@ -110,6 +111,8 @@ def history(project, merged):
             claim = first.get(fid, {}).get("claim", "")
             if e.get("outcome") == "parked":
                 parked.append((nn, fid, claim))
+            elif e.get("outcome") == "open" and first.get(fid, {}).get("severity") == "advisory":
+                parked.append((nn, f"{fid} (advisory, left open)", claim))
             elif e.get("outcome") == "fixed" and first.get(fid, {}).get("check"):
                 checks[" ".join(first[fid]["check"].lower().split())].append(f"{nn}/{fid}")
     seen, unique = set(), []
@@ -133,7 +136,7 @@ def brief(project, commits, parked, checks):
         "## The changes", "```diff", "\n\n".join(diffs), "```", "",
         "## The project's conventions (from AGENTS.md)", project_conventions(project, project.base_ref) or "(none)", "",
         "## What to look for", SWEEP_LOOK_FOR, "", SECURITY, "", DO_NOT_REPORT, "",
-        "## Parked findings from the tickets merged since the last sweep",
+        "## Parked and open advisory findings from the tickets merged since the last sweep",
         *([f"- ticket {nn} {fid}: {claim}" for nn, fid, claim in parked] or ["(none)"]), "",
         "## Checks reviewers proposed for findings that were fixed",
         *([f"- {check} ({', '.join(where)})" for check, where in checks.items()] or ["(none)"]),
@@ -152,7 +155,7 @@ def summary(nn, start, commits, merged, problems, counts, entry, parked, checks)
     for f in (entry or {}).get("findings", []):
         where = f"{f['file']}:{f['line']}" if f.get("line") else f["file"]
         lines.append(f"- {f['id']} ({f['severity']}) {where}: {f['claim']}" + (f" Check: {f['check']}" if f.get("check") else ""))
-    lines += ["", "## Parked findings", *([f"- ticket {n} {fid}: {c}" for n, fid, c in parked] or ["(none)"]),
+    lines += ["", "## Parked and open advisory findings", *([f"- ticket {n} {fid}: {c}" for n, fid, c in parked] or ["(none)"]),
               "", "## Proposed checks, by kind", *([f"- {c} ({', '.join(w)})" for c, w in checks.items()] or ["(none)"])]
     return "\n".join(lines) + "\n"
 

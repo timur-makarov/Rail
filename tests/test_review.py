@@ -59,18 +59,32 @@ class Review(RailTest):
         p.write("src/calc.py", "def add(a, b):\n    return b + a\n", base=p.worktree("1"))
         p.rail("answer", "1", "F1", "fixed", "Order no longer matters.")
         p.rail("answer", "1", "F2", "declined", "The project has no docstrings.")
-        ready = p.rail("advance", "1")  # the re-review repeats F2: open again, and advisory, so the step passes
-        self.assertEqual(ready["reason"]["code"], "ANSWER_FINDINGS")
+        ready = p.rail("advance", "1")  # the re-review repeats F2: open again, but advisory, so it holds nothing
+        self.assertEqual(ready["state"], "merge-ready")
         rereview = p.briefs()[1]["brief"]
         self.assertIn("now fixed (by author): Order no longer matters.", rereview)
-        done = p.rail("answer", "1", "F2", "declined", "Still: the project has no docstrings.")
-        self.assertEqual(done["state"], "merge-ready")
         doc = json.loads(p.git("show", "1-fix-add:.rail/journal/1-review.json"))
         self.assertEqual([r["role"] for r in doc["runs"]], ["review", "review"])
         self.assertNotEqual(doc["runs"][0]["patch_id"], doc["runs"][1]["patch_id"])
         self.assertEqual(doc["runs"][0]["model"], "fake-model")
         self.assertEqual(p.rail("advance", "1")["state"], "merged")
-        self.assertIn("| review | ran, 2 runs by fake-model, 2 findings, all answered |", p.git("log", "-1", "--format=%b", "main"))
+        body = p.git("log", "-1", "--format=%b", "main")
+        self.assertIn("| review | ran, 2 runs by fake-model, 2 findings, 1 open |", body)
+        self.assertIn("Advisory findings left open, for the sweep:\n- F2 (advisory, review) src/calc.py: add has no docstring.", body)
+
+    def test_an_open_advisory_finding_alone_reaches_merge_ready_and_is_shown_with_a_blocking_one(self):
+        p = self.fixture()
+        self.medium(p)
+        p.queue_reviews(found(ADVISORY))
+        self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")
+        q = self.fixture(name="other")
+        self.medium(q)
+        q.queue_reviews(found(BLOCKING, ADVISORY))
+        failed = q.rail("advance", "1", expect=3)
+        self.assertIn("- F2 (advisory, review) src/calc.py: add has no docstring.", failed["action"]["brief"])
+        q.write("src/calc.py", "def add(a, b):\n    return b + a\n", base=q.worktree("1"))
+        q.rail("answer", "1", "F1", "fixed", "Order no longer matters.")
+        self.assertEqual(q.rail("advance", "1")["state"], "merge-ready")  # F2 still open
 
     def test_marking_a_blocking_finding_fixed_without_a_change_needs_a_clean_rereview(self):
         p = self.fixture()
@@ -571,7 +585,7 @@ class Answer(RailTest):
         p.rail("next")
         p.fix_calc("1")
         p.queue_reviews(found(ADVISORY))
-        self.assertEqual(p.rail("advance", "1")["reason"]["code"], "ANSWER_FINDINGS")
+        self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")  # an open advisory holds nothing, yet takes an answer
         self.assertEqual(p.rail("answer", "1", "F1", "declined", expect=2)["reason"]["message"], "a decline needs a reason")
         self.assertEqual(p.rail("answer", "1", "F9", "fixed", expect=2)["reason"]["code"], "NO_FINDING")
         self.assertEqual(p.rail("answer", "1", "f1", "parked", "Old code.")["state"], "merge-ready")
