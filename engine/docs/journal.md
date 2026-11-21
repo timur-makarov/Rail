@@ -73,7 +73,7 @@ A sample:
 | `doc-lint` | Ship, CI | `ARCHITECTURE.md` no longer matches the tree |
 | `verify` | Ship, CI | The command fails. When it fails on the base branch too, the event has `counted: false` |
 | `checks` | Ship, CI | A `Check:` line fails; `detail` names it |
-| `review`, `security` | `advance` | The run leaves a blocking finding open, or its output is invalid. A run past `timeout_secs` fails with `detail: "timeout"` and `counted: false`. No run and no step when the change needs no review |
+| `review`, `security` | `advance` | The run leaves a blocking finding open. A run past `timeout_secs` fails with `detail: "timeout"`, and a run whose output is invalid with `detail: "invalid output: ..."`, both with `counted: false`. No run and no step when the change needs no review |
 | `refuter` | `advance` | The refuter upholds the finding. A pass means it dismissed it |
 | `sweep` | `rail sweep` | Never |
 | `harvest` | `rail sweep`, when nothing merged without a review: no review run | Never. `detail: "nothing to file"` when the sweep found nothing, and its ticket then merges with no task |
@@ -166,8 +166,8 @@ sweep. The schema is `.rail/engine/review-v1.json`; the default command passes i
 After the schema, the engine checks what only it can: `file` is a tracked path at the reviewed commit and
 `line` is inside it (within two lines, because reviewers are sometimes off by one or two); `repeats` names
 an earlier finding of this ticket; a refuter returns at most one finding, and it repeats the disputed id. A
-run that fails one of these has invalid output, and its step fails. The engine trims `evidence.output` to
-2,000 characters.
+run that fails one of these has invalid output, and its step fails without counting against the author
+(`rail docs retries`). The engine trims `evidence.output` to 2,000 characters.
 
 The engine assigns the ids, `F1`, `F2` and so on, per ticket and across all runs. An id is never reused,
 and the reviewer never writes one except in `repeats`.
