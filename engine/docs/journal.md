@@ -160,6 +160,9 @@ sweep. The schema is `.rail/engine/review-v1.json`; the default command passes i
 | `findings[].claim` | What is wrong, and the input or sequence that shows it | The author, the refuter and the person |
 | `findings[].check` | A deterministic check that would catch this kind of mistake, when one exists | The sweep, which turns repeated kinds into checks |
 | `findings[].evidence` | `command` and `output`: what the reviewer ran | The refuter, which runs it again |
+| `findings[].evidence.rerun` | Added by the engine: the engine's own run of `command` at the reviewed commit, before the clean-up: `exit` (null when it passed `timeout_secs`) and `output_tail` | The person; `rail stats` |
+| `findings[].evidence.reproduced` | Added by the engine: true when every non-empty line of `output`, normalised as failure signatures are (numbers, hashes, paths and spacing left out), is in the re-run's output. Nothing is decided from it | `rail stats` |
+| `findings[].evidence.scripts` | Added by the engine: `{path: text}` of each untracked file the command names (at most 3, each cut at 8,000 characters), which the clean-up removes | The author's brief, with the finding |
 | `findings[].repeats` | On a re-review: the id of the earlier finding this one repeats | The engine: the finding keeps its id and is open again |
 | `needs_person` | Optional, rarely given: one sentence on why a person should see the change although no finding blocks it | `advance`: from a `review` or `security` run, an AUTO ticket becomes PERSON. A refuter's or a sweep's is ignored |
 
