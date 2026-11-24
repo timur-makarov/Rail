@@ -222,8 +222,8 @@ Fable, and Rail's workers run on Sonnet 5.5 and Opus 5.5.
 2. **It gets the numbers.** The trend commands (lizard, jscpd, and each profile's own) report per area the
    trend measures in Part 2, sensor-rule counts over the whole tree, and `SENSOR(NN)` markers. From the
    journals the engine adds, per area, files and areas changed per merged ticket, failed steps and review
-   rounds. (The worker's cost is not recorded today; only review runs carry `cost_usd`, `steps.py:52-67`,
-   confirmed.) The sweep stores the numbers in a `trend` event, so the next sweep and `rail stats` see the
+   rounds, and the worker's cost once `rail work` records it (`proposals/worker.md`; today only review runs
+   carry `cost_usd`, `steps.py:52-67`, confirmed). The sweep stores the numbers in a `trend` event, so the next sweep and `rail stats` see the
    change.
 3. **It files refactor tickets.** Each names a kind from "Bad code, defined", with evidence (tool output, or
    two `file:line` places) and its cost. Its `Check:` lines are the tests plus a threshold command that fails
@@ -307,8 +307,8 @@ differences.
    plus the design sweep and Part 6. Plus D with the Fable 5.2 ownership sentence added to the brief, on the
    same worker models. Work: SlopCodeBench problems (Python, graded with its `scb-check`) and one multi-ticket
    project per other language, graded with lizard and jscpd. Measured per arm: erosion and verbosity growth,
-   strict solve rate, review rounds, person waits by cause, waits whose failing step is `sensors`, and review
-   cost. A part is kept when, against the arm before it: erosion growth is lower by a third or more; the solve
+   strict solve rate, review rounds, person waits by cause, waits whose failing step is `sensors`, review
+   cost, and worker cost (with `rail work`, `proposals/worker.md`). A part is kept when, against the arm before it: erosion growth is lower by a third or more; the solve
    rate is not lower by more than 10 points; person waits are not higher; and no ticket waits for a person
    because of `sensors`. The ownership sentence is kept on the same rule, and when it adds no more scope
    amends or split offers than arm D.
@@ -321,7 +321,7 @@ differences.
    it.
 
 Not covered: how well a person can audit agent-first code; languages other than the four; effects that take
-more than a few dozen tickets to show; the cost of the worker, which is not recorded.
+more than a few dozen tickets to show; the worker's cost, until `rail work` (`proposals/worker.md`) records it.
 
 ## Assumed, not verified
 
