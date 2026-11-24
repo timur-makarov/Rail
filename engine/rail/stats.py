@@ -100,6 +100,35 @@ def _amended_after_acceptance(t):
 
 
 
+def _person_reasons(t):
+    """Why a PERSON ticket was PERSON: `at add` when its first acceptance was already PERSON, and the reason of each
+    `tier_raised` event."""
+    first = next((e for e in t.events if e.get("event") == "accepted"), {})
+    reasons = ["at add"] if first.get("tier") == "PERSON" else []
+    return list(dict.fromkeys(reasons + [e.get("reason") or "?" for e in t.events if e.get("event") == "tier_raised"]))
+
+
+def _person_changed_nothing(t):
+    """The person's involvement changed nothing: no note with an approval or a continue, no finding the person
+    decided, no amend after the person's first act, and no new commit after the person's first act once the work had
+    shipped (an approval of the contract before the work comes before every commit, so it is not that act)."""
+    acts = [i for i, e in enumerate(t.events) if e.get("event") == "continued"
+            or (e.get("event") == "accepted" and e.get("by") == "person")]
+    if any(e.get("note") for e in (t.events[i] for i in acts)):
+        return False
+    if any(e.get("event") == "finding" and e.get("by") == "owner" for e in t.events):
+        return False
+    if acts and any(e.get("event") == "amended" for e in t.events[acts[0]:]):
+        return False
+    ships = [i for i, e in enumerate(t.events) if e.get("event") == "shipped"]
+    after = next((i for i in acts if ships and i > ships[0]), None)
+    if after is not None:
+        patch = [t.events[i] for i in ships if i < after][-1].get("patch_id")
+        if any(t.events[i].get("patch_id") != patch for i in ships if i > after):
+            return False
+    return True
+
+
 TAKEN = ("accepted", "edited", "rejected", "answered")
 
 
@@ -178,6 +207,7 @@ def collect(project, tickets, since=None, states=None):
     raised, consults, adopted, steps, roles, models = Counter(), 0, 0, {}, {}, {}
     split = {"offered": 0, "auto": 0, "person": 0}  # AUTO changes over [size] cap offered a split, and what came of it
     blocking, advisory, parked, disputes = Counter(), Counter(), 0, Counter()
+    rounds, evidence, by_reason = [], Counter(), {}  # review runs per reviewed ticket; blocking evidence re-run; PERSON
     situations = Counter()
     for nn, t in tickets.items():
         ships = [e for e in t.events if e.get("event") == "shipped"]
@@ -191,6 +221,14 @@ def collect(project, tickets, since=None, states=None):
         row = tiers[tier]
         row["merged"] += 1
         row["reviewed"] += bool(ledger.runs("review"))
+        if ledger.runs("review"):
+            rounds.append(len(ledger.runs("review")))
+        if tier == "PERSON":
+            nothing = _person_changed_nothing(t)
+            for reason in _person_reasons(t) or ["?"]:
+                counts = by_reason.setdefault(reason, {"tickets": 0, "changed_nothing": 0})
+                counts["tickets"] += 1
+                counts["changed_nothing"] += nothing
         person = any(e.get("event") == "continued" or (e.get("event") == "accepted" and e.get("by") == "person")
                      or (e.get("event") == "finding" and e.get("by") == "owner") for e in t.events)
         row["no_person"] += tier == "AUTO" and not person
@@ -245,6 +283,9 @@ def collect(project, tickets, since=None, states=None):
             if severity == "parked":
                 parked += 1
             elif severity == "blocking":
+                if "reproduced" in (finding.get("evidence") or {}):  # the engine ran the evidence again
+                    evidence["rerun"] += 1
+                    evidence["reproduced"] += finding["evidence"]["reproduced"] is True
                 ended = _ended(severity, ledger.last(fid))
                 blocking[ended] += 1
                 model = models.setdefault(first_run.get(fid, {}).get("model") or NO_MODEL, dict(NO_RUNS))
@@ -257,6 +298,7 @@ def collect(project, tickets, since=None, states=None):
         row["median_minutes"] = round(statistics.median(minutes), 1) if minutes else None
     decided = sum(blocking.values()) - blocking["open"]
     merged = sum(row["merged"] for row in tiers.values())
+    overturned, disputed = disputes["dismissed"] + disputes["parked"], sum(disputes.values())
     return {
         "since": since, "merged": merged, "left_out": len(tickets) - merged, "tiers": tiers, "raised": dict(raised),
         "base_checks": base, "adopted": adopted, "split": split,
@@ -264,6 +306,8 @@ def collect(project, tickets, since=None, states=None):
         "grilling": grilling(tickets, states or {}, merged_at, start),
         "sources": by_source(project, tickets, states or {}, merged_at, reverted, start),
         "consults": consults, "steps": {name: steps[name] for name in sorted(steps, key=_step_rank)},
+        # Per reason a ticket was PERSON: its merged tickets, and those where the person changed nothing.
+        "person_changed_nothing": dict(sorted(by_reason.items())),
         "review": {
             "roles": {name: _rounded(roles[name]) for name in REVIEW_STEPS if name in roles},
             "models": {name: _rounded(models[name]) for name in sorted(models)},
@@ -271,6 +315,14 @@ def collect(project, tickets, since=None, states=None):
             "blocking": {"total": sum(blocking.values()), **dict(blocking)},
             "advisory": {"total": sum(advisory.values()), **dict(advisory)},
             "parked": parked, "disputes": dict(disputes),
+            # Disputes the refuter dismissed or parked, of all its verdicts.
+            "refuter_overturns": round(overturned / disputed, 3) if disputed else None,
+            # Review runs per merged ticket the reviewer read: the median, and the share merged after one run.
+            "rounds": {"tickets": len(rounds), "median": statistics.median(rounds) if rounds else None,
+                       "one_run": round(rounds.count(1) / len(rounds), 3) if rounds else None},
+            # Blocking findings whose evidence the engine ran again, and those whose re-run showed the quoted output.
+            "evidence": {"rerun": evidence["rerun"], "reproduced": evidence["reproduced"],
+                         "share": round(evidence["reproduced"] / evidence["rerun"], 3) if evidence["rerun"] else None},
             # Of the blocking findings that were decided, the share that ended in a fix.
             "hit_rate": round(blocking["fixed"] / decided, 3) if decided else None,
         },
@@ -424,6 +476,18 @@ def render(data):
         lines.append(f"Parked by the reviewer: {review['parked']}.")
     if review["disputes"]:
         lines.append(f"Disputes: {sum(review['disputes'].values())}. " + _listed(review["disputes"], (
-            ("dismissed", "the refuter dismissed"), ("parked", "parked"), ("upheld", "upheld"))))
+            ("dismissed", "the refuter dismissed"), ("parked", "parked"), ("upheld", "upheld")))
+            + f" Refuter overturns: {_pct(review['refuter_overturns'])}.")
+    rounds, evidence = review["rounds"], review["evidence"]
+    if rounds["tickets"]:
+        lines.append(f"Rounds to pass: median {rounds['median']:g} review runs for each ticket the reviewer read;"
+                     f" {_pct(rounds['one_run'])} merged after one run.")
+    if evidence["rerun"]:
+        lines.append(f"Evidence reproduced: {evidence['reproduced']} of {evidence['rerun']} blocking findings whose"
+                     f" evidence the engine ran again ({_pct(evidence['share'])}).")
+    if data["person_changed_nothing"]:
+        lines.append("PERSON tickets where the person changed nothing, by why they were PERSON: " + ", ".join(
+            f"{reason} {r['changed_nothing']} of {r['tickets']}" for reason, r in data["person_changed_nothing"].items())
+            + ".")
     lines += render_sources(data) + render_grilling(data)
     return "\n".join(line.rstrip() for line in lines)
