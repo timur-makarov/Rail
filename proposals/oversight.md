@@ -42,6 +42,7 @@ back by a revert, and those stay before the fact:
 |---|---|
 | Moving money, charging, refunding | The money has moved |
 | Deleting data, and migrations | The data may be gone. A migration's `rollback` field is a claim nobody has run, so `migration_paths` stays PERSON |
+| Stored data shapes: database schemas, file and wire formats, the keys of stored data, a new storage service | Data written in the new shape meanwhile stays after a revert, and old code may not read it. Boundary's co-founder (the host) has a person review anything serialized or persisted for this reason (reported, Boundary talk, 39:47-40:41) |
 | Credentials, secrets, authentication and permissions | Access granted meanwhile was usable; a leaked secret stays leaked |
 | Messages to real people (email, notifications) | They were sent |
 | Infrastructure that a change can delete or replace | The resource and its data are gone |
@@ -54,6 +55,12 @@ Changes:
    (auth, payments, infrastructure)" (`engine/rail/init.py:43` and `:74`, confirmed). It would name the kinds
    above, and only those, so `person_paths` holds what can't be undone. The seed's defaults are already the
    controls row.
+   Paths can hold a schema folder or a migrations folder, but the keys of stored data or a wire format can sit
+   in any file. So the reviewer's `needs_person` cases (`engine/reviewer.md:31-38`, confirmed) gain one: the
+   change alters the shape of data that is stored or that other programs read (a schema, a file or wire
+   format, the keys of stored data, a new storage service). On an AUTO ticket that raises the tier, as the
+   other cases do. The added PERSON load shows in the reason counts `rail stats` already keeps, and in
+   System 2's load (Part 5).
 2. **The other reasons are reviewed by their own numbers.** `rail stats` already reports, per reason a ticket
    was PERSON, how often the person changed nothing, and says a reason may stop making tickets PERSON at 95%
    or more over 20 tickets with no revert and no later `caused_by` (`engine/docs/stats.md:80, 91`,
@@ -140,6 +147,9 @@ today (`engine/docs/github.md`, `engine/rail/forge.py` `LABELS`, confirmed), and
    - the fix ticket, `after` the revert, which redoes the work with the fix and closes the issue. The revert's
      pull request says `Part of #N`, so it doesn't close the issue.
    Decision 2 is whether to revert first or fix forward as today.
+   `rail stats` adds the time from the smoke issue's opening to the revert's merge: how long dev stayed broken.
+   The `requested` event's `at` is the intake's time, not the issue's (`engine/docs/journal.md:24`,
+   confirmed), so intake records the issue's `created_at` as `opened` on both tickets.
 2. **Fix chains end.** A smoke fix ticket is one filed from an issue that starts with `Commit:`; its
    `requested` event says so (`smoke: true`). A smoke fix ticket whose `caused_by` ticket was itself a smoke
    fix ticket waits for a person before its contract is accepted, with the chain in the brief. Today nothing
@@ -171,7 +181,7 @@ beyond the ticket (`engine/reviewer.md:31-38`, confirmed); on an AUTO ticket it 
 (`review.py:450-456`, confirmed), and its sentence is the first item of the list. `attention` is for lines on
 a change that merges either way, which a person reading afterwards should not miss: a value chosen by
 judgment (a limit, a timeout, a threshold), behaviour the tests can't show (timing, concurrency, an external
-service), a name or format others will depend on. If Decision 1 ends the reviewer's tier raise, its cases move
+service), a name others will depend on. A stored or shared data shape is a `needs_person` case (Part 1). If Decision 1 ends the reviewer's tier raise, its cases move
 to `attention`.
 
 **Flag rules.** A `[[rules]]` entry gains `flag = true`: it matches text on added lines as any structure rule
@@ -210,8 +220,17 @@ brings it back there. It is keyed by `patch_id`, so a clean rebase, which keeps 
    (`engine/rail/rules.py`, confirmed), which is why a changed `.gitattributes` is an item: a ticket that marks
    its own files generated hides them from the diff and from the cap.
 
-**`rail stats` measures it.** On PERSON tickets: of the person's line comments (the unmarked ones), the share
-that fall on an item. On tickets reverted afterwards: whether the reverted lines held an item. On AUTO
+**`rail stats` measures System 2's load.** Per merged ticket, by tier: the person's acts that the journal
+records (each `rail accept` or `rail:go`, each finding a person decided with `--owner`, each amend a person
+approved), with the median and the share of tickets with none. Warp reports human interactions per
+pull request as its first measure of how automated a factory is (reported, Boundary talk, 24:37-25:21).
+`rail stats` today counts only the AUTO tickets where no person acted (`engine/docs/stats.md:60`, confirmed);
+the count per ticket, on both tiers, shows where the acts go.
+
+**`rail stats --forge` measures the list.** `rail stats` reads only the journals and the base branch's
+history (`engine/docs/stats.md:3-5`, confirmed), and line comments live on GitHub; `--forge` also reads each
+merged ticket's pull request comments, and without it these lines are left out. On PERSON tickets: the
+person's line comments per ticket (unmarked ones), and the share that fall on an item. On tickets reverted afterwards: whether the reverted lines held an item. On AUTO
 tickets: how many `rail:look` pull requests led to a revert or to a ticket that names them in `caused_by`.
 
 ## Docs and files that change
@@ -222,9 +241,9 @@ tickets: how many `rail:look` pull requests led to a revert or to a ticket that 
 - `engine/docs/environments.md`: a failed smoke check reverts first. `engine/docs/cloud.md`: where a person's
   acts go (`rail:stop`, `rail:revert`, the `rail:look` search), and that closing a stop issue starts no run.
 - `engine/docs/tickets.md` and ticket lint: the revert ticket's fields. `engine/docs/journal.md`: the
-  `requested` event's `smoke`, and the `Reverts:` trailer. `engine/docs/stats.md`: the new lines.
+  `requested` event's `smoke` and `opened`, and the `Reverts:` trailer. `engine/docs/stats.md`: the new lines.
 - `engine/review-v1.json` (its top level refuses unknown keys today), `engine/reviewer.md`,
-  `engine/docs/review.md`: the `attention` field.
+  `engine/docs/review.md`: the `attention` field and the stored-data `needs_person` case.
 - `engine/rail/config.py` (`RULE_KEYS`) and `engine/docs/rules.md`: `flag = true`.
 - `engine/rail/init.py` (both briefs): the kinds that can't be undone, and `.gitattributes`.
 
@@ -244,13 +263,18 @@ tickets: how many `rail:look` pull requests led to a revert or to a ticket that 
      comments on the right lines, and not posted twice; a flag rule adds an item and fails nothing; a changed
      `.gitattributes` is an item; a person's line comment reaches the next brief; `rail:look` is set on an
      AUTO merge with items and on no other.
-   - `rail init`'s briefs name the kinds that can't be undone.
+   - `rail init`'s briefs name the kinds that can't be undone, stored data shapes among them.
+   - `rail stats --forge` reads line comments from a test repository; without `--forge` those lines are
+     left out.
+   - `rail stats` counts a person's acts per ticket on fixture journals, and the time from a smoke issue's
+     `opened` to its revert's merge.
    Kept when every case behaves as written.
 2. **The reviewer's `attention` field, with a model.** On changes with a planted line of the `attention`
-   kinds (a limit chosen by judgment, a timeout, a format others will read) that is no `needs_person` case,
+   kinds (a limit chosen by judgment, a timeout, a retry count) that is no `needs_person` case,
    and on plain controls, four runs each: kept when the planted line is among the items in at least 3 of 4
    runs per case, the controls get no item in at least 3 of 4, and `needs_person` is not set on the planted
-   cases in at least 3 of 4. This uses models, so it waits for the owner to restart the paused model tests.
+   cases in at least 3 of 4. The same runs cover Part 1's new `needs_person` case: on an AUTO change that renames a key of
+   stored data in a file outside `person_paths`, `needs_person` is set in at least 3 of 4 runs. This uses models, so it waits for the owner to restart the paused model tests.
 3. **In use, from the journals.** Over 20 PERSON tickets: when fewer than half the person's line comments fall
    on items, the sources are revisited. Over 20 `rail:look` pull requests: a source whose items never led to
    a revert, a ticket or a comment is removed from the list.
@@ -283,7 +307,8 @@ One pull request each, with docs and `CHANGELOG.md`.
 4. `rail:revert` and `rail:look`.
 5. The smoke-check revert and the fix-chain limit, after Decision 2.
 6. The reviewer's `attention` field, after its test.
-7. `rail init`'s question about the kinds that can't be undone.
+7. `rail init`'s question about the kinds that can't be undone, and the reviewer's stored-data case after
+   test 2.
 
 ## Decisions
 
@@ -293,3 +318,16 @@ One pull request each, with docs and `CHANGELOG.md`.
    each with "Read these" in place. Proposed: decide on those numbers.
 2. On a failed dev deploy: revert first (proposed), or fix forward as today.
 3. The cap on the reviewer's `attention` items: three (proposed).
+
+## Sources
+
+Rail, confirmed: `engine/rail/state.py`, `steps.py`, `review.py`, `table.py`, `cli.py`, `stats.py`, `forge.py`,
+`project.py`, `rules.py`, `init.py`; `engine/reviewer.md`; `engine/review-v1.json`; `engine/docs/`;
+`seed/config.toml`.
+
+GitHub's docs, confirmed: "REST API endpoints for pull request reviews"; "Customizing how changed files appear
+on GitHub".
+
+Reported: review framing, Mitropoulos et al., arXiv 2603.18740; "How to Build an AI Software Factory That
+Ships Faster", Boundary's AI That Works, with Warp's founder, https://www.youtube.com/watch?v=XUEfIxkdT2Q
+(transcript read 2026-11-25).

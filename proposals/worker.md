@@ -54,9 +54,10 @@ as it does today after a subagent returns.
    and pushes them every `[claim] save_minutes`, as the save hook does today. It runs in the runner's Bash
    call, so the saves are the runner's session's. The child's own save hooks do nothing (step 3). A save
    during a rebase is skipped, as today (`cli.py:1458-1462`, confirmed).
-5. **It records the run.** It reads the command's JSON when there is some: `total_cost_usd`, `session_id`,
-   `num_turns`, `subtype`. It writes a `worked` event: model, effort, cost, turns, minutes, session id, and
-   how the run ended (`done`, `turns`, `budget`, `timeout`, `error`). When the worktree is in a rebase, the
+5. **It records the run.** It reads the command's output as JSON lines when it is that: the last `result`
+   line gives `total_cost_usd`, `session_id`, `num_turns` and `subtype`, and the lines before it give the run
+   log (below). It writes a `worked` event: model, effort, cost, turns, minutes, session id, the run-log
+   counts, and how the run ended (`done`, `turns`, `budget`, `timeout`, `error`). When the worktree is in a rebase, the
    event waits in the local cache until the rebase ends, because nothing may be written to the ticket then
    (`engine/docs/loop.md`, "While that rebase is open", confirmed).
 6. **It returns** the `worked` event and the answer `rail advance NN` should now get. It doesn't run the
@@ -68,7 +69,7 @@ gets a `worked` event with no cost.
 
 ```toml
 [worker]
-command = '''claude -p --output-format json --model "$RAIL_MODEL" --effort "$RAIL_EFFORT" --permission-mode auto --permission-prompts none --max-turns 300 --max-budget-usd 15 ${RAIL_SESSION:+--resume "$RAIL_SESSION"}'''
+command = '''claude -p --output-format stream-json --verbose --model "$RAIL_MODEL" --effort "$RAIL_EFFORT" --permission-mode auto --permission-prompts none --max-turns 300 --max-budget-usd 15 ${RAIL_SESSION:+--resume "$RAIL_SESSION"}'''
 timeout_minutes = 90        # one worker run, wall clock; keep it under the Bash tool's BASH_MAX_TIMEOUT_MS
 ticket_usd = 40             # recorded runs of one ticket (worker and review) since a person last acted; 0: off
 daily_usd = 0               # recorded runs of every ticket in the last 24 hours; 0: off
@@ -129,6 +130,39 @@ unchanged: it does the brief itself, and its cost is not recorded (`rail stats` 
 
 A source's brief (`rail source NAME`) is not a ticket's and stays as it is.
 
+### What the runs teach
+
+Boundary and Warp grade a sample of past agent runs for dead ends and for "relearning": a worker that tries
+six commands to find how the tests run, when a skill or `AGENTS.md` should have told it (reported, Boundary
+talk, 31:15-32:22). Rail could do the same from each run's own record, with no model.
+
+- **The run log.** From the stream's tool-call lines `rail work` keeps one line per tool call: the tool,
+  the command or path, and whether it failed or was denied. Each run appends to the ticket's log, cut at 200
+  characters a line and 500 lines a run. The log stays in the local cache (`.git/rail/cache/work/NN`, where
+  the engine keeps its other notes, `engine/rail/project.py:233-235`, confirmed) and is never committed:
+  command lines can carry tokens, and a committed one would be pushed and merged, in a folder only the engine
+  may write (`.rail/journal/**`, `engine/docs/guards.md:91-92`, confirmed), so no one could take it out. The
+  stream's format is documented, and the session transcript's is not (reported: the Claude Code docs say the
+  transcript format is internal and changes between versions).
+- **What is counted per run,** into the `worked` event, which is committed: Bash commands that failed before
+  the first one of the same program passed; commands the shell couldn't find (exit 127); tool calls denied by
+  a rule or the guard; files read more than twice. Each counted item keeps a short key (the program, the
+  denied tool and rule, the path), so the sweep can match items across tickets without the log. The program
+  is the first word after dropping leading `NAME=value` words, a leading `cd DIR &&`, and the runners
+  `uv run`, `npx`, `pnpm exec`, `poetry run` and `bundle exec`; `uv run pytest -x` is `pytest`. In a rebase the
+  event waits in the cache like the rest (above), and the log is already there.
+- **What the sweep does with it.** It reads the `worked` events of the tickets merged since the last sweep,
+  from the base, as it reads their other events (`engine/rail/sweep.py:96-99`, confirmed). A key that recurs
+  in three or more tickets goes into the sweep's summary as a pattern, and a pattern counts as something found,
+  so the sweep's ticket gets a task even when nothing merged unreviewed (today it merges with no task,
+  `engine/docs/sweep.md:36-38`, confirmed). The agent files one ticket per pattern, as it does for a finding:
+  a `setup` or `provision` line, a line in the project's part of `AGENTS.md`, or a guide's text. A ticket that
+  changes `.claude/**` or `.rail/config.toml` is PERSON, as today. This is a row of the entropy proposal's
+  Part 6 (nothing learned is lost).
+
+`rail replay` (`proposals/replay.md`) keeps a replayed worker's whole stream for its own search, and doesn't
+use this log.
+
 ### What `rail stats` adds
 
 Worker cost per merged ticket, by tier; cost by model and rung; cost of tickets that waited for a person and
@@ -143,12 +177,14 @@ sessions. The entropy proposal's model arms (`proposals/entropy.md`, test 3) the
 - `engine/docs/cloud.md` and `README.md`: the runner prompt. `seed/AGENTS.md`: its lines on starting a
   subagent and running `rail advance`.
 - `engine/docs/retries.md` and `engine/docs/states.md`: the `BUDGET` wait. `engine/docs/journal.md`: the
-  `worked` event and the cost in the drop mark. `engine/docs/stats.md`: the new lines.
+  `worked` event with its counts and keys, and the cost in the drop mark. `engine/docs/stats.md`: the new
+  lines.
 - `engine/rail/config.py` defaults, `engine/rail/docs.py` (`rail docs config`), `seed/config.toml`: the
   `[worker]` keys; the `[claim] stale_minutes` comment, which today says to keep it above the longest command.
 - `engine/docs/guards.md` and `seed/settings.json`: `rail work` in the allow rules and in `excludedCommands`
   (inferred: it writes the journal, as `rail advance` does).
-- `engine/rail/cli.py`: the `worker()` docstring.
+- `engine/rail/cli.py`: the `worker()` docstring. `engine/docs/sweep.md`: patterns in the summary and
+  in "something found". `engine/rail/sweep.py`: reading the `worked` counts.
 - The skills that say "run `rail advance`" (`rail-build`, `rail-findings`, `rail-conflict`) stay as they are:
   a session a person drives still runs it, and inside a worker run the added brief line and the refusal say
   otherwise.
@@ -170,6 +206,12 @@ sessions. The entropy proposal's model arms (`proposals/entropy.md`, test 3) the
      clears both;
    - `daily_usd` makes `next` rest and `work` refuse;
    - a command with no JSON gives a `worked` event with no cost;
+   - a stream with tool calls gives a run log in the cache, cut at its caps per run, appended by the second
+     run, and never in a commit; the counts and keys land in the `worked` event; `FOO=1 uv run pytest` and
+     `cd app && pytest` both count as `pytest`;
+   - a run that ends inside a rebase keeps its log and counts, and the event is written once the rebase ends;
+   - a sweep over fixture journals where one command fails in three tickets, and nothing merged unreviewed,
+     gets a task, and its summary names the pattern;
    - a dropped ticket's cost is in its drop mark.
    Kept when every case behaves as written.
 2. **Pilot, with a model.** Three real tickets in a cloud session through the runner with `rail work`: one
@@ -192,6 +234,9 @@ to it, and no one has run one); whether the default values suit real tickets. Th
   process inherits its parent's environment, and Claude Code passes its own to the commands it runs).
 - That auto mode is available for `-p` on the account the runner uses (the docs list the eligible models and
   plans; reported).
+- That `--output-format stream-json` in print mode needs `--verbose`, and that its tool-call lines name the
+  tool, its input and whether it failed (read on the docs for the SDK's message stream, which the CLI is said
+  to share; reported).
 - The JSON keys and exit codes when a limit ends a run: the subtypes and `total_cost_usd` are documented for
   the SDK result message, and the CLI is said to share it (reported, not read for the CLI itself).
 - That the child's own Bash calls run in the sandbox when `rail work` itself is excluded from it, on a
@@ -202,10 +247,11 @@ to it, and no one has run one); whether the default values suit real tickets. Th
 One pull request each, with docs and `CHANGELOG.md`.
 
 1. `rail work`, `RAIL_WORKER` and the refusals, the saves during a run, the `worked` event, `[worker] command`
-   and `timeout_minutes`, the gate cases.
+   and `timeout_minutes`, the run log, the gate cases.
 2. `ticket_usd`, `daily_usd`, the `BUDGET` and `BUDGET_DAY` answers, the cost in the drop mark, the
    `rail stats` lines.
-3. After the pilot: the runner prompt in `cloud.md` and `README.md`, and the seed's command values.
+3. The run-log counts in the sweep.
+4. After the pilot: the runner prompt in `cloud.md` and `README.md`, and the seed's command values.
 
 ## Decisions
 

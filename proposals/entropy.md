@@ -155,7 +155,25 @@ gamed (agents removed an architecture violation by deleting the new file in 44 o
 reported); some complex functions are legitimate. Why no length sensor: max-lines rules pushed complexity
 elsewhere (Böckeler), and longer files scored better on code questions in LongCodeBench (reported). Erosion is
 SlopCodeBench's measure: the share of complexity (cyclomatic x square root of lines) held by functions above
-10. The replay test tunes every value.
+10. The past-commit test tunes every value.
+
+**Rule sets written against agent code (checked 2026-11-25 on their repositories).** Three are candidates. The
+past-commit test (Tests 2) decides each one rule by rule, with the same bar as any sensor, and a candidate
+enters a profile only through it.
+
+| Rule set | What it is | Use in Rail |
+|---|---|---|
+| `scb-check` (gabeorlanski/scb-check, Apache-2.0) | SlopCodeBench's own checker as a CLI: `uvx scb-check check PATH --report` gives JSON with verbosity and erosion; exit 0 clean, 1 findings, 2 usage error. Its ast-grep "slop rules" and structural rules (trivial wrappers, short functions used once) are Python-only; for Rust, JavaScript and TypeScript it still reports clones and erosion. No Go | **Trend:** computes erosion as SlopCodeBench defines it for Python, JavaScript, TypeScript and Rust, and verbosity for Python only, since verbosity counts its slop-rule hits (inferred from the rules being Python-only), instead of Rail recomputing them from lizard; Go keeps lizard. **Python sensor candidate:** its slop and structural rules on added lines. Its suppression marker, `# scbc ignore[`, joins the Python markers if it is adopted |
+| `@cloudflare/oxlint-config` (Apache-2.0) | Cloudflare's shared oxlint preset, built on `@nkzw/oxlint-config`, with rules for type safety, promise handling and type-only imports. Its type-aware mode uses `tsrs`, published as a beta. The author of `dmmulroy/anti-slop` (MIT, a vendored oxlint plugin of about 20 rules: chained type assertions, `unknown` leaking through contracts, module mocking) says to prefer this preset, which adopted most of his rules | **TypeScript sensor candidate:** the profile's oxlint config extends it. Anti-slop rules the preset lacks are candidates one by one |
+| `@factory/eslint-plugin` (Factory) | Factory's internal lint rules, made generic: file layout (enums in `enums.ts`), naming, tests beside each file, structured logging. Its README says not to import it but to take the ideas, and that it won't be maintained; GitHub lists it as Apache-2.0 and the README says MIT | **Ideas only.** Its rules are one team's conventions, not kinds from "Bad code, defined" |
+
+A fork of anti-slop maintained at Factory (K-Mistele/anti-slop, MIT) adds rules a model judges, such as
+Fowler's "middle man" and "feature envy", and an `integrity` script that fails a branch that weakens its own
+checks. Left out: a model call per rule per ship costs more than Rail's one review, and the reviewer already
+looks for "a check weakened, skipped or deleted so that it passes" (`engine/rail/review.py:42-44`). The talk
+that named these sources also reports that newer models have regressed on some patterns, such as Python's `%`
+formatting in place of f-strings (reported, Horthy, "12 Rules for a Software Factory"): a lint rule catches
+that, and a prompt can't keep up with each model.
 
 **Left out:** Semgrep's rules (their licence bars use in products and SaaS), CodeScene (paid), in-crate layering
 tools for Rust (young), per-language prose pages (models know the idioms; each sensor's `fix` line carries the
@@ -204,6 +222,15 @@ for 3 (about +12 lines), section 3 and 7 changes (about -1): about 108 lines, sl
 Step 7: "A sensor is wrong on one line: mark it `SENSOR(NN): why`. Wrong in general: open a ticket that
 changes `.rail/sensors/`." This sits beside the existing rule for a wrong `Check:` (`rail amend`), which stays:
 a `Check:` is the contract, a sensor is not.
+
+The grilling page, `engine/docs/grill.md`, which the `rail-grill` skill and chat bots follow, gains one line in
+its section 3, "Ask only what changes the contract": "Ask first about what
+would be expensive to change later: a database schema, a stored or wire format, an interface other code
+calls. A choice that is cheap to change later, such as wording or a colour, is an `ASSUMED:` row, not a
+question." The measure is Horthy's: the chance of rework times the cost of the change (reported, Boundary
+talk, 45:26-47:44, and his "12 Rules" talk). The grill keeps its cap of five questions
+(`engine/docs/grill.md:32-38`, confirmed). It changes on evidence like any guide: the
+old page against the new on the same requests.
 
 How the pages are written stays as `guides.md` says, and the research supports it: no persona ("you are the
 best engineer" showed no gain in any study found), no capitals for emphasis (Anthropic: emphasis makes the
@@ -256,6 +283,7 @@ applies to its paths and its situation.
 | Review | Findings and answers | The sweep collects parked findings and the checks of fixed ones (`sweep.py:97-121`) | The sweep also collects declined findings, grouped by kind |
 | A person's word | `rail accept` notes, pull request comments | The briefs until the next ship (`state.py:180-183`) | The sweep collects every note since the last sweep and files a ticket for each that reads as a standing rule |
 | Repeated failures | Failure signatures | Counted within one ticket | The sweep flags a signature that recurs across tickets and files a check or an `AGENTS.md` line |
+| Worker runs | Commands that failed before the right one, commands not found, denied calls, files re-read | Lost with the worker's context | The counts in each `worked` event, from a run log kept in the local cache (`proposals/worker.md`, "What the runs teach"); a pattern in three or more tickets gives the sweep a task, and the agent files a ticket for it |
 | Work left for later | `TODO` and `FIXME` comments | Free text | A structure rule: a `TODO` or `FIXME` names the open ticket that will do it, `TODO(NN)`, filed with `rail add`. The sweep files a removal ticket when that ticket merged or was dropped and the comment is still there. (`SHORTCUT(NN)` names the current ticket; `TODO(NN)` names a later one) |
 
 Left out on purpose: a free-form reasoning log. Each change above is a section or an event with one reader and
@@ -296,7 +324,7 @@ differences.
    `SENSOR(NN)` line passes and `SENSOR:` without a number fails; a sensor config edited on the ticket's branch
    has no effect; a new directory with a new map row passes the boundary sensor; a `TODO` without a number
    fails. Kept when every case behaves as written.
-2. **Replay, no model.** For each language, the last 200 merged commits of two active open-source projects pass
+2. **Past commits, no model.** For each language, the last 200 merged commits of two active open-source projects pass
    through stage 1 and the profile. Recorded: the share of commits that would fail, per sensor and for the
    profile as a whole; the minutes added; ten failures per sensor read by hand. A sensor stays in the default
    when it fails at most 5% of human commits, at least 8 of the 10 read failures are a real instance of its
@@ -305,9 +333,12 @@ differences.
    is written by hand.
 3. **Model arms.** A: Rail as now. B: A plus stage 1. C: B plus the profiles. D: C plus the Part 4 text. E: D
    plus the design sweep and Part 6. Plus D with the Fable 5.2 ownership sentence added to the brief, on the
-   same worker models. Work: SlopCodeBench problems (Python, graded with its `scb-check`) and one multi-ticket
-   project per other language, graded with lizard and jscpd. Measured per arm: erosion and verbosity growth,
-   strict solve rate, review rounds, person waits by cause, waits whose failing step is `sensors`, review
+   same worker models. Work: SlopCodeBench problems (Python, graded with its `scb-check`), one multi-ticket
+   project per other language, graded with lizard and jscpd, and, once `rail replay` exists
+   (`proposals/replay.md`), a project's own merged tickets. A replay arm can't add engine code, so arms B to
+   E run as replay arms only once their parts are in the project's engine behind a config key. Measured per arm: erosion and verbosity growth,
+   strict solve rate (on SlopCodeBench, its own; on replayed tickets, the share of runs that solve, as
+   `proposals/replay.md` defines it), review rounds, person waits by cause, waits whose failing step is `sensors`, review
    cost, and worker cost (with `rail work`, `proposals/worker.md`). A part is kept when, against the arm before it: erosion growth is lower by a third or more; the solve
    rate is not lower by more than 10 points; person waits are not higher; and no ticket waits for a person
    because of `sensors`. The ownership sentence is kept on the same rule, and when it adds no more scope
@@ -324,6 +355,10 @@ Not covered: how well a person can audit agent-first code; languages other than 
 more than a few dozen tickets to show; the worker's cost, until `rail work` (`proposals/worker.md`) records it.
 
 ## Assumed, not verified
+
+- That `scb-check` reports each finding with a path and a line, so its rules can be kept to added lines like
+  any sensor (its README shows the JSON totals and source context, not a line format).
+- That `tsrs`, the beta type-aware backend `@cloudflare/oxlint-config` uses, is stable enough for a default.
 
 - That git's moved-line detection can be read reliably from a diff: it is a feature of coloured output
   (`--color-moved`), and `rules.added` asks for `--no-color` on purpose (`rules.py:23`, confirmed).
@@ -344,10 +379,11 @@ One pull request each, with docs and `CHANGELOG.md`. Nothing becomes a default b
 1. Engine: `[[sensors]]`, the `sensors` step, hunk-line parsing, `$RAIL_SENSORS` and `$RAIL_MAP` from the
    base, `SENSOR(NN)` and its rule, the `could_not_run` brief for a sensor, the reviewer's line on markers,
    `rail doctor` listing sensor tools; gate cases (test 1). No sensor is on by default.
-2. Stage 1 (lizard, jscpd, suppression markers) and its replay (test 2); then on by default.
+2. Stage 1 (lizard, jscpd, suppression markers) and its past-commit test (test 2); then on by default.
 3. Part 6, the engine changes: `## Why` and decided rows in the brief, `## Tried`, `Noticed:`, `TODO(NN)`,
    the context history. Test 5 starts here.
-4. The profiles, one pull request per language, each with its replay; then on by default.
+4. The profiles, one pull request per language, each with its past-commit test, candidate rule sets
+   included; then on by default.
 5. The `Uses` column: `areas.py`, doc-lint, the review brief, the boundary sensors.
 6. The design sweep: reviewed merges, the `trend` event, refactor tickets, the collections.
 7. After the model arms (test 3): the `rail-build` and `rail-debug` text.
@@ -379,7 +415,12 @@ Rail, confirmed: `engine/reviewer.md`; `engine/rail/review.py`; `engine/rail/swe
 Research, reported:
 
 - SlopCodeBench, Orlanski et al., arXiv 2603.24755 (v2, 2026-05-07); https://www.scbench.ai/;
-  github.com/SprocketLab/slop-code-bench; scb-check.
+  github.com/SprocketLab/slop-code-bench; github.com/gabeorlanski/scb-check (read 2026-11-25).
+- Rule sets, read 2026-11-25: github.com/cloudflare/oxlint-config, github.com/dmmulroy/anti-slop,
+  github.com/K-Mistele/anti-slop, github.com/Factory-AI/eslint-plugin.
+- Talks: Dex Horthy, "12 Rules for a Software Factory That Doesn't Ship Slop", AI Engineer,
+  https://www.youtube.com/watch?v=-NFMsM2y0Vk; Boundary's AI That Works with Warp's founder,
+  https://www.youtube.com/watch?v=XUEfIxkdT2Q (transcripts read on usetranscribe.io, 2026-11-25).
 - Metrics in the loop, Chapados, Gagné, Dziri, arXiv 2611.23817 (2026-11-18).
 - RepoReuse, arXiv 2609.35357; "More Code, Less Reuse", arXiv 2601.21276.
 - SWE-Maintain, arXiv 2610.14768: the debt that hurts the next task is failing tests more than structure.
