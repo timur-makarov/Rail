@@ -188,23 +188,30 @@ class Ladder(RailTest):
 class ReviewRetries(RailTest):
     def test_failed_review_runs_count_as_the_same_failure_whatever_their_reasons(self):
         # A review run's output differs from run to run, so its failures are counted plainly: two failed runs are the
-        # budget, whatever went wrong in each. Neither is a timeout, so the review isn't stuck.
+        # budget, whatever each one found. An invalid run between them counts for nothing.
         p = self.fixture()
         p.add(ticket())
         p.rail("next")
         p.fix_calc("1")
-        ghost = {"severity": "blocking", "file": "src/missing.py", "claim": "x"}
-        p.queue_reviews({"summary": "Read it.", "findings": [ghost]}, {"raw": "not json at all"}, {"raw": "nor this"})
+
+        def blocking(claim):
+            return {"summary": "Read it.", "findings": [{"severity": "blocking", "file": "src/calc.py", "claim": claim}]}
+
+        p.queue_reviews(blocking("add drops None."), {"raw": "not json at all"}, blocking("add drops floats."),
+                        blocking("add drops ints."))
         first = p.rail("advance", "1", expect=3)
-        self.assertIn("src/missing.py isn't a tracked file", first["steps"][-1]["detail"])
+        self.assertEqual(first["steps"][-1]["detail"], "run 1: 1 blocking, 1 findings")
         self.assertNotIn("consult says", first["action"]["brief"])
+        p.rail("answer", "1", "F1", "fixed", "None counts as 0.")
         second = p.rail("advance", "1", expect=3)
-        self.assertEqual(second["steps"][-2]["detail"], "invalid output: the output is not JSON")
-        self.assertEqual((second["owner"], second["reason"]["code"]), ("agent", "REVIEW"))  # not STUCK_REVIEW
+        details = [s["detail"] for s in second["steps"] if s["step"] == "review"]
+        self.assertEqual(details, ["invalid output: the output is not JSON", "run 2: 1 blocking, 1 findings"])
+        self.assertEqual((second["owner"], second["reason"]["code"]), ("agent", "ANSWER_FINDINGS"))
         self.assertIn("consult says change", second["action"]["brief"])
-        runs = [e for e in events(p, "step") if e["step"] == "review"]
+        runs = [e for e in events(p, "step") if e["step"] == "review" and e.get("counted", True)]
         self.assertNotEqual(runs[0]["detail"], runs[1]["detail"])
         self.assertEqual(runs[0]["signature"], runs[1]["signature"])
+        p.rail("answer", "1", "F2", "fixed", "Floats count too.")
         stuck = p.rail("advance", "1", expect=3)
         self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "RETRY_CAP"))
         self.assertIn("'review' failed the same way 2 times in a row, then once more after consult",

@@ -173,7 +173,8 @@ class Facts:
         self.consult_due = next((s for s, n in same.items() if n >= budget and s not in consulted and can_consult
                                  and s not in self.capped_why), None)
         runs = [e for e in events[since:] if e.get("event") == "step" and e.get("step") in ("review", "security", "refuter")]
-        self.stuck_review = len(runs) >= 2 and all(e.get("detail") == "timeout" for e in runs[-2:])
+        # Two review runs in a row with no verdict, timed out or with invalid output: neither counts against the author.
+        self.stuck_review = len(runs) >= 2 and all(e.get("counted") is False for e in runs[-2:])
         self.amend_pending = amended_at > accepted_at
         self.merge_approved = continued_at > shipped_at >= 0
         # A person's note from `accept` goes into the agent's briefs until the next ship.

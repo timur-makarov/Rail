@@ -127,8 +127,9 @@ class Ledger:
         return [r for r in self.doc["runs"] if r.get("role") == role and (patch_id is None or r.get("patch_id") == patch_id)]
 
     def run_after(self, role, index):
+        """A run of `role` with a verdict after `index`: a timeout or invalid output (counted: false) is none."""
         return any(e.get("event") == "step" and e.get("step") == role and e.get("status") == "ran" and i > index
-                   for i, e in enumerate(self.events))
+                   and e.get("counted", True) for i, e in enumerate(self.events))
 
     def needed_run(self, patch_id, tier):
         """The role whose run the patch still needs, or None."""
@@ -409,7 +410,8 @@ def _read(project, f, role, receipt, disputed, head, doc, ledger, code, output, 
     except ValueError:
         data, meta, errors = None, {}, ["the output is not JSON"]
     if errors:
-        receipt.record(step, False, f.patch_id, f"invalid output: {errors[0]}", ms,
+        # The reviewer's fault, not the author's: not counted, like a timeout.
+        receipt.record(step, False, f.patch_id, f"invalid output: {errors[0]}", ms, counted=False,
                        output=f"The {role} run's output was invalid:\n- " + "\n- ".join(errors) + f"\n\n{tail(output, 30)}")
         return None
 

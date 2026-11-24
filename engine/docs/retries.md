@@ -18,9 +18,11 @@ signatures, the ticket waits for a person. This is what stops an agent that keep
 An agent could also make a failure look new by changing the text it prints; the cap bounds that too.
 
 Both count since the step last passed or since a person last continued the ticket. A review run counts when
-it leaves a blocking finding open, or when its output is invalid, and all such runs at a review step count
-as the same failure, so the budget there is a plain count of failed runs. A review run that timed out
-doesn't count: it is started once more, and two review timeouts in a row wait for a person. A command that
+it leaves a blocking finding open, and all such runs at a review step count as the same failure, so the
+budget there is a plain count of failed runs. A review run that timed out, or whose output is invalid (not
+JSON, not `review/v1`, a finding on a file or line that doesn't exist, or a non-zero exit), is the reviewer's
+fault, not the change's: it doesn't count and doesn't move the worker ladder. It is started once more, and
+two such runs in a row wait for a person. A command that
 times out at ship, such as `verify` or a check, counts like any other failure. A failed step event with no
 `signature`, written by an older engine, counts as the same failure as its neighbour.
 
@@ -41,7 +43,7 @@ it. The advice given at the budget is in the answer of
 ## Waits
 
 A ticket waits for a person (`owner: human`) for an approval, a person's merge, the retry budget or cap, a finding
-the refuter upheld, a review that timed out twice, or an amended Done Contract. The brief says what is
+the refuter upheld, a review that timed out or gave invalid output twice in a row, or an amended Done Contract. The brief says what is
 needed. One act continues any wait:
 
 ```text
