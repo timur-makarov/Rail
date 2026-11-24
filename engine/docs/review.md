@@ -5,6 +5,16 @@ Every ticket gets a review after ship. The engine launches it, so the agent can'
 output, binds the run to the patch, and resets the worktree afterwards. The reviewer may run commands and
 write scratch files to test an idea; all of it is thrown away.
 
+**The engine runs each finding's evidence again.** After the run, the engine restores the tracked files
+(`git reset --hard` to the reviewed commit), keeping the reviewer's untracked scratch files. It reads the output,
+then runs each finding's `evidence.command` in the worktree with `timeout_secs`, and only then removes the
+scratch files (`git clean -fdq`, after another reset). It records the re-run's exit and output's tail, and
+`reproduced`: whether every line the reviewer quoted shows up in the re-run's output, with numbers, hashes and
+paths left out. When the command names an untracked file, such as `sh probe.sh`, the file's text is kept with
+the evidence and shown to the author with the finding. A finding whose evidence doesn't reproduce stays as it
+is: nothing is decided from `reproduced`; it is a record for measuring the reviewer. A re-run that passes
+`timeout_secs` is recorded with no exit and fails nothing.
+
 **Which changes skip it.** `[review] skip_paths` lists paths whose changes need no reviewer, such as docs. An
 AUTO ticket merges without a review when every product file it changes matches that list. The paths decide,
 not the author: one changed file outside the list, and the reviewer reads the whole change. A PERSON ticket
