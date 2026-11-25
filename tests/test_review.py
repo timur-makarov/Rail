@@ -11,6 +11,7 @@ from railtest import CONFIG, RailTest, ticket
 BLOCKING = {"severity": "blocking", "file": "src/calc.py", "line": 2, "claim": "add(-1, 1) returns the wrong sign.",
             "check": "a test of add with negative numbers"}
 ADVISORY = {"severity": "advisory", "file": "src/calc.py", "claim": "add has no docstring."}
+ENGINE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "engine")
 
 
 def clean(summary="Read the diff, ran the check."):
@@ -710,41 +711,79 @@ class BaseGreen(RailTest):
         self.assertNotIn(self.LINE, p.briefs()[0]["brief"])
 
 
-class NeedsPerson(RailTest):
-    ASKED = "It adds the first retry wrapper, which other calls will copy."
+class ReviewerKinds(RailTest):
+    SHAPE = {"kind": "data-shape", "file": "src/calc.py", "line": 2, "why": "It changes what add returns to callers."}
+    SAID = "data-shape: src/calc.py:2: It changes what add returns to callers."
 
-    def test_a_reviewer_asking_for_a_person_makes_an_auto_ticket_person(self):
+    def test_a_kind_from_the_reviewer_makes_an_auto_ticket_person(self):
         p = self.fixture()
         Review.medium(self, p)
-        p.queue_reviews(clean() | {"needs_person": self.ASKED}, clean(), clean())
+        p.queue_reviews(clean() | {"kinds": [self.SHAPE]}, clean(), clean())
         ready = p.rail("advance", "1")
         # From the raise on, it is a PERSON ticket: the security seat runs, and a person merges.
         self.assertEqual((ready["state"], ready["tier"], ready["reason"]["code"]), ("merge-ready", "PERSON", "MERGE_BY_PERSON"))
         self.assertEqual([s["step"] for s in ready["steps"]][-2:], ["review", "security"])
-        self.assertIn("The reviewer asked for a person: " + self.ASKED, ready["action"]["brief"])
+        self.assertIn("The reviewer found what a revert doesn't undo: " + self.SAID, ready["action"]["brief"])
         raised = events(p, "1-fix-add", "tier_raised")
-        self.assertEqual([(e["from"], e["to"], e["reason"], e["detail"]) for e in raised],
-                         [("AUTO", "PERSON", "reviewer", self.ASKED)])
+        self.assertEqual([(e["from"], e["to"], e["reason"], e["kind"], e["kinds"], e["detail"]) for e in raised],
+                         [("AUTO", "PERSON", "reviewer", "data-shape", ["data-shape"], self.SAID)])
         doc = json.loads(p.git("show", "1-fix-add:.rail/journal/1-review.json"))
-        self.assertEqual(doc["runs"][0]["needs_person"], self.ASKED)
+        self.assertEqual(doc["runs"][0]["kinds"], [self.SHAPE])
         p.rail("accept", "1")
         self.assertEqual(p.rail("advance", "1")["state"], "merged")
-        self.assertIn("The reviewer asked for a person: " + self.ASKED, p.git("log", "-1", "--format=%b", "main"))
+        self.assertIn("The reviewer found what a revert doesn't undo: " + self.SAID, p.git("log", "-1", "--format=%b", "main"))
         stats = p.rail("stats")
         self.assertEqual(stats["stats"]["raised"], {"reviewer": 1})
         self.assertEqual(stats["stats"]["tiers"]["PERSON"]["merged"], 1)
         self.assertIn("Became PERSON at ship or review: 1 (reviewer 1).", stats["text"])
 
-    def test_on_a_person_ticket_it_is_recorded_and_changes_nothing_else(self):
+    def test_an_unknown_kind_is_invalid_output_run_again_and_counted_against_no_one(self):
+        p = self.fixture()
+        Review.medium(self, p)
+        big = {"kind": "large-change", "file": "src/calc.py", "why": "It rewrites add."}
+        p.queue_reviews(clean() | {"kinds": [big]}, clean())
+        ready = p.rail("advance", "1", expect=3)  # a failed step in the receipts, the invalid run
+        self.assertEqual((ready["state"], ready["tier"], ready["reason"]["code"]), ("merge-ready", "AUTO", "MERGE"))
+        details = [s.get("detail") for s in review_steps(ready)]
+        self.assertTrue(details[0].startswith("invalid output: kinds[0]: 'large-change' is not a kind's id"), details[0])
+        runs = [e for e in events(p, "1-fix-add", "step") if e["step"] == "review"]
+        self.assertEqual([(e["result"], e.get("counted")) for e in runs], [("fail", False), ("pass", None)])
+        self.assertEqual(events(p, "1-fix-add", "tier_raised"), [])
+
+    def test_on_a_person_ticket_the_kinds_are_recorded_and_nothing_else_changes(self):
         p = self.fixture()
         p.add(ticket(tier="PERSON"))
         p.rail("accept", "1")
         p.rail("next")
         p.fix_calc("1")
-        p.queue_reviews(clean() | {"needs_person": self.ASKED}, clean() | {"needs_person": ""})
+        p.queue_reviews(clean() | {"kinds": [self.SHAPE]}, clean() | {"kinds": []})
         ready = p.rail("advance", "1")
         self.assertEqual((ready["state"], ready["tier"], ready["reason"]["code"]), ("merge-ready", "PERSON", "MERGE_BY_PERSON"))
         self.assertEqual(events(p, "1-fix-add", "tier_raised"), [])
         doc = json.loads(p.git("show", "1-fix-add:.rail/journal/1-review.json"))
-        self.assertEqual([r.get("needs_person") for r in doc["runs"]], [self.ASKED, None])
-        self.assertIn("The reviewer asked for a person: " + self.ASKED, ready["action"]["brief"])
+        self.assertEqual([r.get("kinds") for r in doc["runs"]], [[self.SHAPE], None])
+        self.assertIn("The reviewer found what a revert doesn't undo: " + self.SAID, ready["action"]["brief"])
+
+    def test_an_empty_list_changes_nothing(self):
+        p = self.fixture()
+        Review.medium(self, p)
+        p.queue_reviews(clean() | {"kinds": []})
+        ready = p.rail("advance", "1")
+        self.assertEqual((ready["state"], ready["tier"], ready["reason"]["code"]), ("merge-ready", "AUTO", "MERGE"))
+        self.assertEqual(events(p, "1-fix-add", "tier_raised"), [])
+        doc = json.loads(p.git("show", "1-fix-add:.rail/journal/1-review.json"))
+        self.assertNotIn("kinds", doc["runs"][0])
+
+    def test_a_run_stored_with_needs_person_by_an_older_engine_still_shows(self):
+        sys.path.insert(0, ENGINE)
+        from rail.review import Ledger
+        ledger = Ledger.__new__(Ledger)
+        ledger.doc = {"runs": [{"needs_person": "It adds the first retry wrapper."}, {"kinds": [self.SHAPE]}]}
+        self.assertEqual(ledger.asked_for_person(), ["It adds the first retry wrapper.", self.SAID])
+
+    def test_the_schema_lists_every_kind(self):
+        sys.path.insert(0, ENGINE)
+        from rail.ticket import KINDS
+        schema = json.loads(read(os.path.join(ENGINE, "review-v1.json")))
+        self.assertEqual(tuple(schema["properties"]["kinds"]["items"]["properties"]["kind"]["enum"]), KINDS)
+        self.assertNotIn("needs_person", schema["properties"])

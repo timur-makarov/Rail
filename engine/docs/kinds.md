@@ -45,7 +45,8 @@ tier (`rail docs loop`).
   `"external-effect: emails each customer; data-shape: db/schema/orders.sql"`. Ticket lint fails a PERSON
   ticket without one, or with a part whose id is not in the list. A change with none of these kinds is AUTO,
   however large or new.
-- **The reviewer.** It asks for a person with `needs_person` (`rail docs review`).
+- **The reviewer.** It lists each kind it sees in the change in `kinds`, on every ticket; on an AUTO ticket one
+  makes it PERSON (`rail docs review`).
 
 The `accepted` event records the ticket's kinds: its `person_reason`'s, in the order written, and those its
 scope's paths reach (`rail docs journal`).

@@ -11,7 +11,7 @@ import shlex
 
 from . import areas, gitx
 from .project import event, review_path, ticket_path
-from .ticket import Ticket
+from .ticket import KINDS, Ticket
 from .util import could_not_run, match_any, now_iso, run_shell, tail
 
 SECURITY = """Security. This list is a checklist, not a ceiling. Report only what someone could exploit in this application:
@@ -53,6 +53,11 @@ GUIDANCE_LIMIT = 8000  # characters of REVIEW.md in a brief, all files together
 
 BASE_GREEN = ("Every check in the Done Contract already passed on the base branch before this work began, so the checks"
               " alone do not show the work was done. Look at whether the change is tested.")
+
+
+def kind_line(k):
+    where = f"{k.get('file')}:{k['line']}" if k.get("line") else k.get("file")
+    return f"{k.get('kind')}: {where}: {k.get('why')}"
 
 
 def load_doc(text, nn):
@@ -150,8 +155,14 @@ class Ledger:
             and self.needed_run(patch_id, tier) is None
 
     def asked_for_person(self):
-        """What review and security runs said a person should see before the merge, each sentence once."""
-        return list(dict.fromkeys(r["needs_person"] for r in self.doc["runs"] if r.get("needs_person")))
+        """What review and security runs found that a revert doesn't undo, each item once, as "kind: file:line: why".
+        A run stored by an older engine may hold a `needs_person` sentence instead."""
+        found = []
+        for r in self.doc["runs"]:
+            found += [kind_line(k) for k in r.get("kinds") or [] if isinstance(k, dict)]
+            if r.get("needs_person"):
+                found.append(r["needs_person"])
+        return list(dict.fromkeys(found))
 
     def describe(self, fid, with_answer=True, scripts=False):
         f = self.findings[fid]
@@ -303,7 +314,19 @@ def validate(project, head, nn, data, ledger, role, disputed):
     inside it, and `repeats` names an earlier finding of this ticket. Returns a list of errors."""
     if not isinstance(data, dict) or not isinstance(data.get("summary"), str) or not isinstance(data.get("findings"), list):
         return ["the output is not a review/v1 object with summary and findings"]
-    errors = [] if isinstance(data.get("needs_person", ""), str) else ["needs_person is not a string"]
+    errors = []
+    kinds = data.get("kinds", [])
+    if not isinstance(kinds, list):
+        errors.append("kinds is not a list")
+        kinds = []
+    for n, k in enumerate(kinds):
+        where = f"kinds[{n}]"
+        if not isinstance(k, dict) or set(k) - {"kind", "file", "line", "why"} or not {"kind", "file", "why"} <= set(k):
+            errors.append(f"{where} doesn't match the schema")
+        elif k["kind"] not in KINDS:
+            errors.append(f"{where}: '{k['kind']}' is not a kind's id ({', '.join(KINDS)})")
+        elif "line" in k and not isinstance(k["line"], int):
+            errors.append(f"{where}: line is not a number")
     allowed = {"severity", "file", "line", "claim", "check", "evidence", "repeats"}
     for n, f in enumerate(data["findings"]):
         where = f"finding {n + 1}"
@@ -447,13 +470,15 @@ def _read(project, f, role, receipt, disputed, head, doc, ledger, code, output, 
         entry["findings"].append(finding)
     if role == "sweep":
         events = []  # the sweep's findings become tickets, not ledger entries
-    asked = data.get("needs_person", "").strip() if role in ("review", "security") else ""
-    if asked:
-        # A change a person should see although nothing blocks it: an AUTO ticket becomes PERSON, never back.
-        entry["needs_person"] = asked
+    found = (data.get("kinds") or []) if role in ("review", "security") else []
+    if found:
+        # Something a revert doesn't undo: recorded on every ticket, and an AUTO ticket becomes PERSON, never back.
+        entry["kinds"] = found
         if f.tier == "AUTO":
             events.append(event(t.id, "tier_raised", **{"from": "AUTO", "to": "PERSON", "reason": "reviewer",
-                                                         "detail": asked}))
+                                                         "kind": found[0]["kind"],
+                                                         "kinds": list(dict.fromkeys(k["kind"] for k in found)),
+                                                         "detail": kind_line(found[0])}))
     if role == "refuter" and not data["findings"]:
         events.append(event(t.id, "finding", id=disputed, outcome="declined", by="refuter", reason=data["summary"]))
     parked_by_refuter = [x["repeats"] for x in entry["findings"]
