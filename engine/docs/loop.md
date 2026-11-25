@@ -18,7 +18,8 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   With an empty ladder neither is there. A session a person is driving does the brief itself and
   may ignore them. An unattended runner, a cloud session a scheduled task starts, starts one subagent on
   that model and effort, gives it the brief word for word and the `cwd`, and runs `rail advance` itself when
-  the subagent returns (`rail docs cloud`). The engine starts no agent.
+  the subagent returns (`rail docs cloud`). `rail work NN` has the engine start that worker itself, as it
+  starts the reviewer, and record what the run cost (below).
 - `reason.code` names the situation, and `reason.message` says it in a sentence on a refusal. The codes an
   agent meets most: `IMPLEMENT` (do the ticket's work), `VERIFY_ASSUMPTIONS` (open `ASSUMED:` rows),
   `TICKET_LINT` (fix the ticket), `STEP_FAILED` (a ship step failed; the output is in the brief),
@@ -102,6 +103,38 @@ When the rebase meets a conflict, `advance` undoes it and asks you to rebase by 
 open in the worktree, `next`, `advance` and `save` only say how to end it (`REBASING`), and nothing is
 written to the ticket: git moves the branch when the rebase finishes, so a commit made meanwhile would be
 lost.
+
+## What work does
+
+`rail work NN` runs one attempt at a ticket's agent work, the way `advance` runs the reviewer. It builds the
+brief `next` would give for the ticket, and runs only when that is a ticket's work: `TICKET_LINT`,
+`VERIFY_ASSUMPTIONS`, `IMPLEMENT`, `STEP_FAILED`, `RED_CHECK`, `ANSWER_FINDINGS`, `CONFLICT`, `REBASING` or
+`SPLIT`. For any other answer, such as `SETUP_FAILED`, it runs nothing and returns that answer, and so it does
+when `[worker] command` is empty.
+
+It runs `[worker] command` in the answer's `cwd` (the ticket's worktree, or the project's root for a
+contract), with the brief on stdin and one line added: reply in one line, and don't run `rail advance`. The
+command gets `RAIL_TICKET`, `RAIL_MODEL` and `RAIL_EFFORT` (the rung the answer names), `ANTHROPIC_MODEL` when
+a model is named, `RAIL_SESSION` and `RAIL_WORKER=1`. Inside the run, `rail advance`, `next`, `work` and `save`
+refuse, and the save hooks do nothing: the claim belongs to the session that ran `rail work`, and `rail work`
+saves the work in flight for it every `[claim] save_minutes` while the worker runs, as the save hook does, so
+a run longer than `stale_minutes` keeps its claim. Past `[worker] timeout_minutes` the engine ends the run.
+
+`RAIL_SESSION` is the last run's session when that run ended `done` on the same model and effort, and empty
+otherwise; the default command passes it to `claude --resume`, so the same worker keeps a ticket while its rung
+stays the same, and a run that ran away is not continued. A resume that fails before any turn, because the
+session lives on another machine, runs once more as a fresh session.
+
+The run is recorded in a `worked` event (`rail docs journal`): model, effort, cost, turns, minutes, session
+and how it ended (`done`, `turns`, `budget`, `timeout`, `error`), read from the command's last JSON `result`
+line when there is one, and counts of the dead ends its tool calls show. A command that prints no JSON gets an
+event with no cost. A run log, one line per tool call, is appended to `.git/rail/cache/work/NN` and never
+committed: a command line can carry a token. While a rebase is open in the worktree the event waits in the
+local cache, and the next `rail work` or `rail advance` writes it once the rebase has ended.
+
+`rail work` ships nothing. It answers `WORKED`, with `rail advance NN` as the command to run next and the
+worker's last words in `reply`. Its `worker` step fails when the run didn't end `done`; `advance` then ships
+what is there and counts it, as after any attempt.
 
 ## Other verbs
 

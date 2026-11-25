@@ -19,7 +19,7 @@ from .forge import ENGINE_MARK, TRUSTED, ForgeError
 from .util import RailError, age, cloud, could_not_run, disposable, match_any, session_url, shell
 
 VERBS = ("init", "add", "adopt", "accept", "amend", "answer", "next", "advance", "status", "context", "drop", "doctor", "ci",
-         "consult", "docs", "intake", "sweep", "source", "provision", "save", "stats")
+         "consult", "docs", "intake", "sweep", "source", "provision", "save", "stats", "work")
 STALE_DAYS = 3
 
 
@@ -35,7 +35,7 @@ def answer(ticket=None, state=None, owner="none", action=None, code="NO_WORK", s
 def worker(f, action, code=None):
     """The model and effort an agent_task for a ticket's work names: the tier's ladder, one rung per failed attempt at
     the step the ticket is failing, capped at the last rung. Writing a contract (TICKET_LINT) names worker.contract
-    when it is set. The engine starts no agent; the session that runs the loop may start one on them."""
+    when it is set. `rail work` starts [worker] command on them; a session a person drives may ignore them."""
     ladder = f.project.config["worker"]["person_ladder" if f.tier == "PERSON" else "ladder"]
     if code == "TICKET_LINT" and f.project.config["worker"]["contract"]:
         ladder = [f.project.config["worker"]["contract"]]
@@ -1202,6 +1202,8 @@ def cmd_advance(project, args):
         key = mine[0].id
     nn = project.find(key, tickets).id
     project.busy(nn, wait=True)  # held to the end of the command: no save while it ships and reviews
+    from . import work
+    work.flush(project, nn)  # a worker run's event that a rebase held back
     receipts, first = [], True
     for _ in range(12):
         tickets, facts = load(project)
@@ -1416,6 +1418,54 @@ def init_task(project):
     action = {"kind": "agent_task", "brief": brief}
     named = guide(project, "INIT_TASK", action)  # no ticket, so no event
     return answer(owner="agent", code="INIT_TASK", action=action, cwd=".", **({"guide": named} if named else {}))
+
+
+# --- the worker ------------------------------------------------------------------------------
+
+
+def cmd_work(project, args):
+    """One attempt at a ticket's agent work: [worker] command runs the brief `next` gives for the ticket, and a
+    `worked` event records the run. For any answer that isn't a ticket's agent work it runs nothing and returns the
+    answer. It ships nothing: the runner runs rail advance NN after it."""
+    from . import work
+
+    project.sync()
+    key = requested(project, args)
+    if not key:
+        raise RailError("which ticket? Run rail work NN")
+    nn = project.find(key, project.tickets()).id
+    work.flush(project, nn)
+    f, receipts = settle(project, nn, explicit=False)
+    if f is None:
+        return answer(nn, None, "none", {"kind": "rest", "brief": f"Another session claimed ticket {nn} first."},
+                      "CLAIMED_ELSEWHERE", receipts)
+    result = from_facts(f, receipts)
+    code = result["reason"]["code"]
+    if code not in work.CODES or result["owner"] != "agent" or not project.config["worker"]["command"]:
+        return result
+    if code == "TICKET_LINT" and not note_drafting(project, f):
+        tickets, facts = load(project)  # another session noted it first: it writes this contract
+        return from_facts(facts[nn], receipts)
+
+    def save():
+        try:
+            project.sync()
+            save_all(project, "work", only=nn)  # the runner's session's saves: a rebase under way is left alone
+        except Exception:
+            pass  # the worker goes on; the next save tries again
+
+    worked, reply = work.run(project, f, result, save)
+    work.record(project, nn, worked)
+    tickets, facts = load(project)
+    nf = facts[nn]
+    detail = ", ".join(x for x in (worked["end"], f"{worked['turns']} turns" if "turns" in worked else "",
+                                   f"${worked['cost_usd']:.2f}" if "cost_usd" in worked else "",
+                                   f"{worked['minutes']} min") if x)
+    receipts.append({"step": "worker", "status": "ran", "result": "pass" if worked["end"] == "done" else "fail",
+                     "detail": detail})
+    command = f"rail advance {nn}"
+    return answer(nn, nf.state, "agent", {"kind": "script", "brief": command, "command": command}, "WORKED", receipts,
+                  nf.cwd or ".", tier=nf.tier, worked=worked, reply=reply)
 
 
 # --- saving work in flight ---------------------------------------------------------------
@@ -1855,6 +1905,8 @@ def parser():
                   ticket=False)
     source.add_argument("name", nargs="?", help="the source, .rail/sources/NAME.md")
     verb("save", "commit and push the work in flight as it is, with no checks")
+    verb("work", "run [worker] command on a ticket's agent task and record the run; it ships nothing: run rail advance"
+                 " NN after it")
     stats_ = verb("stats", "what the merged tickets' journals say: tickets by tier, failed steps, and the reviewer's"
                            " cost and hit rate", ticket=False)
     stats_.add_argument("--since", help="count only tickets merged on or after this date, as YYYY-MM-DD")
@@ -1896,6 +1948,9 @@ def main(argv=None):
             args.ticket = args.ticket_opt
         if args.verb == "hook":
             return hooks.run(args.name, args.machine)
+        if os.environ.get("RAIL_WORKER") and args.verb in ("advance", "next", "work", "save"):
+            from .work import refusal
+            raise RailError(refusal(args.verb), code="WORKER_RUN")
         if args.verb == "init":
             result = cmd_init(args)
         elif args.verb == "docs":

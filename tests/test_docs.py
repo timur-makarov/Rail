@@ -35,7 +35,7 @@ class Reference(RailTest):
         p = self.fixture()
         page = p.rail("docs", "cli")["text"]
         for verb in ("init", "add", "accept", "amend", "answer", "next", "advance", "status", "context", "drop",
-                     "doctor", "ci", "consult", "docs", "stats", "sweep", "source", "adopt"):
+                     "doctor", "ci", "consult", "docs", "stats", "sweep", "source", "adopt", "work"):
             self.assertIn(f"## rail {verb}", page)
         self.assertNotIn("## rail hook", page)
 
@@ -86,7 +86,8 @@ class Operations(RailTest):
         self.assertIn("## Decision", p.rail("docs", "adr")["text"])
         self.assertIn("People keep four acts", p.rail("docs", "environments")["text"])
         journal = p.rail("docs", "journal")["text"]
-        for name in ("requested", "accepted", "amended", "claimed", "saved", "step", "shipped", "tier_raised", "finding",
+        for name in ("requested", "accepted", "amended", "claimed", "saved", "worked", "step", "shipped", "tier_raised",
+                     "finding",
                      "consulted", "continued", "dropped"):
             self.assertIn(f"| `{name}` |", journal)  # every event the engine writes has its row
         for text in ("NN-review.json", "review/v1", "A review is complete for a patch", "rail/ids"):

@@ -66,6 +66,18 @@ def checks(project):
                                           " they pause unattended cloud sessions, and the guard hook asks the same on"
                                           " your own machine"))
 
+    worker = project.config["worker"]
+    if worker["command"]:
+        # The runner calls rail work in one Bash call: the Bash tool ends it at its ceiling, 10 minutes when unset.
+        ceiling = (settings.get("env") or {}).get("BASH_MAX_TIMEOUT_MS")
+        ceiling = int(ceiling) if str(ceiling).isdigit() else 600000
+        under = worker["timeout_minutes"] * 60000 < ceiling
+        found.append(("worker timeout", under, f"[worker] timeout_minutes ({worker['timeout_minutes']}) is under the Bash"
+                      f" tool's ceiling ({ceiling // 60000} min)" if under else
+                      f"[worker] timeout_minutes ({worker['timeout_minutes']}) is not under the Bash tool's ceiling"
+                      f" ({ceiling // 60000} min, BASH_MAX_TIMEOUT_MS in .claude/settings.json's env; 10 when unset):"
+                      " the Bash call that runs rail work would end first. Lower it, or raise the ceiling"))
+
     agents = os.path.join(root, "AGENTS.md")
     has_section = os.path.exists(agents) and any(l.strip() == "## Rail" for l in open(agents).read().splitlines())
     found.append(("AGENTS.md", has_section, "has the ## Rail section" if has_section else "no ## Rail section: run rail init"))
