@@ -38,6 +38,12 @@ cap = 5                                   # reader: next and advance; failures a
 ladder = ["claude-sonnet-5-5:medium", "claude-sonnet-5-5:high", "claude-opus-5-5:medium"]
 person_ladder = ["claude-opus-5-5:medium", "claude-opus-5-5:high"]   # a PERSON ticket starts higher
 contract = "claude-opus-5-5:high"         # writing a ticket's contract (TICKET_LINT); empty: the ladder's rung
+# reader: work; the worker rail work starts in the answer's cwd, with the brief on stdin and RAIL_MODEL, RAIL_EFFORT and
+# RAIL_SESSION (a session to resume, or empty) set. Every flag lives here: --max-turns and --max-budget-usd end one run
+# where the CLI honours them (not every version honours --max-turns); timeout_minutes is the bound every run has
+command = '''claude -p --output-format stream-json --verbose ${RAIL_MODEL:+--model "$RAIL_MODEL"} ${RAIL_EFFORT:+--effort "$RAIL_EFFORT"} --permission-mode auto --permission-prompts none --max-turns 300 --max-budget-usd 15 ${RAIL_SESSION:+--resume "$RAIL_SESSION"}'''
+timeout_minutes = 90                      # reader: work; one worker run, wall clock. Keep it under the Bash tool's
+                                          # BASH_MAX_TIMEOUT_MS in .claude/settings.json
 
 [sweep]
 after = 20                                # reader: next; changes merged with no review since the last sweep:
@@ -61,10 +67,12 @@ skip_paths = []                           # an AUTO change gets no reviewer when
 
 [claim]
 stale_minutes = 30                        # reader: next; another session's work with no journal event for this long is
-                                          # resumed. Keep it above your longest command's limit plus save_minutes
-save_minutes = 10                         # reader: advance and rail save; a ticket with nothing to save and no pushed
-                                          # event for this long gets a saved event, the sign that a session is at work
-                                          # on it. How often the save hook runs is the -mmin number in its command in
+                                          # resumed. Keep it above your longest command's limit plus save_minutes;
+                                          # rail work saves while its worker runs, so a worker run doesn't count
+save_minutes = 10                         # reader: advance, rail save and rail work; a ticket with nothing to save and
+                                          # no pushed event for this long gets a saved event, the sign that a session is
+                                          # at work on it; rail work saves this often while its worker runs. How often
+                                          # the save hook runs is the -mmin number in its command in
                                           # .claude/settings.json; keep the two the same
 
 [consult]                                 # reader: the consult pack; read-only, with the brief on stdin

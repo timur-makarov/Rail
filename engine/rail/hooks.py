@@ -72,6 +72,8 @@ def session_start():
                     f.write(f'export PATH="{os.path.join(project.root, ".rail", "bin")}:$PATH"\n')
             if project.session:
                 project.cache_write("hooks", project.session, "1")  # doctor reads it: Rail's hooks run in this session
+            if os.environ.get("RAIL_WORKER"):
+                continue  # a worker run that rail work started: its brief is all it needs, and next isn't its to run
             lines = ["This repository runs on Rail. The loop: rail next --json, do action.brief, then rail advance --json."]
         else:
             where = os.path.relpath(project.root, os.path.realpath(cwd))  # the root is resolved, so cwd must be
@@ -169,6 +171,8 @@ def _save(via, data=None):
     such as a takeover."""
     from .cli import save_all
 
+    if os.environ.get("RAIL_WORKER"):
+        return []  # a worker run: rail work saves the work for the runner's session, whose claim it is
     cwd, inside, projects = _projects(data if data is not None else _input())
     notes = []
     for project in projects:

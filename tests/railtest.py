@@ -22,6 +22,7 @@ def engine():
         sys.path.insert(0, ENGINE)
 
 FAKE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_reviewer.py")
+FAKE_WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_worker.py")
 FAKE_GH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_gh.py")
 GITHUB_URL = "https://github.com/acme/app.git"
 
@@ -114,6 +115,18 @@ class Fixture:
         with open(self.reviews, "w") as f:
             json.dump(list(responses), f)
 
+    def queue_work(self, *items):
+        """What the stand-in worker does in the next `rail work` runs, in order (tests/fake_worker.py)."""
+        with open(self.root + ".worker.json", "w") as f:
+            json.dump(list(items), f)
+
+    def work_log(self):
+        path = self.root + ".worker.log"
+        if not os.path.exists(path):
+            return []
+        with open(path) as f:
+            return [json.loads(line) for line in f]
+
     def briefs(self):
         if not os.path.exists(self.review_log):
             return []
@@ -137,6 +150,8 @@ class Fixture:
         env["CLAUDE_CODE_SESSION_ID"] = session
         env["RAIL_FAKE_REVIEWS"] = self.reviews
         env["RAIL_FAKE_LOG"] = self.review_log
+        env["RAIL_FAKE_WORKER"] = self.root + ".worker.json"
+        env["RAIL_FAKE_WORKER_LOG"] = self.root + ".worker.log"
         if getattr(self, "github", None):
             env["RAIL_FAKE_GITHUB"] = self.github.state
             env["PATH"] = self.github.bin + os.pathsep + env["PATH"]

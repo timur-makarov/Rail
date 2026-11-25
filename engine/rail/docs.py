@@ -49,15 +49,25 @@ READERS = {
     "claim.stale_minutes": "next: minutes without a journal event after which another session's work in flight is"
                            " taken to be abandoned and resumed. No event is written while a command runs, so keep it"
                            " above the longest command's limit (timeout_secs, or setup's or verify's own) plus"
-                           " claim.save_minutes",
-    "claim.save_minutes": "advance and rail save: a ticket with nothing to save and no pushed event for this long"
-                          " gets a saved event, the sign that a session is at work on it. How often the save hook"
-                          " runs is the -mmin number in the hook's own command in .claude/settings.json (10)",
-    "worker.ladder": "next and advance: the model and effort an agent_task names for an AUTO ticket's work, as"
+                           " claim.save_minutes; a worker run (rail work) saves as it goes, so it doesn't count",
+    "claim.save_minutes": "advance, rail save and rail work: a ticket with nothing to save and no pushed event for"
+                          " this long gets a saved event, the sign that a session is at work on it. rail work saves"
+                          " this often while its worker runs. How often the save hook runs is the -mmin number in the"
+                          " hook's own command in .claude/settings.json (10)",
+    "worker.ladder": "next, advance and work: the model and effort an agent_task names for an AUTO ticket's work, as"
                      " model:effort, one rung per failed attempt at the step the ticket is failing. Empty names none",
-    "worker.person_ladder": "next and advance: the same ladder for a PERSON ticket, which starts higher",
-    "worker.contract": "next: the model:effort the task that writes a ticket's contract (TICKET_LINT) names. An AUTO"
-                       " contract is accepted with nobody looking, so it gets a stronger model. Empty: the ladder's",
+    "worker.person_ladder": "next, advance and work: the same ladder for a PERSON ticket, which starts higher",
+    "worker.contract": "next and work: the model:effort the task that writes a ticket's contract (TICKET_LINT) names."
+                       " An AUTO contract is accepted with nobody looking, so it gets a stronger model. Empty: the"
+                       " ladder's",
+    "worker.command": "work: the worker, run in the answer's cwd with the brief on stdin and RAIL_TICKET, RAIL_MODEL,"
+                      " RAIL_EFFORT, RAIL_SESSION (a session to resume, or empty), ANTHROPIC_MODEL and RAIL_WORKER=1"
+                      " set. The engine reads total_cost_usd, session_id, num_turns and subtype from its last JSON"
+                      " result line, when there is one. Not every CLI version honours --max-turns: worker.timeout_minutes is"
+                      " the bound every run has. Empty: rail work runs nothing (rail docs loop)",
+    "worker.timeout_minutes": "work: one worker run's wall clock, after which the engine ends it and records"
+                              " timeout. Keep it under the Bash tool's BASH_MAX_TIMEOUT_MS; rail doctor says when it"
+                              " isn't",
     "sweep.after": "next: changes merged with no review (tickets inside review.skip_paths, and commits with no"
                    " ticket) since the last sweep before one is offered",
     "sweep.every": "next: tickets merged since the last sweep, reviewed or not, before one is offered; it then"

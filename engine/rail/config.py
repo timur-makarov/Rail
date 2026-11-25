@@ -14,6 +14,14 @@ REVIEW_COMMAND = (
     "--json-schema \"$(cat .rail/engine/review-v1.json)\""
 )
 
+# The worker `rail work` starts. Every flag lives here, so another vendor's CLI fits too: the engine reads the JSON keys
+# it finds in the output and ends the run after [worker] timeout_minutes.
+WORKER_COMMAND = (
+    'claude -p --output-format stream-json --verbose ${RAIL_MODEL:+--model "$RAIL_MODEL"} '
+    '${RAIL_EFFORT:+--effort "$RAIL_EFFORT"} --permission-mode auto --permission-prompts none --max-turns 300 '
+    '--max-budget-usd 15 ${RAIL_SESSION:+--resume "$RAIL_SESSION"}'
+)
+
 DEFAULTS = {
     "base_branch": "main",
     "person_paths": [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".claude/**", ".github/workflows/**"],
@@ -27,7 +35,7 @@ DEFAULTS = {
     "claim": {"stale_minutes": 30, "save_minutes": 10},
     "worker": {"ladder": ["claude-sonnet-5-5:medium", "claude-sonnet-5-5:high", "claude-opus-5-5:medium"],
                "person_ladder": ["claude-opus-5-5:medium", "claude-opus-5-5:high"],
-               "contract": "claude-opus-5-5:high"},
+               "contract": "claude-opus-5-5:high", "command": WORKER_COMMAND, "timeout_minutes": 90},
     "sweep": {"after": 20, "every": 20},
     "map": {"depth": 1, "ignore": []},
     # A page named in the brief when its situation applies. The pages come with the seed config only: a project
