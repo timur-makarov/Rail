@@ -156,7 +156,7 @@ class Work(RailTest):
         p = self.fixture(config=WORK)
         p.add(ticket())
         p.rail("next")
-        p.queue_work({"sleep": 60})
+        p.queue_work({"sleep": 60, "detach": 40})
         script = "\n".join([
             "import argparse, json, sys",
             f"sys.path.insert(0, {p.path('.rail', 'engine')!r})",
@@ -176,6 +176,35 @@ class Work(RailTest):
         self.assertEqual(worked["end"], "timeout")
         self.assertNotIn("cost_usd", worked)
         self.assertEqual(json.loads(done.stdout)["steps"][-1]["result"], "fail")
+
+    def test_after_a_failed_ship_the_workers_brief_has_the_failures_output(self):
+        p = self.fixture(config=WORK)
+        check = ("python3 -c \"import sys; sys.path.insert(0, 'src'); import calc;"
+                 " assert calc.add(2, 3) == 5, 'known-' + 'failure-line-7'\"")  # the line is only in its output
+        p.add(ticket(check=check))
+        p.rail("next")
+        p.queue_work({}, {})
+        p.rail("work", "1")  # the worker changes nothing
+        failed = p.rail("advance", "1", expect=3)
+        self.assertEqual(failed["reason"]["code"], "STEP_FAILED")
+        self.assertIn("known-failure-line-7", failed["action"]["brief"])
+        self.assertIn("known-failure-line-7", p.rail("next")["action"]["brief"])
+        p.rail("work", "1")
+        brief = p.work_log()[-1]["brief"]
+        self.assertIn("The last ship of ticket 1 failed at 'checks'", brief)
+        self.assertIn("known-failure-line-7", brief)  # what advance's answer showed, though the journal keeps less
+        self.assertNotIn("known-failure-line-7", p.git("show", "1-fix-add:.rail/journal/1-events.jsonl"))
+
+    def test_a_save_steps_aside_while_the_worker_holds_the_index_lock(self):
+        p = self.fixture(config=WORK + "\n[claim]\nsave_minutes = 0\n")  # 0: save at every chance
+        p.add(ticket())
+        p.rail("next")
+        hold = ('L=$(git rev-parse --path-format=absolute --git-path index.lock); touch "$L"; sleep 4;'
+                ' rm -f "$L"')
+        p.queue_work({"write": {"src/calc.py": FIXED}, "run": [hold]})
+        p.rail("work", "1")
+        self.assertEqual([e for e in events(p, name="saved") if e["via"] == "work"], [])  # every tick skipped
+        self.assertIn("src/calc.py", p.git("status", "--porcelain", cwd=p.worktree("1")))  # left for the ship
 
     def test_the_same_worker_goes_on_while_the_rung_stays_and_its_run_ended_done(self):
         p = self.fixture(config=WORK)

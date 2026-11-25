@@ -36,6 +36,7 @@ person_ladder = ["claude-opus-5-5:medium", "claude-opus-5-5:high"]   # a PERSON 
 contract = "claude-opus-5-5:high"         # writing a ticket's contract (TICKET_LINT); empty: the ladder's rung
 # reader: work; the worker rail work starts in the answer's cwd, with the brief on stdin and RAIL_MODEL, RAIL_EFFORT and
 # RAIL_SESSION (a session to resume, or empty) set. Every flag lives here: --max-turns and --max-budget-usd end one run
+# where the CLI honours them (not every version honours --max-turns); timeout_minutes is the bound every run has
 command = '''claude -p --output-format stream-json --verbose ${RAIL_MODEL:+--model "$RAIL_MODEL"} ${RAIL_EFFORT:+--effort "$RAIL_EFFORT"} --permission-mode auto --permission-prompts none --max-turns 300 --max-budget-usd 15 ${RAIL_SESSION:+--resume "$RAIL_SESSION"}'''
 timeout_minutes = 90                      # reader: work; one worker run, wall clock. Keep it under the Bash tool's
                                           # BASH_MAX_TIMEOUT_MS in .claude/settings.json

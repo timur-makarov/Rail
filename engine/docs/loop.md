@@ -119,6 +119,8 @@ a model is named, `RAIL_SESSION` and `RAIL_WORKER=1`. Inside the run, `rail adva
 refuse, and the save hooks do nothing: the claim belongs to the session that ran `rail work`, and `rail work`
 saves the work in flight for it every `[claim] save_minutes` while the worker runs, as the save hook does, so
 a run longer than `stale_minutes` keeps its claim. Past `[worker] timeout_minutes` the engine ends the run.
+Not every Claude Code version honours `--max-turns` (2.1.332 ignores it), so the wall clock is the bound every
+run has: the engine kills the command's whole process group, whatever the CLI does with its flags.
 
 `RAIL_SESSION` is the last run's session when that run ended `done` on the same model and effort, and empty
 otherwise; the default command passes it to `claude --resume`, so the same worker keeps a ticket while its rung

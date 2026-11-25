@@ -5,7 +5,7 @@ of a queue the test writes, logs its brief, cwd and environment, and prints JSON
 Queue items (a dict, every key optional): "write" {path: text} writes files in its cwd; "run" [commands] runs shell
 commands and logs their exit codes and output; "sleep" seconds; "calls" [[tool, input, outcome, text]] prints a
 tool_use and its tool_result for each (outcome ok, failed or denied); "result" {...} merges into the result line, or
-null prints none; "raw" text is printed as is; "exit" is the exit code; "resume_fails" fails as the CLI does when the
+null prints none; "detach" seconds starts a process outside the process group that keeps the output open; "raw" text is printed as is; "exit" is the exit code; "resume_fails" fails as the CLI does when the
 session to resume isn't on this machine, when RAIL_SESSION is set.
 """
 import json
@@ -64,6 +64,9 @@ for n, (tool, tool_input, outcome, text) in enumerate(item.get("calls") or []):
              "decision_reason": text})
     say({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": tool_id, "content": text,
                                                     "is_error": outcome != "ok"}]}})
+if item.get("detach"):
+    # A process that leaves the command's process group and keeps its output open, as a stray background job would.
+    subprocess.Popen(["sleep", str(item["detach"])], start_new_session=True)
 if item.get("sleep"):
     time.sleep(item["sleep"])
 log()

@@ -297,8 +297,9 @@ class Commands(RailTest):
         self.assertIn("Ship of ticket 1 could not run 'verify'.", first["action"]["brief"])
         self.assertIn("no-such-test-runner: command not found", first["action"]["brief"])  # the shell's own line
         self.assertIn("Nothing was checked", first["action"]["brief"])
-        self.assertIn("could not run 'verify': could not run (exit 127: command not found). Nothing was checked",
-                      p.rail("next", "--ticket", "1")["action"]["brief"])
+        again = p.rail("next", "--ticket", "1")["action"]["brief"]  # with the output the advance answer showed
+        self.assertIn("could not run 'verify': could not run (exit 127: command not found).\n$ no-such-test-runner", again)
+        self.assertIn("no-such-test-runner: command not found\n\nNothing was checked", again)
         recorded = [e for e in journal(p) if e["event"] == "step" and e["step"] == "verify"][-1]
         self.assertEqual((recorded["status"], recorded["result"]), ("could_not_run", "fail"))
         self.assertNotIn("counted", recorded)  # an attempt like any other: the budget bounds it

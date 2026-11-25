@@ -1247,6 +1247,13 @@ def cmd_advance(project, args):
         # A review run that timed out or gave invalid output: the reviewer's fault, so not counted.
         no_verdict = bool(run.failure) and run.failure[0] in steps.REVIEW_STEPS and any(
             e.get("event") == "step" and e.get("counted") is False for e in run.events)
+        if stage == "ship" and run.failure:
+            # The answer below shows the failure's output, and the journal keeps only its detail: the next brief for
+            # the same failure (rail next, rail work) reads the output here.
+            failed = [e for e in run.events if e.get("event") == "step" and e.get("result") == "fail"]
+            project.cache_write("failure", nn, json.dumps({"patch_id": failed[-1].get("patch_id") if failed else None,
+                                                           "signatures": [e.get("signature") for e in failed],
+                                                           "output": run.failure[1]}))
         commit(project, f, run, stage if run.ok else f"{stage} failed")
         receipts += run.steps
         if no_verdict:
@@ -1448,11 +1455,26 @@ def cmd_work(project, args):
         return from_facts(facts[nn], receipts)
 
     def save():
+        # The worker runs git in the same worktree at the same time, and a save holds the worktree's index.lock for
+        # its add and commit: a git command of the worker's that started then would fail. So a save waits while the
+        # worker holds the lock, and reads with GIT_OPTIONAL_LOCKS=0, as git status otherwise takes it to refresh.
+        tree = f.t.worktree if f.t.worktree and os.path.isdir(f.t.worktree) else None
+        lock = tree and gitx.git(["rev-parse", "--path-format=absolute", "--git-path", "index.lock"], tree,
+                                 check=False).stdout.strip()
+        if lock and os.path.exists(lock):
+            return
+        before = os.environ.get("GIT_OPTIONAL_LOCKS")
+        os.environ["GIT_OPTIONAL_LOCKS"] = "0"
         try:
             project.sync()
             save_all(project, "work", only=nn)  # the runner's session's saves: a rebase under way is left alone
         except Exception:
             pass  # the worker goes on; the next save tries again
+        finally:
+            if before is None:
+                os.environ.pop("GIT_OPTIONAL_LOCKS", None)
+            else:
+                os.environ["GIT_OPTIONAL_LOCKS"] = before
 
     worked, reply = work.run(project, f, result, save)
     work.record(project, nn, worked)

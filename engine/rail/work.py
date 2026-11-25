@@ -76,14 +76,19 @@ def _run(project, command, cwd, env, brief, save):
             break
         except subprocess.TimeoutExpired:
             if time.monotonic() >= deadline:
-                os.killpg(proc.pid, signal.SIGKILL)
+                # The wall clock is the bound a run always has, whatever the CLI does with its own limit flags: the
+                # whole process group is killed, and a process that left the group can't hold rail work open.
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass  # it ended a moment ago
                 proc.wait()
                 code = None
                 break
             save()
             next_save = time.monotonic() + period
     for thread in threads[1:]:
-        thread.join(timeout=10)
+        thread.join(timeout=5)  # a process the command left behind may hold its output open: don't wait for it
     return code, out, err, time.monotonic() - began
 
 

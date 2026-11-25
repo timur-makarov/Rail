@@ -4,6 +4,8 @@ Rows whose code is in TRANSITIONS are moves `next` makes itself (accepting an AU
 consult); `next` makes the move, derives the facts again, and reads the table once more.
 """
 
+import json
+
 from . import gitx
 from .project import advice_path, ticket_path
 from .util import MISSING_HELP
@@ -145,12 +147,27 @@ def _assumptions(f):
             f" with these rows in it.\n{rows}\nWork in {f.cwd}.")
 
 
+def _failure_output(f, e):
+    """The output of the failed ship step `e`, which the answer of that `advance` showed. The journal keeps only the
+    step's detail; advance keeps the output in the local cache, so a later brief for the same failure has it too."""
+    try:
+        kept = json.loads(f.project.cache_read("failure", f.id) or "null")
+    except ValueError:
+        return ""
+    if not isinstance(kept, dict) or kept.get("patch_id") != e.get("patch_id") or \
+            e.get("signature") not in (kept.get("signatures") or []):
+        return ""
+    return kept.get("output") or ""
+
+
 def _step_failed(f):
     e = f.last_fail
+    output = _failure_output(f, e)
+    end = f".\n{output}\n\n" if output else ". "
     if e.get("status") == "could_not_run":
-        return (f"The last ship of ticket {f.id} could not run '{e.get('step')}': {e.get('detail', '')}. {MISSING_HELP}"
-                f" Then run: rail advance {f.id}") + _findings(f, "Open review findings:") + _note(f)
-    return (f"The last ship of ticket {f.id} failed at '{e.get('step')}': {e.get('detail', '')}. Nothing has changed"
+        return (f"The last ship of ticket {f.id} could not run '{e.get('step')}': {e.get('detail', '')}{end}"
+                f"{MISSING_HELP} Then run: rail advance {f.id}") + _findings(f, "Open review findings:") + _note(f)
+    return (f"The last ship of ticket {f.id} failed at '{e.get('step')}': {e.get('detail', '')}{end}Nothing has changed"
             f" since. Fix the cause in {f.cwd}, then run: rail advance {f.id}") + _advice(f, e.get("step")) \
         + _findings(f, "Open review findings:") + _note(f)
 

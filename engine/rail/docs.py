@@ -56,7 +56,8 @@ READERS = {
     "worker.command": "work: the worker, run in the answer's cwd with the brief on stdin and RAIL_TICKET, RAIL_MODEL,"
                       " RAIL_EFFORT, RAIL_SESSION (a session to resume, or empty), ANTHROPIC_MODEL and RAIL_WORKER=1"
                       " set. The engine reads total_cost_usd, session_id, num_turns and subtype from its last JSON"
-                      " result line, when there is one. Empty: rail work runs nothing (rail docs loop)",
+                      " result line, when there is one. Not every CLI version honours --max-turns: worker.timeout_minutes is"
+                      " the bound every run has. Empty: rail work runs nothing (rail docs loop)",
     "worker.timeout_minutes": "work: one worker run's wall clock, after which the engine ends it and records"
                               " timeout. Keep it under the Bash tool's BASH_MAX_TIMEOUT_MS; rail doctor says when it"
                               " isn't",
