@@ -72,6 +72,9 @@ class Facts:
         self.claimed = sorted(claims, key=lambda e: e.get("at", ""))[-1] if claims else None  # of equal times, the later
         # A drop is an event in the journal, and a mark in the counter branch for when the journal's branch is gone.
         self.dropped_event = t.last("dropped") or ({"event": "dropped"} if t.dropped_mark else None)
+        # Dropped in its journal, with no mark on the counter branch yet: the drop keeps the ticket's worktree, branches
+        # and pull request until the mark is written, so a drop never leaves no record at all.
+        self.drop_pending = bool(t.last("dropped")) and not t.dropped_mark
         self.contract_merged = False
         self.patch_id = None
         self.dirty = []

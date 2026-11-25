@@ -25,9 +25,11 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   agent meets most: `IMPLEMENT` (do the ticket's work), `VERIFY_ASSUMPTIONS` (open `ASSUMED:` rows),
   `TICKET_LINT` (fix the ticket), `STEP_FAILED` (a ship step failed; the output is in the brief),
   `ANSWER_FINDINGS`, `REBASING` and `CONFLICT`, `SPLIT`, `RED_BASE` (the base branch fails `verify`),
-  `WAITING_AFTER` and `SCOPE_OVERLAP` (another ticket goes first), `CI_WAIT`, `NO_WORK`. A person's turn is
-  `APPROVE_CONTRACT`, `APPROVE_AMEND`, `MERGE_BY_PERSON`, `RETRY_CAP` (the retry budget or the cap),
-  `FINDING_UPHELD`, `STUCK_REVIEW`, `HOLD` or `MERGE_FAILED`. Act on `owner` and `action`; the code is for
+  `WAITING_AFTER` and `SCOPE_OVERLAP` (another ticket goes first), `AFTER_DROPPED` on an AUTO ticket (decide
+  whether it stands without the dropped one), `STUCK` (an AUTO ticket at the retry cap: `rail next` drops it),
+  `DROP_PENDING`, `CI_WAIT`, `NO_WORK`. A person's turn is `APPROVE_CONTRACT`, `APPROVE_AMEND`,
+  `MERGE_BY_PERSON`, and on a PERSON ticket `RETRY_CAP` (the retry budget or the cap), `FINDING_UPHELD` and
+  `AFTER_DROPPED`; `STUCK_REVIEW`, `HOLD` or `MERGE_FAILED`. Act on `owner` and `action`; the code is for
   logs and for telling two briefs apart.
 - `guide` names the page `[guides]` gives for the brief's situation, such as the start of a ticket or a
   failure that repeats; the brief's last line then says to read it (`rail docs guides`). It is a hint, and

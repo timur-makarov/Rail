@@ -126,11 +126,18 @@ class Review(RailTest):
         p.rail("answer", "1", "F1", "parked")
         upheld = p.rail("advance", "1", expect=3)
         self.assertEqual(upheld["steps"][-1]["detail"], "run 2: upheld F1")
+        # On AUTO no person settles a second dispute: the verdict stands, and it comes back as a failed review.
+        # Two failed refuter steps in a row are the retry budget, so consult advises first.
         again = p.rail("answer", "1", "F1", "parked", "Still not mine.")
-        self.assertEqual((again["owner"], again["reason"]["code"]), ("human", "FINDING_UPHELD"))
-        self.assertIn("parked \"why\" --owner", again["action"]["brief"])
-        owner = p.rail("answer", "1", "F1", "parked", "It predates this ticket; ticket 9 fixes it.", "--owner")
-        self.assertEqual(owner["state"], "merge-ready")
+        self.assertEqual((again["owner"], again["reason"]["code"]), ("agent", "CONSULT"))
+        back = p.rail("next", "--ticket", "1")
+        self.assertEqual((back["owner"], back["reason"]["code"]), ("agent", "ANSWER_FINDINGS"))
+        self.assertIn("a refuter upheld it before, and on an AUTO ticket its verdict stands: fix it",
+                      back["action"]["brief"])
+        refuted = [e for e in events(p, "1-fix-add", "step") if e["step"] == "refuter"]
+        self.assertEqual([(e["result"], e["detail"]) for e in refuted],
+                         [("fail", "run 2: upheld F1"), ("fail", "F1 upheld before: it stands")])
+        self.assertEqual(refuted[0]["signature"], refuted[1]["signature"])  # counted toward the cap as the same failure
 
     def test_an_advisory_finding_parks_without_a_refuter(self):
         p = self.fixture()
@@ -141,9 +148,12 @@ class Review(RailTest):
         self.assertEqual(done["state"], "merge-ready")
         self.assertEqual(len(p.briefs()), 1)
 
-    def test_an_upheld_finding_the_agent_still_disputes_waits_for_a_person(self):
+    def test_an_upheld_finding_the_agent_still_disputes_waits_for_a_person_on_a_person_ticket(self):
         p = self.fixture()
-        self.medium(p)
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")
+        p.rail("next")
+        p.fix_calc("1")
         p.queue_reviews(found(BLOCKING), found(BLOCKING | {"repeats": "F1"}, summary="It holds."))
         p.rail("advance", "1", expect=3)
         p.rail("answer", "1", "F1", "declined", "It is fine.")
@@ -152,7 +162,7 @@ class Review(RailTest):
         waiting = p.rail("answer", "1", "F1", "declined", "Still fine.")
         self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("human", "FINDING_UPHELD"))
         owner = p.rail("answer", "1", "F1", "declined", "Negative inputs never happen here.", "--owner")
-        self.assertEqual(owner["state"], "merge-ready")
+        self.assertEqual((owner["state"], owner["reason"]["code"]), ("reviewing", "REVIEW"))  # the security seat next
 
     def test_a_person_ticket_runs_the_security_seat_with_a_refuter_and_a_person_approves_the_merge(self):
         p = self.fixture()
@@ -281,7 +291,8 @@ class Review(RailTest):
 class Retry(RailTest):
     def test_at_the_budget_consult_advises_then_a_person_continues(self):
         p = self.fixture()
-        p.add(ticket())
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")  # PERSON: at the retry budget or cap it waits for a person
         p.rail("next")
         p.rail("advance", "1", expect=3)
         p.write("src/calc.py", "def add(a, b):\n    return a * b\n", base=p.worktree("1"))
@@ -340,7 +351,8 @@ class Retry(RailTest):
 
     def test_the_cap_sends_new_failures_to_a_person_and_a_person_resets_budget_and_cap(self):
         p = self.fixture()
-        p.add(ticket())
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")  # PERSON: at the retry budget or cap it waits for a person
         p.rail("next")
         p.rail("advance", "1", expect=3)  # 1: AssertionError
         for n, body in enumerate(["return a + c", "return a - b", "return a + c"], 2):

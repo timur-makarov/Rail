@@ -41,8 +41,9 @@ paths = []
 
 [retry]
 budget = 2                                # reader: next and advance; the same failure in a row at one step, then
-                                          # consult, then a person
-cap = 5                                   # reader: next and advance; failures at one step of any kind, then a person
+                                          # consult, then stuck
+cap = 5                                   # reader: next and advance; failures at one step of any kind, then stuck.
+                                          # A stuck AUTO ticket is dropped with a record; a PERSON one waits for a person
 
 [worker]                                  # reader: next; the model and effort the answer names for a ticket's work,
                                           # one rung per failed attempt at the current step. Empty: none is named

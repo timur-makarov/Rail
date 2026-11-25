@@ -46,8 +46,9 @@ order: a rebase onto the base branch, ticket lint, open assumptions, scope, stru
 fields of a migration ticket (`reversibility` and `rollback`), size, the architecture map (the `## Areas`
 table in `ARCHITECTURE.md`), the project's own `verify` command (tests, lint, scans), and each `Check:` line. A failure sends the ticket back with the output. A failure counts as stuck only when it
 repeats: when a step fails the same way twice in a row, a second opinion (`rail consult`) advises once, and
-after one more failure the ticket waits for a person. Five failures at one step wait for a person whatever
-they were.
+after one more failure the ticket is stuck. Five failures at one step are stuck whatever they were. A stuck AUTO
+ticket is dropped with a record (nothing merged, so nothing needs undoing), and its issue says why; label the issue
+again to retry. A stuck PERSON ticket waits for a person.
 
 **A fresh agent reviews every change, and the author can't steer it.** The engine starts the reviewer
 itself, in the ticket's worktree, with a brief built from the ticket and the diff, and binds the result to
