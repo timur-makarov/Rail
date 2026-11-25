@@ -14,7 +14,7 @@ of the two it is on.
 ## Set up, once
 
 1. **Start a cloud session on the repository** and ask Claude to set Rail up from the framework's
-   repository. It runs `rail init`, writes the project's commands, map and `person_paths`, installs what the
+   repository. It runs `rail init`, writes the project's commands, map and `[kinds]`, installs what the
    checks need, and opens one pull request.
 2. **Merge that pull request.**
 3. **Make three settings on GitHub.** A cloud session can't change a repository's settings, so these are

@@ -4,7 +4,7 @@ import os
 
 from . import gitx
 from .project import NON_PRODUCT, ticket_path
-from .ticket import TIERS, Ticket, highest, lint
+from .ticket import KINDS, TIERS, Ticket, highest, lint
 from .util import globs_overlap, match_any, minutes_since
 
 OPEN = ("implementing", "reviewing", "in-ci", "merge-ready")  # claimed and not finished
@@ -12,30 +12,50 @@ SHIP_STEPS = ("rebase", "ticket-lint", "assumptions", "scope", "change", "rules"
               "checks")
 
 
+def kind_paths(config):
+    """(kind, globs, key) for each place the config names paths of a kind, in the order of KINDS: `[kinds]`, and the
+    two older keys, `migration_paths` for `data-loss` and `person_paths` for `controls`."""
+    found = []
+    for kind in KINDS:
+        if config["kinds"].get(kind):
+            found.append((kind, config["kinds"][kind], "kinds"))
+        if kind == "data-loss":
+            found.append((kind, config["migration_paths"], "migration_paths"))
+        if kind == "controls":
+            found.append((kind, config["person_paths"], "person_paths"))
+    return found
+
+
 def floor(project, scope):
-    """The tier the person and migration paths set for a scope, and why. Matched at add."""
-    cfg = project.config
+    """The tier the paths of a scope set, and each kind they reach as (kind, path, key): the path is a tracked file
+    both match, or else the scope glob. Matched at add and amend."""
     if not hasattr(project, "_tracked"):
         listing = gitx.git(["ls-tree", "-r", "--name-only", project.base_ref], project.root, check=False)
         project._tracked = listing.stdout.splitlines()
 
-    def hits(globs):
-        if any(globs_overlap(s, g) for s in scope for g in globs):
-            return True
-        return any(match_any(scope, f) and match_any(globs, f) for f in project._tracked)
+    inside = [f for f in project._tracked if match_any(scope, f)]
 
-    for key in ("migration_paths", "person_paths"):
-        if hits(cfg[key]):
-            return "PERSON", key
-    return "AUTO", None
+    def hit(globs):
+        path = next((f for f in inside if match_any(globs, f)), None)
+        return path or next((s for s in scope for g in globs if globs_overlap(s, g)), None)
+
+    found = [(kind, path, key) for kind, globs, key in kind_paths(project.config) if (path := hit(globs))]
+    return ("PERSON" if found else "AUTO"), found
 
 
 def raised_tier(project, files):
-    """The tier the changed files need, and why. Used at ship."""
-    for key in ("migration_paths", "person_paths"):
-        if any(match_any(project.config[key], f) for f in files):
-            return "PERSON", key
-    return "AUTO", None
+    """The tier the changed files need, and each kind they hold as (kind, [files], key). Used at ship."""
+    found = []
+    for kind, globs, key in kind_paths(project.config):
+        hits = [f for f in files if match_any(globs, f)]
+        if hits:
+            found.append((kind, hits, key))
+    return ("PERSON" if found else "AUTO"), found
+
+
+def ticket_kinds(project, ticket):
+    """The kinds a ticket holds as filed: those its person_reason names, in order, and those its scope's paths reach."""
+    return list(dict.fromkeys(ticket.kinds + [k for k, _, _ in floor(project, ticket.scope)[1]]))
 
 
 class Facts:

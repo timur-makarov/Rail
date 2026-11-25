@@ -8,9 +8,12 @@ import tomllib
 
 # AUTO: the engine accepts the contract and merges. PERSON: a person approves the contract and merges.
 TIERS = ("AUTO", "PERSON")
+# What a revert doesn't undo (rail docs kinds). A ticket is PERSON when its change does something of one of these kinds.
+KINDS = ("data-loss", "data-shape", "data-exposure", "external-effect", "access", "runs-with-secrets", "controls",
+         "infrastructure", "money", "licence", "public-release")
 FIELDS = {
     "id": str, "title": str, "tier": str, "scope_paths": list, "after": list,
-    "caused_by": str, "external_id": str, "reversibility": str, "rollback": str,
+    "caused_by": str, "external_id": str, "reversibility": str, "rollback": str, "person_reason": str,
 }
 # The `## Grilling` record a bot or a session writes when it questioned the person who asked for the ticket.
 TOPICS = ("scope", "done", "behaviour", "tier", "out-of-scope", "other")
@@ -78,6 +81,21 @@ class Ticket:
     @property
     def scope(self):
         return [p for p in self.get("scope_paths", []) if isinstance(p, str)]
+
+    def reason_parts(self):
+        """Each part of `person_reason` ("kind id: where", parts separated by "; ") as (kind or None, the part)."""
+        reason = self.get("person_reason", "")
+        parts = [p.strip() for p in reason.split(";")] if isinstance(reason, str) else []
+        kinds = [p.partition(":")[0].strip() if ":" in p else "" for p in parts]
+        return [(k if k in KINDS else None, p) for k, p in zip(kinds, parts) if p]
+
+    @property
+    def kinds(self):
+        """The kinds `person_reason` names, in the order written, each once; [] when a part names none."""
+        parts = self.reason_parts()
+        if not parts or not all(k for k, _ in parts):
+            return []
+        return list(dict.fromkeys(k for k, _ in parts))
 
     @property
     def after(self):
@@ -189,6 +207,15 @@ def lint(ticket, expect_id=None):
         errors.append("title is empty")
     if ticket.tier not in TIERS:
         errors.append(f"tier must be one of {', '.join(TIERS)}")
+    reason = ticket.get("person_reason", "")
+    if isinstance(reason, str) and (reason.strip() or ticket.tier == "PERSON") and not ticket.kinds:
+        bad = next((part for kind, part in ticket.reason_parts() if not kind), reason)
+        errors.append("a PERSON ticket needs person_reason: the id of what in the change can't be undone (rail docs"
+                      " kinds), a colon, and where, such as person_reason = \"access: src/auth/session.py\"."
+                      " Separate several with \"; \". A change with none of those kinds is AUTO"
+                      if not reason.strip() else
+                      f"person_reason must start with a kind's id and a colon, and so must each part after a \"; \""
+                      f" ({', '.join(KINDS)}); got '{bad}'")
     scope = ticket.get("scope_paths", [])
     if not scope or not all(isinstance(p, str) and p.strip() for p in scope):
         errors.append("scope_paths must list at least one path glob")

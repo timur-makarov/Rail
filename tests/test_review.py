@@ -495,7 +495,7 @@ class Shape(RailTest):
         failed = p.rail("advance", "1", expect=3)
         self.assertIn("is a new file outside db/migrations/**", failed["action"]["brief"])
 
-    def test_over_the_size_cap_an_auto_ticket_becomes_person_and_lockfiles_do_not_count(self):
+    def test_over_the_size_cap_an_auto_ticket_stays_auto_and_lockfiles_do_not_count(self):
         p = self.fixture(config=CONFIG + "\n[size]\ncap = 10\n")
         p.add(ticket())
         p.rail("next")
@@ -509,11 +509,13 @@ class Shape(RailTest):
         self.assertIn("size", brief)
         p.write("src/more.py", "".join(f"x{i} = {i}\n" for i in range(12)), base=p.worktree("1"))
         self.assertEqual(p.rail("advance", "1")["reason"]["code"], "SPLIT")  # offered a split first
+        p.queue_reviews(clean())
         shipped = p.rail("advance", "1")
-        self.assertEqual((shipped["tier"], shipped["reason"]["code"]), ("PERSON", "MERGE_BY_PERSON"))  # too much to merge unread
-        raised = events(p, "1-fix-add", "tier_raised")[0]
-        self.assertEqual((raised["reason"], raised["to"], raised["detail"]),
-                         ("size", "PERSON", "14 changed lines, over the cap of 10"))
+        # A large change is reverted like a small one: it stays AUTO, records its size and goes on to review.
+        self.assertEqual((shipped["state"], shipped["tier"]), ("merge-ready", "AUTO"))
+        self.assertEqual(events(p, "1-fix-add", "tier_raised"), [])
+        self.assertEqual(events(p, "1-fix-add", "shipped")[-1]["size"], 14)
+        self.assertEqual(len(review_steps(shipped)), 1)
         size = [s for s in shipped["steps"] if s["step"] == "size"][0]
         self.assertEqual(size["detail"], "size 14/10")
 
@@ -535,14 +537,14 @@ class Split(RailTest):
         p.write("src/more.py", self.BIG, base=p.worktree("1"))
         return p
 
-    def test_over_the_cap_an_auto_ticket_is_offered_a_split_once_then_becomes_person(self):
+    def test_over_the_cap_an_auto_ticket_is_offered_a_split_once_then_stays_auto(self):
         p = self.over_the_cap()
         offered = p.rail("advance", "1")
         self.assertEqual((offered["state"], offered["owner"], offered["tier"], offered["reason"]["code"]),
                          ("implementing", "agent", "AUTO", "SPLIT"))
         brief = offered["action"]["brief"]
         for text in ("This change is 14 lines, over [size] cap of 10.", "git branch split/1-rest", "rail amend 1",
-                     'after = ["1"]', "split from ticket 1", "the ticket becomes PERSON and a person merges it"):
+                     'after = ["1"]', "split from ticket 1", "the ticket stays AUTO and goes on to review as it is"):
             self.assertIn(text, brief)
         # Not a failure: no step failed, so no attempt is spent and the model ladder stays at its first rung.
         self.assertEqual([s["step"] for s in offered["steps"] if s.get("result") == "fail"], [])
@@ -552,26 +554,27 @@ class Split(RailTest):
         split = events(p, "1-fix-add", "split_offered")
         self.assertEqual([(e["size"], e["cap"]) for e in split], [(14, 10)])
         self.assertEqual(p.rail("next")["reason"]["code"], "SPLIT")
-        # The agent can't split it: advance as it is.
+        # The agent can't split it: advance as it is. It stays AUTO and the reviewer reads it.
+        p.queue_reviews(clean())
         shipped = p.rail("advance", "1")
-        self.assertEqual((shipped["state"], shipped["tier"], shipped["reason"]["code"]),
-                         ("merge-ready", "PERSON", "MERGE_BY_PERSON"))
-        self.assertEqual([e["reason"] for e in events(p, "1-fix-add", "tier_raised")], ["size"])
+        self.assertEqual((shipped["state"], shipped["tier"]), ("merge-ready", "AUTO"))
+        self.assertEqual(events(p, "1-fix-add", "tier_raised"), [])
         self.assertEqual(len(events(p, "1-fix-add", "split_offered")), 1)
-        # CI agrees with the ship: the patch shipped as PERSON, and CI neither offers a split nor fails on the size.
+        # CI agrees with the ship: the patch shipped as AUTO, and CI neither offers a split nor fails on the size.
         ci = os.path.join(self.tmp, "ci")
         subprocess.run(["git", "clone", "--quiet", p.root, ci], check=True)
         subprocess.run(["git", "checkout", "--quiet", "--detach", p.git("rev-parse", "1-fix-add").strip()], cwd=ci, check=True)
         result = subprocess.run([os.path.join(ci, ".rail", "bin", "rail"), "ci", "--json"], cwd=ci, capture_output=True,
                                 text=True, env=dict(os.environ, RAIL_BRANCH="1-fix-add"))
-        self.assertEqual((result.returncode, json.loads(result.stdout)["tier"]), (0, "PERSON"), result.stdout)
+        self.assertEqual((result.returncode, json.loads(result.stdout)["tier"]), (0, "AUTO"), result.stdout)
 
     def test_the_offer_is_made_once_even_for_a_changed_patch(self):
         p = self.over_the_cap()
         self.assertEqual(p.rail("advance", "1")["reason"]["code"], "SPLIT")
         p.write("src/more.py", self.BIG + "y = 1\n", base=p.worktree("1"))
+        p.queue_reviews(clean())
         shipped = p.rail("advance", "1")
-        self.assertEqual((shipped["tier"], shipped["reason"]["code"]), ("PERSON", "MERGE_BY_PERSON"))
+        self.assertEqual((shipped["state"], shipped["tier"]), ("merge-ready", "AUTO"))
         self.assertEqual(len(events(p, "1-fix-add", "split_offered")), 1)
 
     def test_a_split_under_the_cap_ships_auto_with_a_narrowed_contract(self):
@@ -597,8 +600,7 @@ class Split(RailTest):
         self.assertEqual(p.rail("advance", "1")["state"], "merged")
         stats = p.rail("stats")
         self.assertEqual(stats["stats"]["split"], {"offered": 1, "auto": 1, "person": 0})
-        self.assertIn("Offered a split over [size] cap: 1. Shipped AUTO afterwards: 1; became PERSON for size: 0.",
-                      stats["text"])
+        self.assertIn("Offered a split over [size] cap: 1. Shipped AUTO afterwards: 1.\n", stats["text"])
 
     def test_a_person_path_over_the_cap_is_raised_at_once_with_no_offer(self):
         p = self.over_the_cap(config='person_paths = ["**/*.sql"]\n' + CONFIG)

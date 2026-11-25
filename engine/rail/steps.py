@@ -232,10 +232,10 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
                                        for rule, path, what in broken)):
         return _stop(run, "rules")
 
-    needed, reason = raised_tier(project, changed)
+    needed, kinds = raised_tier(project, changed)
     if rank(needed) > rank(tier):
-        hits = [p for p in changed if match_any(project.config[reason], p)]
-        run.events.append(event(nn, "tier_raised", **{"from": tier, "to": needed, "reason": reason,
+        kind, hits, key = kinds[0]
+        run.events.append(event(nn, "tier_raised", **{"from": tier, "to": needed, "reason": key, "kind": kind,
                                                      "detail": ", ".join(hits[:5])}))
         tier = needed
 
@@ -250,17 +250,12 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
     count, _ = rules.size(project, ref, cwd)
     cap = project.config["size"]["cap"] if tier == "AUTO" else None  # a PERSON change has no cap: a person reads it
     run.record("size", True, patch_id, f"size {count}/{cap}" if cap else f"size {count}")
-    sized = rules.size_tier(project, tier, count)
     run.size = count
-    if rank(sized) > rank(tier) and offer:
-        # Once per ticket, before a person has to merge it: the agent may split the change. No step failed, so it
-        # spends no attempt; an advance with the change as it is raises the tier below.
+    if cap is not None and count > cap and offer:
+        # Once per ticket: the agent may split the change, because a reviewer checks a small change better. No step
+        # failed, so it spends no attempt. Size raises no tier: a large change is reverted like a small one.
         run.events.append(event(nn, "split_offered", patch_id=patch_id, size=count, cap=cap))
         return _stop(run, "size")
-    if rank(sized) > rank(tier):
-        run.events.append(event(nn, "tier_raised", **{"from": tier, "to": sized, "reason": "size",
-                                                     "detail": f"{count} changed lines, over the cap of {cap}"}))
-        tier = sized
 
     if gitx.read_blobs([f"{ref}:ARCHITECTURE.md"], project.root).get(f"{ref}:ARCHITECTURE.md") is None:
         run.not_run("doc-lint")

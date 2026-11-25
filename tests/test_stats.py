@@ -109,21 +109,19 @@ class Stats(RailTest):
         self.assertIn("--since takes a date like 2026-01-31, not 'soon'", failed["reason"]["message"])
 
     def test_a_ticket_that_became_person_at_ship_is_counted_under_person_with_the_reason(self):
-        p = self.fixture(config=CONFIG + "\n[size]\ncap = 10\n")
+        p = self.fixture(config='person_paths = ["**/*.sql"]\n' + CONFIG)
         p.add(ticket())
         p.rail("next")
         p.fix_calc("1")
-        p.write("src/more.py", "".join(f"x{i} = {i}\n" for i in range(12)), base=p.worktree("1"))
+        p.write("src/report.sql", "select 1;\n", base=p.worktree("1"))
         p.queue_reviews(clean(), clean())
-        self.assertEqual(p.rail("advance", "1")["reason"]["code"], "SPLIT")
         self.assertEqual(p.rail("advance", "1")["reason"]["code"], "MERGE_BY_PERSON")
         p.rail("accept", "1")
         self.assertEqual(p.rail("advance", "1")["state"], "merged")
         stats = p.rail("stats")
-        self.assertEqual(stats["stats"]["raised"], {"size": 1})
-        self.assertEqual(stats["stats"]["split"], {"offered": 1, "auto": 0, "person": 1})
+        self.assertEqual(stats["stats"]["raised"], {"person_paths": 1})
         self.assertEqual((stats["stats"]["tiers"]["AUTO"]["merged"], stats["stats"]["tiers"]["PERSON"]["merged"]), (0, 1))
-        self.assertIn("Became PERSON at ship or review: 1 (size 1).", stats["text"])
+        self.assertIn("Became PERSON at ship or review: 1 (person_paths 1).", stats["text"])
         self.assertIn("No step failed.", stats["text"])
 
     def test_with_nothing_merged_only_where_the_tickets_came_from_is_counted(self):

@@ -15,7 +15,7 @@ and `rail doctor` reports when they are missing.
 `gh run watch`.
 A matching allow rule is decided before any prompt and before auto mode's classifier, so the loop isn't
 stopped by either. `rail advance` is one of them, and it merges an AUTO ticket with no person: that is the
-policy you set with `person_paths` in `.rail/config.toml`. The person's verbs have no allow rule: `rail accept`, `rail drop` and
+policy you set with `[kinds]` and `person_paths` in `.rail/config.toml`. The person's verbs have no allow rule: `rail accept`, `rail drop` and
 `rail init` are judged like any other command, and `rail answer ... --owner` always asks, in every mode.
 
 Auto mode's own rule lists (the `autoMode` setting) can't be set here: Claude Code reads them from user or

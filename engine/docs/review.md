@@ -91,8 +91,9 @@ run and shown in the pull request's Risk section and in the wait for a person. A
 
 Don't rely on it for a path you already know a person must see. In test runs the reviewer asked for a
 person on about half of the changes that added a project's first cache or first permission check, and on
-every change that added a dependency. Put such paths (the auth code, the dependency manifests) in
-`person_paths`: that rule is a path match and always fires.
+every change that added a dependency. Put such paths in `[kinds]` under their kind (the auth code under
+`access`, the dependency manifests under `licence`; `rail docs kinds`): that rule is a path match and always
+fires.
 
 ## What the reviewer costs and finds
 

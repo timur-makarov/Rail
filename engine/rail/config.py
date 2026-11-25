@@ -5,6 +5,7 @@ import difflib
 import os
 import tomllib
 
+from .ticket import KINDS
 from .util import RailError
 
 REVIEW_COMMAND = (
@@ -24,8 +25,10 @@ WORKER_COMMAND = (
 
 DEFAULTS = {
     "base_branch": "main",
-    "person_paths": [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".claude/**", ".github/workflows/**"],
-    "migration_paths": ["**/migrations/**"],
+    "person_paths": [".rail/bin/**", ".rail/engine/**", ".rail/config.toml"],  # the kind `controls`
+    "migration_paths": ["**/migrations/**"],  # the kind `data-loss`
+    # Paths that hold each kind of change a revert doesn't undo (rail docs kinds).
+    "kinds": {kind: [".github/workflows/**", ".claude/**"] if kind == "runs-with-secrets" else [] for kind in KINDS},
     "commands": {"setup": "", "verify": "", "provision": "", "timeout_secs": 900, "setup_timeout_secs": 0,
                  "verify_timeout_secs": 0, "base_checks": True},
     "size": {"cap": 600, "exclude": []},

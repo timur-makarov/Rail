@@ -96,8 +96,3 @@ def size(project, ref=None, cwd=None):
             continue
         total += added_n + deleted_n
     return total, excluded
-
-
-def size_tier(project, tier, count):
-    """The tier a count needs: an AUTO change over [size] cap becomes PERSON."""
-    return "PERSON" if tier == "AUTO" and count > project.config["size"]["cap"] else tier

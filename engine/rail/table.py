@@ -62,13 +62,13 @@ def _size(f):
     line = f"size {count}/{cap}"
     if count >= 0.8 * cap:
         line += (": past 80% of the cap. Split what is left into a new ticket (rail add); over the cap, ship offers"
-                 " a split once, then the ticket becomes PERSON, and a person has to merge it")
+                 " a split once, because a reviewer checks a small change better")
     return line
 
 
 def _migration(f):
     from .state import floor
-    if floor(f.project, f.ticket.scope)[1] != "migration_paths":
+    if not any(key == "migration_paths" for _, _, key in floor(f.project, f.ticket.scope)[1]):
         return ""
     return ("Migrations: expand, then contract. Write the down step and test the rollback. Set reversibility (such as"
             " expand-contract) and rollback in the ticket's front matter.")
@@ -117,8 +117,7 @@ def _split(f):
     e, nn = f.split, f.id
     return "\n".join([
         f"This change is {e.get('size')} lines, over [size] cap of {e.get('cap')}. A reviewer checks a change of that"
-        " size badly, so an AUTO ticket over the cap goes to a person. Before that, see whether it splits into tickets"
-        " that each stand alone.", "",
+        " size badly, so see whether it splits into tickets that each stand alone.", "",
         "It splits when you can name a first part that is under the cap, meets at least one Check: of the Done Contract"
         " on its own, and leaves the code working. If you can:",
         f"1. Keep the first part on this ticket's branch, {f.t.branch}. Move the rest to a branch of its own, so"
@@ -133,7 +132,7 @@ def _split(f):
         f" that holds its code, split/{nn}-rest.",
         f"4. Run rail advance {nn}.", "",
         f"If it does not split (the parts would not work alone, or each Check: needs all of it), change nothing and run"
-        f" rail advance {nn}: the ticket becomes PERSON and a person merges it.",
+        f" rail advance {nn}: the ticket stays AUTO and goes on to review as it is.",
     ]) + _note(f)
 
 

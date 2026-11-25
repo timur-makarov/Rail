@@ -1,7 +1,9 @@
 +++
 title = "Say what changes, as an imperative"
 tier = "AUTO"                      # AUTO: the reviewer checks it, the engine merges. PERSON: a person approves this
-                                   # contract and merges. Paths and size can raise AUTO to PERSON; nothing lowers it
+                                   # contract and merges. A kind's paths can raise AUTO to PERSON; nothing lowers it
+person_reason = ""                 # on PERSON: what a revert doesn't undo, as a kind's id and where (rail docs kinds),
+                                   # such as "access: src/auth/session.py". Separate several with "; "
 scope_paths = ["src/feature/**"]   # globs; a change outside them fails at ship
 after = []                         # ticket IDs that must merge first
 caused_by = ""                     # on a fix ticket: the ticket that caused the defect

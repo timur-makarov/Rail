@@ -224,9 +224,11 @@ class Amend(RailTest):
         self.assertEqual((amended["tier"], amended["state"], amended["owner"]), ("PERSON", "implementing", "agent"))
         record = [e for e in events(p) if e["event"] == "amended"][-1]
         self.assertEqual((record["changed"], record["added_paths"], record["needs_approval"]),
-                         (["scope"], [".github/workflows/**"], False))
-        self.assertEqual((events(p)[-1]["event"], events(p)[-1]["tier"]), ("accepted", "PERSON"))
+                         (["scope", "tier"], [".github/workflows/**"], False))
+        self.assertEqual((events(p)[-1]["event"], events(p)[-1]["tier"], events(p)[-1]["kinds"]),
+                         ("accepted", "PERSON", ["runs-with-secrets"]))
         self.assertIn('tier = "PERSON"', read(path))
+        self.assertIn('person_reason = "runs-with-secrets: .github/workflows/rail.yml"', read(path))
         self.assertIn('tier = "PERSON"', p.git("show", "1-fix-add:.rail/tickets/1.md"))
 
     def test_an_amend_keeps_its_reason_and_shows_it_to_the_person_who_approves(self):

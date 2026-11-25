@@ -3,10 +3,17 @@
 
 base_branch = "main"                      # reader: claim, ship, CI, merge
 # A ticket is AUTO or PERSON. AUTO: the engine accepts its contract, the reviewer checks the change, and the engine
-# merges it. PERSON: a person approves the contract and merges; a security seat reviews as well.
-# reader: add (matched against scope_paths) and ship (changed files). A ticket that touches one of these is PERSON
-person_paths = [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".claude/**", ".github/workflows/**"]
-migration_paths = ["**/migrations/**"]    # PERSON as well; tickets touching them need reversibility and rollback
+# merges it. PERSON, only for a change a revert doesn't undo (rail docs kinds): a person approves the contract and
+# merges; a security seat reviews as well.
+# reader: add and amend (matched against scope_paths) and ship (changed files). A ticket that touches one is PERSON
+person_paths = [".rail/bin/**", ".rail/engine/**", ".rail/config.toml"]   # the kind controls: Rail's own gates
+migration_paths = ["**/migrations/**"]    # the kind data-loss; tickets touching them need reversibility and rollback
+
+[kinds]                                   # reader: add, amend and ship. A ticket whose scope or changed files match is
+                                          # PERSON. Each key is a kind's id (rail docs kinds), each value its paths here
+runs-with-secrets = [".github/workflows/**", ".claude/**"]
+# access = ["src/auth/**"]
+# data-shape = ["db/schema/**"]
 
 [commands]
 setup = ""                                # reader: claim (after each worktree is made) and CI
@@ -25,7 +32,7 @@ base_checks = true                        # reader: next, at a ticket's first cl
                                           # untouched base and records red or green; never a gate
 
 [size]                                    # reader: ship and CI; changed lines, generated files and lockfiles excluded
-cap = 600                                 # an AUTO change over this is offered a split once, then becomes PERSON
+cap = 600                                 # an AUTO change over this is offered a split once; size raises no tier
 exclude = []
 
 [tests]                                   # reader: nothing yet. Globs of the files that hold tests and their runner's

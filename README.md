@@ -67,10 +67,12 @@ author's argument. The only changes that skip the reviewer are those to paths yo
 In a project with no remote there is no CI and no pull request: the engine merges both tiers, and a PERSON
 ticket waits for a person's `rail accept NN` first.
 
-A ticket is PERSON when its author says so, when it touches `person_paths` (the paths you name, such as
-auth, payments and infrastructure, plus Rail's own files and the CI workflows) or a migration, or when the
-change grows past `[size] cap` (600 changed lines) and the agent doesn't split it when the first ship offers a
-split, or when the reviewer asks for one. The engine raises a
+A person is asked only about what a revert doesn't undo: deleted data, a data shape, credentials, code that runs
+with secrets, Rail's own gates, money and the rest of the kinds in `rail docs kinds`. A ticket is PERSON when its
+author names such a kind in `person_reason`, when it touches the paths `[kinds]` lists for one (the paths you
+name, such as auth, schemas and infrastructure, plus the CI workflows and agent settings), `person_paths` (Rail's
+own files) or a migration, or when the reviewer asks for one. Size raises no tier: a change past `[size] cap`
+(600 changed lines) is offered a split once, because a reviewer checks a small change better. The engine raises a
 tier and never lowers one.
 
 **GitHub is the wall.** Every ticket is a pull request. The `rail` workflow runs `rail ci`, which repeats
@@ -114,7 +116,7 @@ A cloud session is Rail's standard place to work. Open one on your repository an
 
 > Set this repository up for Rail, from https://github.com/timur-makarov/Rail
 
-Claude clones the framework, runs `rail init`, writes the project's checks, map and `person_paths`, installs what
+Claude clones the framework, runs `rail init`, writes the project's checks, map and `[kinds]`, installs what
 the checks need, and opens one pull request. Then three things are yours:
 
 1. Merge the pull request.
@@ -180,7 +182,7 @@ cd /path/to/project && rail init
 adds a `## Rail` section to `AGENTS.md`, merges hooks and guard rules into `.claude/settings.json`, and adds
 the `rail` workflow. It never overwrites a file of yours. Then open Claude Code in the project and ask it to
 run `rail next`: the first answer is the init task, which proposes the project's checks, its map and its
-`person_paths` for you to confirm. On your own machine Rail installs nothing: you install the tools the checks
+`[kinds]` for you to confirm. On your own machine Rail installs nothing: you install the tools the checks
 need, and the guard asks before `sudo` and other commands that could hurt your machine.
 
 ## Use it
