@@ -31,7 +31,9 @@ next sweep starts. The first sweep starts where Rail was set up.
   the review's findings, the parked findings and the proposed checks by kind. The agent opens a ticket for
   each finding that names something wrong (a finding about style gets none), and one ticket
   "make it a check: ..." for each kind of proposed check, so a mistake that could happen again ends as a
-  test, a rule or a lint.
+  test, a rule or a lint. Filing tickets is writing contracts, so the answer (`SWEEP_TICKETS`) names
+  `[worker] contract`'s model and effort, and `rail work NN` runs it like any ticket's work: a script that
+  drives Rail with `rail next`, `rail work` and `rail advance` goes through a sweep with no step of its own.
 
 When the sweep finds nothing (no unreviewed change, no parked finding, no proposed check, and doc-lint is
 clean), the agent gets no task: `rail next` answers `SWEEP_EMPTY` with `rail advance NN`, and the sweep's

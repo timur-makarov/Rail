@@ -50,9 +50,9 @@ READERS = {
     "worker.ladder": "next, advance and work: the model and effort an agent_task names for an AUTO ticket's work, as"
                      " model:effort, one rung per failed attempt at the step the ticket is failing. Empty names none",
     "worker.person_ladder": "next, advance and work: the same ladder for a PERSON ticket, which starts higher",
-    "worker.contract": "next and work: the model:effort the task that writes a ticket's contract (TICKET_LINT) names."
-                       " An AUTO contract is accepted with nobody looking, so it gets a stronger model. Empty: the"
-                       " ladder's",
+    "worker.contract": "next and work: the model:effort the task that writes a ticket's contract (TICKET_LINT), and the"
+                       " task that files a sweep's tickets (SWEEP_TICKETS), name. An AUTO contract is accepted with"
+                       " nobody looking, so it gets a stronger model. Empty: the ladder's",
     "worker.command": "work: the worker, run in the answer's cwd with the brief on stdin and RAIL_TICKET, RAIL_MODEL,"
                       " RAIL_EFFORT, RAIL_SESSION (a session to resume, or empty), ANTHROPIC_MODEL and RAIL_WORKER=1"
                       " set. The engine reads total_cost_usd, session_id, num_turns and subtype from its last JSON"

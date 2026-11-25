@@ -34,10 +34,11 @@ def answer(ticket=None, state=None, owner="none", action=None, code="NO_WORK", s
 
 def worker(f, action, code=None):
     """The model and effort an agent_task for a ticket's work names: the tier's ladder, one rung per failed attempt at
-    the step the ticket is failing, capped at the last rung. Writing a contract (TICKET_LINT) names worker.contract
-    when it is set. `rail work` starts [worker] command on them; a session a person drives may ignore them."""
+    the step the ticket is failing, capped at the last rung. Writing a contract (TICKET_LINT), and filing a sweep's
+    tickets (SWEEP_TICKETS), name worker.contract when it is set. `rail work` starts [worker] command on them; a
+    session a person drives may ignore them."""
     ladder = f.project.config["worker"]["person_ladder" if f.tier == "PERSON" else "ladder"]
-    if code == "TICKET_LINT" and f.project.config["worker"]["contract"]:
+    if code in ("TICKET_LINT", "SWEEP_TICKETS") and f.project.config["worker"]["contract"]:
         ladder = [f.project.config["worker"]["contract"]]
     if action.get("kind") == "agent_task" and ladder:
         model, _, effort = ladder[min(f.attempts.get(f.failing, 0), len(ladder) - 1)].rpartition(":")
