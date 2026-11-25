@@ -1,0 +1,12 @@
+description = "A deterministic fake agent for the suite and check-arm: it follows the plan the bench writes into the run's folder"
+
+[worker]
+command = "python3 {bench}/fake_agent.py"
+env = { BENCH_FAKE_PLAN = "{run}/fake-plan.json" }
+
+[review]
+command = "python3 {bench}/fake_agent.py --review"
+env = { BENCH_FAKE_PLAN = "{run}/fake-plan.json" }
+
+[consult]
+command = "python3 {bench}/fake_agent.py --consult"

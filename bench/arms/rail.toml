@@ -1,0 +1,5 @@
+description = "Rail as the pinned commit has it: its ladder, reviewer and consult; the worker never resumes a session"
+
+[worker]
+# Rail's seed command, with the bench's budget flag and tool list, and without --resume.
+command = '''claude -p --output-format stream-json --verbose ${RAIL_MODEL:+--model "$RAIL_MODEL"} ${RAIL_EFFORT:+--effort "$RAIL_EFFORT"} --tools {tools} --permission-mode auto --permission-prompts none --max-turns 300 --max-budget-usd {budget}'''

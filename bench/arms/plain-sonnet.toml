@@ -1,0 +1,7 @@
+description = "Plain Claude Code, claude-sonnet-5-5 at medium effort"
+plain = true
+
+[worker]
+command = '''claude -p --output-format stream-json --verbose --model {model} --effort {effort} --tools {tools} --permission-mode auto --permission-prompts none --max-turns 300 --max-budget-usd {budget}'''
+model = "claude-sonnet-5-5"
+effort = "medium"
