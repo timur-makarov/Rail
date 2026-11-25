@@ -26,6 +26,10 @@ The engine passes it to the command as `ANTHROPIC_MODEL`, which the `claude` CLI
 for any other command. Empty leaves the command's own default. The model that answered is stored with each
 run and shown in the pull request's Evidence table. `[consult] model` does the same for consult.
 
+The seed sets the reviewer to `claude-opus-5-5` and consult to `claude-fable-5-2`, both at high effort. The
+effort is the `--effort high` flag in each command, since the engine passes a model and no effort. The refuter,
+the security seat and the sweep's review run through `[review] command`, so they get the same model and effort.
+
 The brief holds the ticket, the diff, the matching `## Areas` rows, the project's own part of `AGENTS.md`
 (never the `## Rail` section), the project's `REVIEW.md` files, what to look for, and the do-not-report
 list. On an AUTO ticket, what to look for includes a security checklist. On a re-review the brief also
