@@ -14,7 +14,8 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
 - `action.model` and `action.effort` name the model and effort for an `agent_task` that is a ticket's work,
   from `[worker] ladder` (`person_ladder` for a PERSON ticket). The rung is the number of failed attempts at
   the step the ticket is failing, 0 when there are none, capped at the last rung; a person's act starts it
-  again at 0. Writing a ticket's contract (`TICKET_LINT`) names `[worker] contract` instead, when it is set.
+  again at 0. Writing a ticket's contract (`TICKET_LINT`), and filing a sweep's tickets (`SWEEP_TICKETS`), name
+  `[worker] contract` instead, when it is set.
   With an empty ladder neither is there. A session a person is driving does the brief itself and
   may ignore them. An unattended runner, a cloud session a scheduled task starts, starts one subagent on
   that model and effort, gives it the brief word for word and the `cwd`, and runs `rail advance` itself when
@@ -108,8 +109,8 @@ lost.
 
 `rail work NN` runs one attempt at a ticket's agent work, the way `advance` runs the reviewer. It builds the
 brief `next` would give for the ticket, and runs only when that is a ticket's work: `TICKET_LINT`,
-`VERIFY_ASSUMPTIONS`, `IMPLEMENT`, `STEP_FAILED`, `RED_CHECK`, `ANSWER_FINDINGS`, `CONFLICT`, `REBASING` or
-`SPLIT`. For any other answer, such as `SETUP_FAILED`, it runs nothing and returns that answer, and so it does
+`VERIFY_ASSUMPTIONS`, `IMPLEMENT`, `STEP_FAILED`, `RED_CHECK`, `ANSWER_FINDINGS`, `CONFLICT`, `REBASING`,
+`SPLIT`, or a sweep's `SWEEP_TICKETS` (`rail docs sweep`). For any other answer, such as `SETUP_FAILED`, it runs nothing and returns that answer, and so it does
 when `[worker] command` is empty.
 
 It runs `[worker] command` in the answer's `cwd` (the ticket's worktree, or the project's root for a

@@ -15,8 +15,8 @@ WORK = CONFIG + f'\n[worker]\ncommand = "python3 {FAKE_WORKER}"\n'
 FIXED = "def add(a, b):\n    return a + b\n"
 
 
-def events(fx, ref="1-fix-add", name=None):
-    text = fx.git("show", f"{ref}:.rail/journal/1-events.jsonl")
+def events(fx, ref="1-fix-add", name=None, nn="1"):
+    text = fx.git("show", f"{ref}:.rail/journal/{nn}-events.jsonl")
     found = [json.loads(line) for line in text.splitlines()]
     return [e for e in found if e["event"] == name] if name else found
 
@@ -308,3 +308,45 @@ class Work(RailTest):
         self.assertEqual((worked[0]["code"], worked[0]["counts"]["not_found"], worked[0]["keys"]["not_found"]),
                          ("REBASING", 1, ["make"]))
         self.assertFalse(os.path.exists(a.path(".git", "rail", "cache", "worked", "1")))  # written, so gone
+
+
+class Sweep(RailTest):
+    def test_a_due_sweeps_task_runs_through_rail_work_on_the_contract_model(self):
+        # A script that drives Rail with next, work and advance only, as an unattended runner would.
+        p = self.fixture(config=WORK + "\n[sweep]\nevery = 2\n")
+        parked = {"severity": "parked", "file": "src/calc.py", "claim": "calc has no subtract, and callers negate add."}
+        for nn, title, scope, check, path, text in (
+                ("1", "Fix add", ("src/**",), None, "src/calc.py", FIXED),
+                ("2", "Add a status code", ("api/**",), "grep -q 201 api/handlers.py", "api/handlers.py",
+                 "def handle():\n    return 201\n")):
+            p.add(ticket(title=title, scope=scope, **({"check": check} if check else {})))
+            p.rail("next")
+            p.queue_work({"write": {path: text}})
+            p.rail("work", nn)
+            if nn == "1":
+                p.queue_reviews({"summary": "Read it.", "findings": [parked]})
+            p.rail("advance", nn)
+            self.assertEqual(p.rail("advance", nn)["state"], "merged")
+        offer = p.rail("next")
+        self.assertEqual((offer["reason"]["code"], offer["action"]["command"]), ("SWEEP", "rail sweep"))
+        swept = p.rail(*offer["action"]["command"].split()[1:])
+        self.assertEqual((swept["ticket"], swept["reason"]["code"], swept["action"]["model"], swept["action"]["effort"]),
+                         ("3", "SWEEP_TICKETS", "claude-opus-5-5", "high"))
+        filed = os.path.join(self.tmp, "subtract.md")
+        p.queue_work({"write": {filed: ticket(title="Add subtract", check="grep -q sub src/calc.py")},
+                      "run": [rail_in_worker("add", filed)]})
+        done = p.rail("work", "3")
+        self.assertEqual((done["reason"]["code"], done["action"]["command"]), ("WORKED", "rail advance 3"))
+        ran = p.work_log()[-1]
+        self.assertEqual((ran["cwd"], ran["env"]["RAIL_MODEL"], ran["env"]["RAIL_EFFORT"]),
+                         (p.worktree("3"), "claude-opus-5-5", "high"))
+        self.assertIn("read .rail/journal/3-summary.md", ran["brief"])
+        self.assertEqual(ran["ran"][0]["code"], 0, ran["ran"][0]["output"])  # the worker filed its ticket
+        branch = next(t["branch"] for t in p.rail("status")["tickets"] if t["ticket"] == "3")
+        worked = events(p, ref=branch, name="worked", nn="3")
+        self.assertEqual((worked[0]["code"], worked[0]["model"], worked[0]["effort"]),
+                         ("SWEEP_TICKETS", "claude-opus-5-5", "high"))
+        p.rail("advance", "3")
+        self.assertEqual(p.rail("advance", "3")["state"], "merged")
+        self.assertIn("Sweep: since", p.git("log", "-1", "--format=%b", "main"))
+        self.assertEqual([t["title"] for t in p.rail("status")["tickets"]][-1], "Add subtract")
