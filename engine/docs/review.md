@@ -78,18 +78,19 @@ counts only once a later run doesn't repeat it.
 A PERSON ticket adds a security seat: a second run whose brief asks only about security. Each blocking
 finding it reports goes to a refuter at once. A person merges a PERSON ticket.
 
-**The reviewer may ask for a person.** A review or security run can return `needs_person`: one sentence on
-why a person should see the change before it merges although no finding blocks it, such as a pattern other
-code will copy. On an AUTO ticket the engine writes `tier_raised` with the reason `reviewer`, and the ticket
-is PERSON from then on: the security seat runs next, and a person merges. A later run that doesn't ask
-never lowers it. On a PERSON ticket the sentence is only recorded. Either way the sentence is kept with the
-run and shown in the pull request's Risk section and in the wait for a person. A refuter's is ignored.
+**The reviewer lists what a revert doesn't undo.** A review or security run returns `kinds`: each thing in
+the change of a kind in `rail docs kinds`, as `{kind, file, line, why}`, on every ticket; it is usually
+empty. The engine checks each `kind` against the list, and an unknown id makes the output invalid: the run
+is started once more and counts against no one. On an AUTO ticket a non-empty `kinds` writes `tier_raised`
+with the reason `reviewer` and the kinds, and the ticket is PERSON from then on: the security seat runs
+next, and a person merges. A later run with none never lowers it. On a PERSON ticket the kinds are only
+recorded. Either way they are kept with the run and shown in the pull request's Risk section and in the
+wait for a person. A refuter's are ignored. A change that is large or new but can be reverted is not a
+kind: the reviewer reports its problems as findings.
 
-Don't rely on it for a path you already know a person must see. In test runs the reviewer asked for a
-person on about half of the changes that added a project's first cache or first permission check, and on
-every change that added a dependency. Put such paths in `[kinds]` under their kind (the auth code under
-`access`, the dependency manifests under `licence`; `rail docs kinds`): that rule is a path match and always
-fires.
+Don't rely on it for a path you already know holds a kind. The reviewer reads the diff and can miss one; put
+such paths in `[kinds]` under their kind (the auth code under `access`, the dependency manifests under
+`licence`): that rule is a path match and always fires.
 
 ## What the reviewer costs and finds
 

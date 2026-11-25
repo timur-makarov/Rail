@@ -28,14 +28,12 @@ fixes them all.
 On a re-review, review the whole change again. When an earlier finding still stands,
 report it with its id in `repeats` and keep its severity.
 
-Set `needs_person` when a person should see the change before it merges and no blocking
-finding already stops it: the change adds the first of something other code will copy (a
-new shared module, the first permission check, the first cache), it adds a dependency the
-project did not have, or it changes what users of the product get beyond what the ticket
-says. Say which, in one sentence. This is separate from the findings: a change can
-be correct and still need a person, so don't file it as an advisory finding instead. Leave
-it out for a change that does none of these, and on a PERSON ticket, where a person sees
-the change anyway.
+List in `kinds` each thing in the change that can't be undone, whatever the ticket's
+tier. The kinds are in `rail docs kinds`: data-loss, data-shape, data-exposure,
+external-effect, access, runs-with-secrets, controls, infrastructure, money, licence. For
+each, give the id, the file and line, and one sentence on what the change does. A change
+that is large, new, or risky in a way a revert undoes is not one of these: report its
+problems as findings. An empty list is the usual answer.
 
 Return only JSON matching the schema. `summary` says what you checked and how. An empty
 list is a valid review.

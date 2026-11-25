@@ -33,7 +33,7 @@ stores state. Never edit it by hand: the guard denies it.
 | `shipped` | Every ship step passed for the current patch | `patch_id`, `head`, `tier`, `size` | CI's "not shipped yet" test, and the `reviewing` and `in-ci` states |
 | `split_offered` | The first ship of an AUTO ticket whose change is over `[size] cap`, when no file on a kind's paths raised it. Once per ticket | `patch_id`, `size`, `cap` | The `SPLIT` brief; the next ship goes on as AUTO. No step failed, so it spends no attempt. `rail stats` |
 | `guided` | `next` or `advance` named a `[guides]` page in a brief, the first time for each situation. Not while a rebase is stopped | `situation` (`start`, `stuck`, `findings`, `conflict`, `contract`, `split`), `path` | `start` is named once per ticket. `rail stats` (`rail docs guides`) |
-| `tier_raised` | Ship makes an AUTO ticket PERSON, or a review run asks for a person | `from`, `to`, `reason` (`kinds`, `person_paths`, `migration_paths`, `reviewer`; `size` from an older engine), `kind` (for a path: the kind's id), `detail` (for `reviewer`: the reviewer's sentence; for a path: the files) | The ticket's tier from then on, CI included |
+| `tier_raised` | Ship makes an AUTO ticket PERSON, or a review run asks for a person | `from`, `to`, `reason` (`kinds`, `person_paths`, `migration_paths`, `reviewer`; `size` from an older engine), `kind` (the kind's id; for `reviewer`, its first item's), `kinds` (for `reviewer`: each id it listed), `detail` (for `reviewer`: the first item, as `kind: file:line: why`; from an older engine, its `needs_person` sentence; for a path: the files) | The ticket's tier from then on, CI included |
 | `finding` | A review run reports or repeats a finding; `rail answer`; a refuter or the owner decides one | `id`, `outcome` (`open`, `fixed`, `declined`, `parked`), `by` (`reviewer`, `author`, `refuter`, `owner`, and `engine` when an upheld finding stands on an AUTO ticket), `reason`, `disputed`. The first event for an id also has `severity`, `claim` and `check` | `advance` and CI: no finding may be open. The sweep reads the parked ones and the `check` of fixed ones |
 | `consulted` | Consult ran | `trigger` (`retry_cap`, `request`), `step`, `verdict` (`proceed`, `change`, `stop`), `same_model` | The retry rule below, and the limit of three per ticket |
 | `continued` | A person continued a wait with `rail:go` or `rail accept` | `via` (`label`, `accept`), `note` | A fresh retry budget, and the agent's next brief |
@@ -134,7 +134,7 @@ One file per ticket. The engine appends one entry per run.
 | `head` | The commit the reviewer saw | The person, and the reset after the run |
 | `tier` | The tier at the time | CI: was a `security` run needed |
 | `disputes` | A refuter run only: the finding's id | `advance`: which finding the refuter judged |
-| `needs_person` | A `review` or `security` run that asked for a person: its sentence | The pull request's Risk section and the wait for a person |
+| `kinds` | A `review` or `security` run that listed any: its `kinds` items. A run from an older engine may hold `needs_person`, a sentence, instead | The pull request's Risk section and the wait for a person |
 | `model`, `cost_usd` | From the command's JSON, when it gives them. `model` is the one that did the work | The Evidence table |
 
 **A review is complete for a patch** when all three hold. The `reviewing` state and CI use the same test:
@@ -164,7 +164,7 @@ sweep. The schema is `.rail/engine/review-v1.json`; the default command passes i
 | `findings[].evidence.reproduced` | Added by the engine: true when every non-empty line of `output`, normalised as failure signatures are (numbers, hashes, paths and spacing left out), is in the re-run's output. Nothing is decided from it | `rail stats` |
 | `findings[].evidence.scripts` | Added by the engine: `{path: text}` of each untracked file the command names (at most 3, each cut at 8,000 characters), which the clean-up removes | The author's brief, with the finding |
 | `findings[].repeats` | On a re-review: the id of the earlier finding this one repeats | The engine: the finding keeps its id and is open again |
-| `needs_person` | Optional, rarely given: one sentence on why a person should see the change although no finding blocks it | `advance`: from a `review` or `security` run, an AUTO ticket becomes PERSON. A refuter's or a sweep's is ignored |
+| `kinds` | Optional, usually empty: each thing in the change a revert doesn't undo, as `kind` (an id from `rail docs kinds`; an unknown one makes the output invalid), `file`, `line` and `why` | `advance`: from a `review` or `security` run, an AUTO ticket becomes PERSON; on a PERSON ticket they are only recorded. A refuter's or a sweep's are ignored |
 
 After the schema, the engine checks what only it can: `file` is a tracked path at the reviewed commit and
 `line` is inside it (within two lines, because reviewers are sometimes off by one or two); `repeats` names
