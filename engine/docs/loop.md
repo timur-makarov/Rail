@@ -28,8 +28,9 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   `FINDING_UPHELD`, `STUCK_REVIEW`, `HOLD` or `MERGE_FAILED`. Act on `owner` and `action`; the code is for
   logs and for telling two briefs apart.
 - `guide` names the page `[guides]` gives for the brief's situation, such as the start of a ticket or a
-  failure that repeats; the brief's last line then says to read it (`rail docs guides`). It is a hint, and
-  part of the brief, so a subagent that gets the brief word for word gets the guide too.
+  failure that repeats; the brief then ends with that page's text, or the sections the key names (`rail docs
+  guides`). It is a hint, and part of the brief, so a subagent that gets the brief word for word gets the
+  guide too.
 - `steps` lists what the command ran: `ran` with `pass` or `fail`, `could_not_run` with `fail` (the shell
   couldn't start the command: it isn't on the machine, or isn't executable), `not_run`, or `unavailable`. A
   skipped step never looks like a pass, and a step that couldn't start never looks like a check that ran.

@@ -67,15 +67,16 @@ command = "claude -p --safe-mode --tools Read,Grep,Glob"
 model = "claude-fable-5-2"                # the model consult runs on; empty is the CLI's default
                                           # point it at another vendor's CLI when you have one; claude is labelled same-model
 
-[guides]                                  # reader: next and advance; a page named in the brief when its situation
-                                          # applies. A hint: nothing fails when it is ignored. Delete a line to give
-                                          # no guide (rail docs guides)
-start = ".claude/skills/rail-build/SKILL.md"
+[guides]                                  # reader: next and advance; a page whose text the brief carries when its
+                                          # situation applies, the whole page or each #Heading section named. A
+                                          # hint: nothing fails when it is ignored. Delete a line to give no guide
+                                          # (rail docs guides)
+start = ".rail/engine/guides/build.md"
 stuck = ".claude/skills/rail-debug/SKILL.md"
-findings = ".claude/skills/rail-findings/SKILL.md"
-conflict = ".claude/skills/rail-conflict/SKILL.md"
+findings = ".rail/engine/guides/findings.md"
+conflict = ".rail/engine/guides/conflict.md"
 contract = ".claude/skills/rail-blast-radius/SKILL.md"
-split = ".claude/skills/rail-slice/SKILL.md"
+split = ".claude/skills/rail-slice/SKILL.md#2. Three tests for each draft#When the engine offered the split"
 setup = ".claude/skills/rail-verify/SKILL.md"
 
 [[rules]]                                 # reader: ship and CI; structure rules on added lines (rail docs rules)
@@ -87,5 +88,5 @@ fix = "Fix the cause instead of silencing the check."
 [[rules]]
 id = "shortcut-names-its-ticket"          # a corner cut on purpose is marked SHORTCUT(NN): with the ticket's number
 forbid = ["SHORTCUT:", "SHORTCUT()", "SHORTCUT(NN)", "SHORTCUT(TODO)"]
-allow = [".claude/**"]                    # the guides write the marker's form
+allow = [".claude/**", ".rail/engine/**"] # the guides and the docs write the marker's form
 fix = "Write SHORTCUT(NN): with this ticket's number, the known limit, and what to do when it is reached."

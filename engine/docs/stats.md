@@ -93,8 +93,8 @@ out; read them over the stated number of tickets, not fewer.
 
 ## Guides
 
-Once a brief has named a [guide](guides.md), one line says how many merged tickets each situation was named
-for: `Guides named: start 12, conflict 2.` In JSON it is `guides.situations`.
+Once a brief has carried a [guide](guides.md), one line says how many merged tickets each situation was
+given for: `Guides named: start 12, conflict 2.` In JSON it is `guides.situations`.
 
 ## Grilling
 

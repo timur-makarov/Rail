@@ -83,7 +83,9 @@ class InASession(RailTest):
     def test_rail_init_installs_the_grilling_skill(self):
         p = self.fixture()
         with open(p.path(".claude", "skills", "rail-grill", "SKILL.md")) as f:
-            self.assertIn("rail docs grill", f.read())
+            skill = f.read()
+        self.assertIn("## 1. Read before you ask", skill)  # the page itself, not a pointer to it
+        self.assertNotIn("rail docs grill", skill)
         self.assertIn("Never answer for the person", p.rail("docs", "grill")["text"])
 
     def test_a_grilling_record_that_does_not_add_up_fails_ticket_lint(self):

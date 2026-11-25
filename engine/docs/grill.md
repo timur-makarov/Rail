@@ -12,7 +12,7 @@ You only ask. You don't change code, and you don't start the work.
 Clone the repository, or use the checkout you are in. Read:
 
 - `AGENTS.md`, and `ARCHITECTURE.md` with its `## Areas` table;
-- `.rail/tickets/TEMPLATE.md`, the shape of a ticket (`rail docs tickets` explains each part);
+- `.rail/tickets/TEMPLATE.md`, the shape of a ticket;
 - `.rail/config.toml`: `person_paths`, `migration_paths` and `[size] cap`, which decide the tier;
 - the code the request touches, and its tests.
 
@@ -102,4 +102,4 @@ person has confirmed the draft.
 - A ticket with no questions keeps the lines and an empty table: you read the code and asked nothing.
 
 Ticket lint checks the section. Rail copies it into the ticket's journal as the `requested` event, and
-`rail stats` counts it (`rail docs stats`).
+`rail stats` counts it.

@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import stat
 
@@ -90,6 +91,22 @@ Finally run `rail doctor`. It prints the lines for the cloud environment's setup
 environment tool, so the person approves them once and every later session starts ready."""
 
 
+INCLUDE = re.compile(r"^<!-- include (\S+) -->$", re.M)
+
+
+def include(text):
+    """A seed file's `<!-- include PAGE[#Heading...] -->` lines, replaced by that text of the framework's page: a
+    skill carries what it would otherwise tell the agent to go and read."""
+    from .docs import read_part
+
+    def page(m):
+        found = read_part(m.group(1), FRAMEWORK)
+        if found is None:
+            raise RailError(f"the seed includes {m.group(1)}, which isn't there")
+        return found
+    return INCLUDE.sub(page, text)
+
+
 def _write(path, text, mode=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
@@ -174,7 +191,8 @@ def init(cwd):
         "ruleset.json": ".rail/ruleset.json",  # for the person to import in GitHub: a session can't set it. It
                                                # names the default branch, so one file fits every repository
     }
-    # The skills, as Claude Code skills: the grilling, and the pages [guides] names in the briefs.
+    # The skills a person's session starts, as Claude Code skills. The engine's own pages for the briefs stay in
+    # .rail/engine/guides; [guides] names both kinds.
     skills = os.path.join(seed, "skills")
     for name in sorted(os.listdir(skills)):
         if os.path.isfile(os.path.join(skills, name, "SKILL.md")):
@@ -196,6 +214,7 @@ def init(cwd):
             text = f.read()
         if src == "config.toml":
             text = text.replace('base_branch = "main"', f'base_branch = "{_base_branch(root)}"', 1)
+        text = include(text)
         _write(target, text)
         step(dest, True, "added")
 
