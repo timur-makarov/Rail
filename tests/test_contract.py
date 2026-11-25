@@ -282,8 +282,8 @@ class ReviewOutput(RailTest):
         return p
 
     def test_output_that_breaks_the_schema_is_rejected_with_the_reason(self):
-        # Every invalid run at a review step is the same failure: a budget that holds the runs below.
-        p = self.claimed_and_fixed(CONFIG + "\n[retry]\nbudget = 9\ncap = 9\n")
+        # An invalid run is started once more at once, and two in a row wait for a person, who continues.
+        p = self.claimed_and_fixed()
 
         def finding(**kw):
             return {"severity": "advisory", "file": "src/calc.py", "claim": "x", **kw}
@@ -294,13 +294,14 @@ class ReviewOutput(RailTest):
                  ({"summary": "x", "findings": [finding(evidence={"command": "pytest"})]},
                   "finding 1: evidence needs command and output"),
                  ({"summary": "x", "findings": [finding(author="me")]}, "finding 1 doesn't match the schema")]
-        p.queue_reviews(*[output for output, _ in cases])
         for output, reason in cases:
             with self.subTest(reason):
+                p.queue_reviews(output, output)
                 failed = p.rail("advance", "1", expect=3)
-                review = [s for s in failed["steps"] if s["step"] == "review"][-1]
-                self.assertEqual((failed["state"], failed["owner"], review["detail"]),
-                                 ("reviewing", "agent", f"invalid output: {reason}"))
+                details = [s["detail"] for s in failed["steps"] if s["step"] == "review"]
+                self.assertEqual((failed["state"], failed["owner"], failed["reason"]["code"], details),
+                                 ("reviewing", "human", "STUCK_REVIEW", [f"invalid output: {reason}"] * 2))
+                p.rail("accept", "1")
         self.assertNotIn("1-review.json", p.git("ls-tree", "-r", "--name-only", "1-fix-add", ".rail/journal"))  # no run kept
 
     def test_a_review_given_as_text_in_the_result_field_is_read(self):

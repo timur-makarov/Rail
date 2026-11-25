@@ -7,6 +7,7 @@ reads its structured output, binds the run to the patch, and resets the worktree
 import json
 import os
 import re
+import shlex
 
 from . import areas, gitx
 from .project import event, review_path, ticket_path
@@ -47,6 +48,7 @@ SECURITY_LOOK_FOR = ("Only security: trust boundaries, input handling, auth, sec
 
 SEVERITIES = ("blocking", "advisory", "parked")
 EVIDENCE_LIMIT = 2000
+SCRIPTS, SCRIPT_LIMIT = 3, 8000  # untracked files an evidence command names, kept in the journal: how many, how long
 GUIDANCE_LIMIT = 8000  # characters of REVIEW.md in a brief, all files together
 
 BASE_GREEN = ("Every check in the Done Contract already passed on the base branch before this work began, so the checks"
@@ -129,8 +131,9 @@ class Ledger:
         return [r for r in self.doc["runs"] if r.get("role") == role and (patch_id is None or r.get("patch_id") == patch_id)]
 
     def run_after(self, role, index):
+        """A run of `role` with a verdict after `index`: a timeout or invalid output (counted: false) is none."""
         return any(e.get("event") == "step" and e.get("step") == role and e.get("status") == "ran" and i > index
-                   for i, e in enumerate(self.events))
+                   and e.get("counted", True) for i, e in enumerate(self.events))
 
     def needed_run(self, patch_id, tier):
         """The role whose run the patch still needs, or None."""
@@ -154,12 +157,15 @@ class Ledger:
         """What review and security runs said a person should see before the merge, each sentence once."""
         return list(dict.fromkeys(r["needs_person"] for r in self.doc["runs"] if r.get("needs_person")))
 
-    def describe(self, fid, with_answer=True):
+    def describe(self, fid, with_answer=True, scripts=False):
         f = self.findings[fid]
         where = f"{f.get('file')}:{f['line']}" if f.get("line") else f.get("file")
         text = f"{fid} ({f.get('severity')}, {f.get('role')}) {where}: {f.get('claim')}"
         if f.get("evidence"):
             text += f"\n    evidence: $ {f['evidence'].get('command')}\n    {tail(f['evidence'].get('output', ''), 8, 600)}"
+            for path, script in (f["evidence"].get("scripts") or {}).items() if scripts else ():
+                text += f"\n    {path}, the reviewer's scratch file (gone from the worktree):\n" + \
+                        "\n".join("      " + line for line in script.splitlines())
         if with_answer and f["history"]:
             last = self.last(fid)
             text += f"\n    now {last.get('outcome')} (by {last.get('by')})" + (f": {last.get('reason')}" if last.get("reason") else "")
@@ -341,8 +347,57 @@ def run(project, f, role, receipt, disputed=None, prompt=None):
     timeout = project.config["commands"]["timeout_secs"]
     code, output, ms = run_shell(project.config["review"]["command"], wt,
                                  {"RAIL_TICKET": t.id, **model_env(project.config["review"]["model"])}, timeout, stdin=prompt)
+    # Tracked files back as they were; the reviewer's untracked scratch files stay for the evidence re-runs.
     gitx.git(["reset", "--quiet", "--hard", head], wt)
-    gitx.git(["clean", "-fdq"], wt)
+    try:
+        return _read(project, f, role, receipt, disputed, head, doc, ledger, code, output, ms, timeout)
+    finally:
+        gitx.git(["reset", "--quiet", "--hard", head], wt)  # a re-run may have changed a tracked file too
+        gitx.git(["clean", "-fdq"], wt)
+
+
+def rerun(wt, evidence, timeout):
+    """A finding's evidence with the engine's own run of its command: `rerun` (its exit, null past timeout_secs,
+    and its output's tail), `reproduced` (every non-empty line the reviewer quoted, normalised as failure signatures
+    are, is in the re-run's output), and `scripts`: the text of each untracked file the command names, which the
+    clean-up removes. `reproduced` is a record only: nothing is decided from it."""
+    from .steps import normalise
+
+    scripts = scratch_files(wt, evidence["command"])  # before the command, which may change them
+    code, output, _ = run_shell(evidence["command"], wt, timeout=timeout)
+    quoted = [normalise(line) for line in evidence["output"].splitlines() if line.strip()]
+    seen = normalise(output)
+    result = dict(evidence, rerun={"exit": code, "output_tail": tail(output, 60, EVIDENCE_LIMIT)},
+                  reproduced=code is not None and bool(quoted) and all(line in seen for line in quoted))
+    if scripts:
+        result["scripts"] = scripts
+    return result
+
+
+def scratch_files(wt, command):
+    """{path: text} of the untracked files inside the worktree that `command` names, at most SCRIPTS of them, each cut
+    at SCRIPT_LIMIT characters."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        words = command.split()
+    found = {}
+    for word in words:
+        path = os.path.normpath(os.path.join(wt, word.split("::")[0].split("=")[-1]))
+        if len(found) >= SCRIPTS or not path.startswith(os.path.join(wt, "")) or not os.path.isfile(path):
+            continue
+        rel = os.path.relpath(path, wt)
+        if rel in found or gitx.out(["ls-files", "--", rel], wt):
+            continue  # a tracked file is in the commit already
+        with open(path, errors="replace") as fh:
+            text = fh.read(SCRIPT_LIMIT + 1)
+        found[rel] = text if len(text) <= SCRIPT_LIMIT else text[:SCRIPT_LIMIT] + f"\n(cut at {SCRIPT_LIMIT} characters)"
+    return found
+
+
+def _read(project, f, role, receipt, disputed, head, doc, ledger, code, output, ms, timeout):
+    """The run's output: checked, its evidence run again, and recorded. The worktree still holds the scratch files."""
+    t, wt = f.t, f.t.worktree
     step = role
     if code is None:
         receipt.record(step, False, f.patch_id, "timeout", ms, counted=False,
@@ -359,7 +414,8 @@ def run(project, f, role, receipt, disputed=None, prompt=None):
     except ValueError:
         data, meta, errors = None, {}, ["the output is not JSON"]
     if errors:
-        receipt.record(step, False, f.patch_id, f"invalid output: {errors[0]}", ms,
+        # The reviewer's fault, not the author's: not counted, like a timeout.
+        receipt.record(step, False, f.patch_id, f"invalid output: {errors[0]}", ms, counted=False,
                        output=f"The {role} run's output was invalid:\n- " + "\n- ".join(errors) + f"\n\n{tail(output, 30)}")
         return None
 
@@ -372,8 +428,8 @@ def run(project, f, role, receipt, disputed=None, prompt=None):
     for finding in data["findings"]:
         finding = dict(finding)
         if finding.get("evidence"):
-            finding["evidence"] = {"command": finding["evidence"]["command"],
-                                   "output": finding["evidence"]["output"][:EVIDENCE_LIMIT]}
+            finding["evidence"] = rerun(wt, {"command": finding["evidence"]["command"],
+                                             "output": finding["evidence"]["output"][:EVIDENCE_LIMIT]}, timeout)
         if finding.get("repeats"):
             fid = finding["repeats"]
             severity = ledger.findings[fid].get("severity")

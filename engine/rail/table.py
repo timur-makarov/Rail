@@ -39,7 +39,7 @@ def _findings(f, intro):
         "Declining or parking a blocking finding disputes it, and a fresh refuter decides whether it holds and whether"
         " this change caused it. An advisory finding doesn't hold the ticket: fix and answer it too, or leave it open"
         " for the sweep.",
-        *[f"- {f.ledger.describe(fid)}" for fid in ids + f.ledger.open_advisory()],
+        *[f"- {f.ledger.describe(fid, scripts=True)}" for fid in ids + f.ledger.open_advisory()],
     ])
 
 
@@ -309,8 +309,9 @@ ROWS = [
     ("RETRY_CAP",          "human", "human_wait",  lambda f: f.state in OPEN and f.capped,
      _capped),
     ("STUCK_REVIEW",       "human", "human_wait",  lambda f: f.state == "reviewing" and f.stuck_review,
-     lambda f: f"The review of ticket {f.id} timed out twice (timeout_secs). A person looks at why, for example a command"
-               f" that waits for input, then continues it: rail accept {f.id}." + _go(f)),
+     lambda f: f"The review of ticket {f.id} failed twice in a row with no verdict: it timed out (timeout_secs) or its"
+               f" output was invalid. A person looks at why, for example a command that waits for input or a reviewer"
+               f" that can't return review/v1, then continues it: rail accept {f.id}." + _go(f)),
     ("FINDING_UPHELD",     "human", "human_wait",  lambda f: f.ledger.disputed_again(),
      lambda f: f"The refuter upheld {_join(f.ledger.disputed_again())} on ticket {f.id}, and the agent still disputes it."
                f" A person decides: rail answer {f.id} F1 declined \"why\" --owner, rail answer {f.id} F1 parked"
