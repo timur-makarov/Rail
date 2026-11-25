@@ -22,7 +22,13 @@ READERS = {
     "commands.verify": "ship and CI: the whole project's checks, scanners included",
     "commands.provision": "rail provision, next in a cloud session, and CI: installs what the machine lacks, once"
                           " per machine, as root. Never run on a person's own machine",
-    "commands.timeout_secs": "every command: setup, verify, provision, each check, each review run",
+    "commands.timeout_secs": "every command: setup, verify, provision, each check, each review run, each source's"
+                             " fetch; setup and verify take their own limit instead when it is set",
+    "commands.setup_timeout_secs": "the claim, rail adopt and CI: the seconds setup may run, for a setup that needs"
+                                   " longer than the other commands, such as a cold build in a new worktree. 0 takes"
+                                   " timeout_secs",
+    "commands.verify_timeout_secs": "ship and CI: the seconds verify may run, on the ticket and on the base. 0 takes"
+                                    " timeout_secs. Each check and each review run still stops at timeout_secs",
     "commands.base_checks": "next, at a ticket's first claim: runs each Check: line once on the untouched base and"
                             " records red or green in a base_checks event. Never a gate: it fails nothing. When every"
                             " check was green, the IMPLEMENT brief asks for a check that fails now (rail amend)",
@@ -41,7 +47,9 @@ READERS = {
     "consult.command": "the consult pack: a read-only model, with the brief on stdin",
     "consult.model": "the consult pack: the model consult runs on, set the same way as review.model",
     "claim.stale_minutes": "next: minutes without a journal event after which another session's work in flight is"
-                           " taken to be abandoned and resumed. Keep it above your longest command",
+                           " taken to be abandoned and resumed. No event is written while a command runs, so keep it"
+                           " above the longest command's limit (timeout_secs, or setup's or verify's own) plus"
+                           " claim.save_minutes",
     "claim.save_minutes": "advance and rail save: a ticket with nothing to save and no pushed event for this long"
                           " gets a saved event, the sign that a session is at work on it. How often the save hook"
                           " runs is the -mmin number in the hook's own command in .claude/settings.json (10)",

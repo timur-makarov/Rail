@@ -8,7 +8,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from . import doclint, gitx, rules
+from . import config as configmod, doclint, gitx, rules
 from .project import event, events_path, ticket_path
 from .state import raised_tier
 from .util import cloud
@@ -98,7 +98,7 @@ def run_command(project, cwd, nn, step, command, run, patch_id=None, label=None)
     """Run one configured command in `cwd` and record it."""
     keep_alive(project, run.t)
     code, output, ms = run_shell(command, cwd, {"RAIL_TICKET": nn, "RAIL_BASE": project.base_ref},
-                                 project.config["commands"]["timeout_secs"])
+                                 configmod.timeout(project.config, step))
     missing = could_not_run(code)
     status = missing or ("timeout" if code is None else f"exit {code}")
     detail = (f"{label}: {status}" if code != 0 else label) if label else status
@@ -286,10 +286,11 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
 def base_fails_verify(project):
     """Run verify once more on the base branch, in a scratch worktree. Returns its output when it fails there too."""
     with scratch(project, gitx.rev(project.base_ref, project.root)) as path:
-        timeout = project.config["commands"]["timeout_secs"]
         if project.config["commands"]["setup"]:
-            run_shell(project.config["commands"]["setup"], path, {"RAIL_TICKET": ""}, timeout)
-        code, output, _ = run_shell(project.config["commands"]["verify"], path, {"RAIL_TICKET": ""}, timeout)
+            run_shell(project.config["commands"]["setup"], path, {"RAIL_TICKET": ""},
+                      configmod.timeout(project.config, "setup"))
+        code, output, _ = run_shell(project.config["commands"]["verify"], path, {"RAIL_TICKET": ""},
+                                    configmod.timeout(project.config, "verify"))
         # verify that can't start on the base proves nothing about the base: the ticket's own failure stands
         if code is None or code == 0 or could_not_run(code):  # None: it timed out, which proves nothing either
             return None

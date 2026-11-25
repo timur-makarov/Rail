@@ -18,7 +18,8 @@ DEFAULTS = {
     "base_branch": "main",
     "person_paths": [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".claude/**", ".github/workflows/**"],
     "migration_paths": ["**/migrations/**"],
-    "commands": {"setup": "", "verify": "", "provision": "", "timeout_secs": 900, "base_checks": True},
+    "commands": {"setup": "", "verify": "", "provision": "", "timeout_secs": 900, "setup_timeout_secs": 0,
+                 "verify_timeout_secs": 0, "base_checks": True},
     "size": {"cap": 600, "exclude": []},
     "review": {"command": REVIEW_COMMAND, "model": "", "skip_paths": []},
     "retry": {"budget": 2, "cap": 5},
@@ -86,6 +87,12 @@ def _check_ladder(config):
         if not model.strip() or effort not in EFFORTS:
             raise RailError(f"config: {name} must be model:effort, such as \"claude-sonnet-5-5:medium\","
                             f" with an effort of {', '.join(EFFORTS)}; got \"{rung}\"")
+
+
+def timeout(config, step):
+    """The seconds a command may run: setup and verify may have a limit of their own; 0, and every other command,
+    takes timeout_secs."""
+    return config["commands"].get(f"{step}_timeout_secs") or config["commands"]["timeout_secs"]
 
 
 def load(root):

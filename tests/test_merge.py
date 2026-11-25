@@ -59,6 +59,10 @@ def failed_step(answer):
     return failed[0]["step"], failed[0].get("detail")
 
 
+def step_of(answer, name):
+    return [s for s in answer["steps"] if s["step"] == name][-1]
+
+
 def journal(fx, nn="1", branch="1-fix-add"):
     return [json.loads(l) for l in fx.git("show", f"{branch}:.rail/journal/{nn}-events.jsonl").splitlines()]
 
@@ -150,6 +154,26 @@ class Ship(RailTest):
         recorded = [e for e in journal(p) if e["event"] == "step" and e["step"] == "verify"][-1]
         self.assertNotIn("counted", recorded)
         self.assertEqual(p.rail("next", "--ticket", "1")["reason"]["code"], "STEP_FAILED")
+
+
+    def test_setup_and_verify_take_their_own_limits_and_a_check_still_stops_at_timeout_secs(self):
+        # A cold build in a new worktree needs longer than a check should ever run.
+        p = self.fixture(config=CONFIG.replace("timeout_secs = 60", "timeout_secs = 2\nsetup_timeout_secs = 30\n"
+                                               "verify_timeout_secs = 30\nsetup = 'sleep 3'")
+                         .replace("python3 -m py_compile src/calc.py", "sleep 3 && python3 -m py_compile src/calc.py"))
+        p.add(ticket(check="sleep 30"))
+        claimed = p.rail("next")
+        self.assertEqual((step_of(claimed, "setup")["result"], claimed["reason"]["code"]), ("pass", "IMPLEMENT"))
+        p.fix_calc("1")
+        failed = p.rail("advance", "1", expect=3)
+        self.assertEqual(step_of(failed, "verify")["result"], "pass")
+        self.assertEqual(failed_step(failed), ("checks", "sleep 30: timeout"))
+
+    def test_with_no_limit_of_its_own_setup_stops_at_timeout_secs_as_before(self):
+        p = self.fixture(config=CONFIG.replace("timeout_secs = 60", "timeout_secs = 2\nsetup = 'sleep 30'"))
+        p.add(ticket())
+        claimed = p.rail("next", expect=None)
+        self.assertEqual((step_of(claimed, "setup")["result"], step_of(claimed, "setup")["detail"]), ("fail", "timeout"))
 
 
 class Conflicts(RailTest):

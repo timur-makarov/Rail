@@ -8,7 +8,7 @@ import os
 import re
 import tempfile
 
-from . import gitx, rules, steps
+from . import config as configmod, gitx, rules, steps
 from .project import PRODUCT_SPEC
 from .state import raised_tier
 from .util import RailError, match_any, run_shell, tail
@@ -152,7 +152,7 @@ def gate(project, commands, base_tip, head, run):
             command = project.config["commands"]["setup"]
             if command:
                 code, output, ms = run_shell(command, path, {"RAIL_TICKET": "", "RAIL_BASE": project.base_ref},
-                                             project.config["commands"]["timeout_secs"])
+                                             configmod.timeout(project.config, "setup"))
                 if code != 0:
                     detail = "timeout" if code is None else f"exit {code}"
                     run.steps.append({"step": "setup", "status": "ran", "result": "fail",
