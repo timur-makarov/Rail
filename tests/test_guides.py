@@ -183,12 +183,17 @@ class Stats(RailTest):
 
     def test_stats_counts_the_tickets_each_guide_was_named_for(self):
         p = self.fixture(config=guides(start=None).replace("[consult]", "[retry]\nbudget = 1\n\n[consult]"))
-        p.add(ticket())
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")  # PERSON: at the budget it waits for a person
         p.rail("next")
         p.rail("advance", "1", expect=3)  # the budget of 1 is used: consult advises
         self.assertEqual(p.rail("advance", "1", expect=3)["reason"]["code"], "RETRY_CAP")  # then a person looks
         p.rail("accept", "1", "fix add")
-        self.merge(p, "1", "src/calc.py", "def add(a, b):\n    return a + b\n")
+        p.rail("next", "--ticket", "1")
+        p.write("src/calc.py", "def add(a, b):\n    return a + b\n", base=p.worktree("1"))
+        self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")
+        p.rail("accept", "1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
         stats = p.rail("stats")
         self.assertNotIn("Guides named", stats["text"])  # nothing was guided yet
         p.write(".rail/config.toml", guides())

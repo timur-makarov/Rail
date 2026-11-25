@@ -22,7 +22,8 @@ class Consult(RailTest):
     def test_a_setup_that_fails_the_same_way_twice_gets_consults_advice_from_next_then_waits_for_a_person(self):
         setup = 'echo "make: no such tool"; exit 1'
         p = self.fixture(config=CONFIG.replace("[commands]", f"[commands]\nsetup = '{setup}'"))
-        p.add(ticket())
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")  # PERSON: at the retry budget or cap it waits for a person
         self.assertEqual(p.rail("next", expect=3)["reason"]["code"], "SETUP_FAILED")
         self.assertEqual(events(p, "consulted"), [])
         again = p.rail("next", "--ticket", "1", expect=3)  # setup runs again and fails the same way: the budget
@@ -56,7 +57,8 @@ class Consult(RailTest):
         shutil.rmtree(p.path(".rail", "packs", "consult"))
         p.git("add", "-A")
         p.git("commit", "--quiet", "-m", "no consult pack")
-        p.add(ticket())
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")  # PERSON: at the retry budget or cap it waits for a person
         p.rail("next")
         first = p.rail("advance", "1", expect=3)
         self.assertEqual((first["owner"], first["reason"]["code"]), ("agent", "STEP_FAILED"))
@@ -71,7 +73,8 @@ class Consult(RailTest):
 
     def test_a_ticket_gets_at_most_three_consults_and_then_the_budget_goes_to_a_person(self):
         p = self.fixture()
-        p.add(ticket())
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")  # PERSON: at the retry budget or cap it waits for a person
         p.rail("next")
         for n in range(3):
             self.assertIn("consult says change", p.rail("consult", "1", f"Question {n + 1}?")["advice"])
@@ -92,7 +95,8 @@ class Consult(RailTest):
         os.chmod(p.path(".rail", "packs", "consult", "bin", "consult"), 0o755)
         p.git("add", "-A")
         p.git("commit", "--quiet", "-m", "a consult pack that says stop")
-        p.add(ticket())
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")  # PERSON: at the retry budget or cap it waits for a person
         p.rail("next")
         p.rail("advance", "1", expect=3)
         second = p.rail("advance", "1", expect=3)  # the same failure again: the budget, and consult is asked
@@ -145,7 +149,8 @@ class Checks(RailTest):
         # Each Check: line is its own event at the step 'checks'. The first line passes on every ship and the
         # second fails the same way: that is the same failure in a row, so consult advises and then a person acts.
         p = self.fixture()
-        p.add(ticket(body="- Check: `test -f src/never.py`\n"))
+        p.add(ticket(tier="PERSON", body="- Check: `test -f src/never.py`\n"))
+        p.rail("accept", "1")
         p.rail("next")
         p.fix_calc("1")
         first = p.rail("advance", "1", expect=3)
@@ -212,7 +217,9 @@ class ReviewRetries(RailTest):
         self.assertNotEqual(runs[0]["detail"], runs[1]["detail"])
         self.assertEqual(runs[0]["signature"], runs[1]["signature"])
         p.rail("answer", "1", "F2", "fixed", "Floats count too.")
-        stuck = p.rail("advance", "1", expect=3)
-        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "RETRY_CAP"))
-        self.assertIn("'review' failed the same way 2 times in a row, then once more after consult",
-                      stuck["action"]["brief"])
+        stuck = p.rail("advance", "1", expect=3)  # AUTO: the engine drops it, with the reason in the drop mark
+        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("agent", "STUCK"))
+        self.assertEqual(p.rail("next", "--ticket", "1")["reason"]["code"], "DROPPED")
+        mark = json.loads(open(p.path(".git", "rail", "ids", "1.dropped")).read())["dropped"]
+        self.assertIn("'review' failed the same way 2 times in a row, then once more after consult", mark["reason"])
+        self.assertEqual((mark["by"], mark["step"]), ("engine", "review"))

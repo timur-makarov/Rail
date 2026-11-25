@@ -286,7 +286,8 @@ class Commands(RailTest):
 
     def test_a_verify_that_cannot_start_could_not_run_and_is_never_taken_for_a_red_base(self):
         p = self.fixture(config=CONFIG.replace("python3 -m py_compile src/calc.py", "no-such-test-runner --all"))
-        p.add(ticket())
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")  # PERSON: at the retry budget or cap it waits for a person
         p.rail("next")
         p.fix_calc("1")
         first = p.rail("advance", "1", expect=3)
@@ -435,7 +436,8 @@ class Parallel(RailTest):
     def test_a_dropped_dependency_waits_for_a_person(self):
         p = self.fixture()
         p.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
-        p.add(ticket(front=('after = ["1"]',)))
+        p.add(ticket(tier="PERSON", front=('after = ["1"]',)))
+        p.rail("accept", "2")  # PERSON: a person decides; on AUTO the agent does (test_stuck.py)
         p.rail("drop", "1")
         waiting = p.rail("next")
         self.assertEqual((waiting["owner"], waiting["waits"][0]["needs"]), ("human", "AFTER_DROPPED"))

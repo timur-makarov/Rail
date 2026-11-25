@@ -8,7 +8,7 @@ from . import gitx
 from .project import advice_path, ticket_path
 from .util import MISSING_HELP
 
-TRANSITIONS = {"ACCEPT_AUTO", "CLAIM", "RESUME", "CONSULT", "GO", "REBASE_BEHIND", "CONTRACT_MERGED"}
+TRANSITIONS = {"ACCEPT_AUTO", "CLAIM", "RESUME", "CONSULT", "GO", "REBASE_BEHIND", "CONTRACT_MERGED", "STUCK"}
 MERGE_PATIENCE = 600  # seconds a requested merge may take before a person looks
 OPEN = ("implementing", "reviewing", "in-ci", "merge-ready")
 
@@ -202,6 +202,16 @@ def _capped(f):
             f" differently\". That gives a fresh budget and a fresh cap." + _go(f))
 
 
+def stuck_reason(f):
+    """(reason, step, signature) for an AUTO ticket the engine drops at the retry cap: what was tried and why it
+    stopped. It goes into the dropped event, the drop mark and the issue's comment."""
+    step = f.capped[0]
+    last = [e for e in f.t.events if e.get("event") == "step" and e.get("step") == step and e.get("result") == "fail"]
+    detail = last[-1].get("detail") if last else ""
+    reason = f"stuck: {_stuck(f, step)}" + (f"; the last failure: {detail}" if detail else "")
+    return reason, step, last[-1].get("signature") if last else None
+
+
 def _pr(f):
     return f"PR #{f.pr['number']} ({f.pr['html_url']})" if f.pr else "its pull request"
 
@@ -262,6 +272,11 @@ ROWS = [
     # (code,               owner,   kind,          when,                                         brief)
     ("MERGED",             "none",  "rest",        lambda f: f.state == "merged",
      lambda f: f"Ticket {f.id} is merged."),
+    # A drop whose mark on the counter branch couldn't be written: everything stays until a later rail next writes it.
+    ("DROP_PENDING",       "none",  "rest",        lambda f: f.state == "dropped" and f.drop_pending,
+     lambda f: f"Ticket {f.id} is dropped, and its mark on the counter branch isn't written yet: the remote can't be"
+               f" reached or refused the push. Its worktree, branches and pull request stay until a later rail next"
+               f" writes the mark and finishes the drop."),
     ("DROPPED",            "none",  "rest",        lambda f: f.state == "dropped",
      lambda f: f"Ticket {f.id} was dropped."),
     # A rebase stopped in the ticket's worktree. Until it ends the engine writes nothing to the ticket: git moves
@@ -291,6 +306,13 @@ ROWS = [
                f" then run: rail accept {f.id}. To change it, say what to change. To reject it, run: rail drop {f.id}"
                + (f" On GitHub: {_pr(f)} shows the contract; the label rail:go approves it, a comment asks for a"
                   f" change, and closing it rejects it." if f.pr_open else "")),
+    # On AUTO no person is asked: whether the ticket stands without the dropped one is the contract writer's call,
+    # and either answer is recorded and can be undone.
+    ("AFTER_DROPPED",      "agent", "agent_task",  lambda f: f.state == "accepted" and f.after_dropped and f.auto,
+     lambda f: f"Ticket {f.id} comes after ticket {_join(f.after_dropped)}, which was dropped. Read both tickets and"
+               f" decide whether ticket {f.id} still stands without it. If it does, remove {_join(f.after_dropped)}"
+               f" from `after`: write the whole ticket to a file and run rail amend {f.id} \"why it stands without"
+               f" it\" --file FILE. If it doesn't, drop it: rail drop {f.id} --reason \"why\"."),
     ("AFTER_DROPPED",      "human", "human_wait",  lambda f: f.state == "accepted" and f.after_dropped,
      lambda f: f"Ticket {f.id} comes after ticket {_join(f.after_dropped)}, which was dropped. A person decides:"
                f" remove it from `after` (rail amend {f.id} --file FILE), or drop ticket {f.id}."),
@@ -304,7 +326,7 @@ ROWS = [
      lambda f: f"The Done Contract of ticket {f.id} changed (rail amend)."
                + (f" The agent's reason: {f.amend_reason}" if f.amend_reason else "") + f" Read {ticket_path(f.id)} on branch {f.t.name},"
                f" then approve it: rail accept {f.id}." + _go(f)),
-    ("RETRY_CAP",          "human", "human_wait",  lambda f: f.state in OPEN and f.capped,
+    ("RETRY_CAP",          "human", "human_wait",  lambda f: f.state in OPEN and f.capped and not f.auto,
      _capped),
     ("STUCK_REVIEW",       "human", "human_wait",  lambda f: f.state == "reviewing" and f.stuck_review,
      lambda f: f"The review of ticket {f.id} failed twice in a row with no verdict: it timed out (timeout_secs) or its"
@@ -324,6 +346,10 @@ ROWS = [
     # merge) needs no claim: the rows below move it from whichever session looks.
     ("CLAIMED_ELSEWHERE",  "none",  "rest",        lambda f: f.held and not f.explicit,
      _held),
+    # An AUTO ticket at the retry cap: nothing merged, so nothing needs undoing, and the engine drops it with a
+    # record instead of asking a person. A PERSON ticket waits (RETRY_CAP).
+    ("STUCK",              "agent", "script",      lambda f: f.state in OPEN and f.capped and f.auto,
+     lambda f: f"rail next --ticket {f.id}"),
     ("RESUME",             "agent", "script",      lambda f: f.in_flight and (f.claimed_elsewhere or not f.worktree),
      lambda f: f"rail next --ticket {f.id}"),
     ("CONSULT",            "agent", "script",      lambda f: f.state in OPEN and f.consult_due,

@@ -37,7 +37,7 @@ def worker(f, action, code=None):
     the step the ticket is failing, capped at the last rung. Writing a contract (TICKET_LINT) names worker.contract
     when it is set. The engine starts no agent; the session that runs the loop may start one on them."""
     ladder = f.project.config["worker"]["person_ladder" if f.tier == "PERSON" else "ladder"]
-    if code == "TICKET_LINT" and f.project.config["worker"]["contract"]:
+    if code in ("TICKET_LINT", "AFTER_DROPPED") and f.project.config["worker"]["contract"]:
         ladder = [f.project.config["worker"]["contract"]]
     if action.get("kind") == "agent_task" and ladder:
         model, _, effort = ladder[min(f.attempts.get(f.failing, 0), len(ladder) - 1)].rpartition(":")
@@ -364,6 +364,15 @@ def transition(project, f, code):
                     forge.expire()  # the pull request's head moved, by their push
                     run.steps[:] = [s for s in run.steps if s["step"] not in ("push", "rebase")]
                     run.steps.append({"step": "rebase", "status": "not_run", "detail": "another session rebased it first"})
+    elif code == "STUCK":
+        # Dropped with a record: the dropped event, the mark, the pull request closed and the issue told why. The
+        # worktree and branches go once the mark is written; until then the ticket rests (DROP_PENDING).
+        from .table import stuck_reason
+        reason, step, signature = stuck_reason(f)
+        drop(project, f, "engine", reason, run.steps, step=step, signature=signature)
+        tickets, facts = load(project)
+        if not facts[t.id].drop_pending:
+            steps.remove_ticket(project, facts[t.id].t)
     elif code == "RESUME":
         ensure_local(project, t)
         if f.claimed_elsewhere and not claim(project, t, takeover=True):
@@ -414,6 +423,8 @@ def cleanup(project, tickets, facts):
     for nn, f in facts.items():
         if f.state == "dropped" and f.pr and not f.dropped_event:
             release_issue(project, f)  # a PR closed by hand gets the same cleanup as rail drop
+        if f.drop_pending and not finish_drop(project, f, []):
+            continue  # still no mark: the drop keeps everything
         if f.state in ("merged", "dropped"):
             leftovers += steps.remove_ticket(project, f.t)
     return leftovers
@@ -721,11 +732,19 @@ def cmd_answer(project, args):
     if args.outcome in ("declined", "parked") and by == "author" and f.ledger.findings[fid].get("severity") == "blocking":
         # The author can't close a blocking finding: declining or parking it disputes it, and a fresh refuter
         # decides whether it holds and whether this change caused it.
-        record = event(f.id, "finding", id=fid, outcome="open", by="author", disputed=True, reason=args.reason or "")
+        records = [event(f.id, "finding", id=fid, outcome="open", by="author", disputed=True, reason=args.reason or "")]
+        if f.auto and f.ledger.upheld_before(fid):
+            # On AUTO no person settles a second dispute: the refuter's verdict stands. The finding comes back to
+            # the author as a failed review, which counts toward the retry cap, and at the cap the ticket is dropped.
+            run = steps.Run(project, f.t)
+            run.record("refuter", False, f.patch_id, f"{fid} upheld before: it stands",
+                       output=f"refuter: {fid} was upheld before")
+            records = run.events + [event(f.id, "finding", id=fid, outcome="open", by="engine", reason=(
+                "a refuter upheld it before, and on an AUTO ticket its verdict stands: fix it"))]
     else:
-        record = event(f.id, "finding", id=fid, outcome=args.outcome, by=by, reason=args.reason or "")
+        records = [event(f.id, "finding", id=fid, outcome=args.outcome, by=by, reason=args.reason or "")]
     ensure_local(project, f.t)
-    project.append_events(f.t, [record], f"answer {fid}")
+    project.append_events(f.t, records, f"answer {fid}")
     tickets, facts = load(project)
     return from_facts(facts[f.id])
 
@@ -763,7 +782,8 @@ def cmd_amend(project, args):
         changed = [name for name, differs in (
             ("done_contract", new.done_hash() != last.get("done")),
             ("scope", sorted(new.scope) != last.get("scope_paths")),
-            ("tier", rank(new.tier) > rank(last.get("tier")))) if differs]
+            ("tier", rank(new.tier) > rank(last.get("tier"))),
+            ("after", f.ticket is not None and sorted(new.after) != sorted(f.ticket.after))) if differs]
         if not changed:
             raise RailError(f"the contract of ticket {t.id} matches the accepted one; there is nothing to amend",
                             code="NOTHING_TO_AMEND")
@@ -1271,7 +1291,7 @@ def cmd_advance(project, args):
                 if advice:
                     brief += f"\n\n{advice}"
                 code_, owner_, action_ = first_match(nf)
-                if owner_ == "human":
+                if owner_ == "human" or code_ == "STUCK":  # a person's wait, or the engine's drop at the cap
                     return from_facts(nf, receipts)
                 action = worker(nf, {"kind": "agent_task", "brief": brief})
                 # A rebase that stopped on a conflict has its own page; any other failure gets one once it repeats.
@@ -1356,23 +1376,54 @@ def cmd_drop(project, args):
     f = facts[project.find(args.ticket or requested(project, args), tickets).id]
     if f.state == "merged":
         raise RailError(f"ticket {f.id} is merged; follow-up work is a new ticket with caused_by", code="MERGED")
-    receipts = []
-    if f.state != "dropped":
-        if f.t.name:
-            ensure_local(project, f.t)
-            project.append_events(f.t, [event(f.id, "dropped", by=args.by, reason=args.reason or "")], "drop")
-        kept = next((e for e in f.t.events if e.get("event") == "requested"), None)
-        project.mark_dropped(f.id, json.dumps(kept, separators=(",", ":")) if kept else "")
+    receipts, leftovers = [], []
+    if drop(project, f, args.by, args.reason or "", receipts):
+        tickets, facts = load(project)
+        leftovers = steps.remove_ticket(project, facts[f.id].t)
+    tickets, facts = load(project)
+    return from_facts(facts[f.id], receipts, leftovers=leftovers)
+
+
+def drop(project, f, by, reason, receipts, **record):
+    """End a ticket without merging it: a `dropped` event in its journal, then the mark on the counter branch, then
+    the pull request closed and the issue released. Removing the worktree and branches is the caller's, and only
+    once this returns True: the mark is the record that outlives the branch, so nothing goes before it is written.
+    `record` (the step and signature the engine stopped at) goes into the event and the mark."""
+    if f.state != "dropped" and f.t.name:
+        ensure_local(project, f.t)
+        project.append_events(f.t, [event(f.id, "dropped", by=by, reason=reason,
+                                          **{k: v for k, v in record.items() if v})], "drop")
+    if f.state != "dropped" or f.drop_pending:
+        return finish_drop(project, f, receipts)
+    close_and_release(project, f, reason, receipts)  # dropped already, such as a pull request closed by hand
+    return True
+
+
+def finish_drop(project, f, receipts):
+    """Write the drop's mark; when it is written, close the pull request and release the issue. The mark keeps the
+    ticket's `requested` event, as rail stats reads it, with `dropped`: who dropped it, why, and for the engine's drop
+    at the retry cap the step and the failure's signature. False when the mark can't be written (offline, or a push
+    refused other than by a race): the ticket then keeps everything and rests as DROP_PENDING."""
+    kept = next((e for e in f.t.events if e.get("event") == "requested"), None)
+    last = f.t.last("dropped") or {}
+    dropped = {k: last[k] for k in ("by", "reason", "step", "signature") if last.get(k)}
+    note = dict(kept or {}, dropped=dropped) if kept or dropped else None
+    if not project.mark_dropped(f.id, json.dumps(note, separators=(",", ":")) if note else ""):
+        receipts.append({"step": "drop-mark", "status": "unavailable",
+                         "detail": "the counter branch can't be pushed: the ticket keeps its worktree, branches and"
+                                   " pull request until a later rail next writes the mark"})
+        return False
+    close_and_release(project, f, last.get("reason", ""), receipts)
+    return True
+
+
+def close_and_release(project, f, reason, receipts):
     if f.pr_open:
         project.forge.update_pr(f.pr["number"], state="closed")
         receipts.append({"step": "close-pr", "status": "ran", "result": "pass", "detail": f"closed #{f.pr['number']}"})
     elif project.remote and not (project.forge and project.forge.ok):
         receipts.append({"step": "close-pr", "status": "unavailable", "detail": "the forge can't be reached"})
-    release_issue(project, f, args.reason or "")
-    tickets, facts = load(project)
-    leftovers = steps.remove_ticket(project, facts[f.id].t)
-    tickets, facts = load(project)
-    return from_facts(facts[f.id], receipts, leftovers=leftovers)
+    release_issue(project, f, reason)
 
 
 def release_issue(project, f, reason=""):
