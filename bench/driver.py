@@ -6,6 +6,8 @@ Rail: the request is filed as `rail intake` files an issue, then each answer of 
 - a script that is a rail command runs as given (`rail advance`, `rail next --ticket`, `rail sweep`);
 - a wait for a person on a PERSON ticket (approve the contract or an amend, merge) is answered with `rail accept NN`
   and counted;
+- STUCK (an AUTO ticket at the retry cap, which the next `rail next` drops with its worktree and branch) ends the run
+  before that drop, so the change at the stop is still there to grade;
 - any other wait, rest or task ends the run, and its code is how it ended.
 
 Plain: the request, one fixed sentence, and the project's commands go to the arm's worker command once. See
@@ -141,13 +143,15 @@ def rail_overrides(arm, conf):
     return out
 
 
-def rail_config(project, arm, conf):
-    config = rail_install.config_for(project, rail_overrides(arm, conf))
+def rail_config(project, arm, conf, seeded=None):
+    """The .rail/config.toml a Rail run gets: `seeded` (the config rail init wrote), the project's, the arm's."""
+    config = rail_install.config_for(project, rail_overrides(arm, conf), seeded)
     worker = config.setdefault("worker", {})
     if not worker.get("command"):
         raise BenchError(f"arm {arm.name}: no worker command, in the arm or the project's Rail config")
     if armsmod.RESUME.search(worker["command"]):
-        raise BenchError("the project's [worker] command resumes a session; no bench arm resumes a worker session")
+        raise BenchError(f"arm {arm.name}: the [worker] command it gets (the project's, or Rail's seed's) resumes a"
+                         " session; give the arm a worker command: no bench arm resumes a worker session")
     worker["command"] = worker["command"] + STREAM_TEE
     worker["timeout_minutes"] = conf["worker_minutes"]
     review = config.setdefault("review", {})
@@ -163,6 +167,13 @@ def engine_default(table, key):
     finally:
         sys.path.pop(0)
     return engine_config.DEFAULTS[table][key]
+
+
+def stopped(answer):
+    """End the run at STUCK: the engine's drop, which its script (`rail next --ticket NN`) or any later `rail next` makes,
+    removes the ticket's worktree and branch, and with them the change at the stop."""
+    if (answer.get("reason") or {}).get("code") == "STUCK":
+        raise Ended("STUCK", detail=((answer.get("action") or {}).get("brief") or "")[:300])
 
 
 class RailDriver:
@@ -269,6 +280,7 @@ class RailDriver:
                                            for s in answer.get("steps", [])):
             self.state["review_rounds"] += 1
             self.save(f"review-{self.state['review_rounds']}")
+        stopped(answer)
         return answer
 
     def after(self, answer):
@@ -287,6 +299,7 @@ class RailDriver:
             overlay(self.ctx, self.r.copy)  # a claim makes a worktree from the base: the arm's files go in it too
             answer = self.rail(["next"])
             self.after(answer)
+            stopped(answer)
             if not answer.get("ok", True):
                 raise Ended(answer["reason"]["code"], detail=answer["reason"]["message"][:300])
             code = answer["reason"]["code"]
@@ -428,8 +441,8 @@ def start_rail(ctx):
         shutil.rmtree(r.copy)
     sealed.fresh(ctx.store, ctx.situation, r.copy)
     env = child_env(ctx.conf, r, ctx.project, ctx.store)
-    config = rail_config(ctx.project, ctx.arm, ctx.conf)
-    base = rail_install.install(r.copy, ctx.project, overrides=config, files=ctx.arm.files, env=env)
+    base = rail_install.install(r.copy, ctx.project, files=ctx.arm.files, env=env,
+                                make_config=lambda seeded: rail_config(ctx.project, ctx.arm, ctx.conf, seeded))
     set_meta(r, base=base)
     state = fresh_state()
     d = RailDriver(ctx, state)
@@ -441,8 +454,8 @@ def overlay(ctx, copy):
     """Put the arm's config and files in place of the copy's, in the root and every worktree, without a commit: git
     is told to leave them out (skip-worktree for tracked files, info/exclude for new ones), so a ship never commits
     them. Run after a restore with another arm, and after every claim, which makes a new worktree from the base."""
-    files = {".rail/config.toml": tomlw.dumps(rail_install.config_for(ctx.project, rail_config(ctx.project, ctx.arm,
-                                                                                               ctx.conf)))}
+    seeded = rail_install.seeded(copy, ctx.run.base)
+    files = {".rail/config.toml": tomlw.dumps(rail_config(ctx.project, ctx.arm, ctx.conf, seeded))}
     for dest, src in ctx.arm.files.items():
         with open(src) as f:
             files[dest] = f.read()

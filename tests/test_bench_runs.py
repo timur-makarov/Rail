@@ -7,12 +7,15 @@ import re
 import signal
 import subprocess
 import time
+import tomllib
 
 from benchtest import BENCH_CLI, BenchTest
 
 from bench import arms, common, driver, runs, sealed, taint
 
 BLOCKING = {"severity": "blocking", "file": "calc/ops.py", "line": 2, "claim": "add(-1, 1) gives the wrong sign."}
+CHECK = "python3 -m unittest tests.test_ops"
+BROKEN = "def add(a, b):\n    return a +\n"
 
 
 def tree(copy):
@@ -66,6 +69,16 @@ class FullRun(BenchTest):
         self.assertTrue(env["PATH"].startswith(os.path.join(r.copy, ".rail", "bin")))
         # the copy stays sealed: one start commit under Rail's, no remote
         self.assertEqual(common.git(["remote"], r.copy).strip(), "")
+        # Rail's config is the one rail init wrote, with the project's tables and the arm's on top: the seed's guides
+        # stay, so the first IMPLEMENT brief carried the build guide
+        config = tomllib.loads(common.git(["show", f"{r.base}:.rail/config.toml"], r.copy))
+        self.assertEqual(config["guides"]["start"], ".rail/engine/guides/build.md")
+        self.assertEqual(config["commands"]["verify"], "python3 -m unittest tests.test_ops")
+        self.assertEqual(config["review"]["model"], "claude-opus-5-5")
+        self.assertIn("fake_agent.py --review", config["review"]["command"])
+        events = [json.loads(line) for line in common.git(["show", "main:.rail/journal/1-events.jsonl"],
+                                                          r.copy).splitlines() if line.strip()]
+        self.assertIn("start", [e.get("situation") for e in events if e.get("event") == "guided"])
         # a second bench run on a finished run grades nothing again
         self.assertIn("ended MERGED", self.bench("run", self.project_file, "--id", "calc-01", "--arm", "fake"))
         self.assertEqual(sum(1 for e in r.log_lines() if e["kind"] == "graded"), 1)
@@ -136,19 +149,32 @@ class Killed(BenchTest):
 class Waits(BenchTest):
     def test_a_person_ticket_is_approved_in_the_persons_place_and_counted(self):
         r = self.run_fake(plan=self.plan(contract={"tier": "PERSON", "scope": ["calc/**"],
-                                                   "check": "python3 -m unittest tests.test_ops"}))
+                                                   "check": "python3 -m unittest tests.test_ops",
+                                                   "person_reason": "data-shape: calc/ops.py"}))
         res = r.result
         self.assertEqual(res["person_acts"], ["APPROVE_CONTRACT", "MERGE_BY_PERSON"])
         self.assertEqual((res["end"], res["right_merged"]), ("MERGED", True))
 
     def test_another_wait_ends_the_run_with_its_code_and_the_stop_is_graded(self):
         self.edit_project("timeout_secs = 120", "timeout_secs = 120\n\n[rail.config.retry]\nbudget = 1\ncap = 1")
-        r = self.run_fake(plan=self.plan(work=[{"write": {"calc/ops.py": "def add(a, b):\n    return a +\n"}}]))
+        r = self.run_fake(plan=self.plan(contract={"tier": "PERSON", "scope": ["calc/**"], "check": CHECK,
+                                                   "person_reason": "data-shape: calc/ops.py"},
+                                         work=[{"write": {"calc/ops.py": BROKEN}}]))
         res = r.result
-        self.assertEqual(res["end"], "RETRY_CAP")
+        self.assertEqual(res["end"], "RETRY_CAP")  # a PERSON ticket at the cap waits for a person
         self.assertFalse(res["merged"])
         self.assertNotIn("right_merged", res)
         self.assertFalse(res["right_stop"])
+
+    def test_a_stuck_auto_ticket_ends_the_run_before_its_drop_and_its_change_is_graded(self):
+        self.edit_project("timeout_secs = 120", "timeout_secs = 120\n\n[rail.config.retry]\nbudget = 1\ncap = 1")
+        r = self.run_fake(plan=self.plan(work=[{"write": {"calc/ops.py": BROKEN}}]))
+        res = r.result
+        self.assertEqual(res["end"], "STUCK")
+        self.assertFalse(res["merged"])
+        self.assertFalse(res["right_stop"])
+        with open(os.path.join(r.path, "change.diff")) as f:
+            self.assertIn("+    return a +", f.read())  # the change at the stop, not lost to the drop
 
     def test_a_rate_limit_marks_the_run_to_run_again_and_it_is_not_graded(self):
         r = self.run_fake(plan=self.plan(work=[{"error": "rate_limit"}]))

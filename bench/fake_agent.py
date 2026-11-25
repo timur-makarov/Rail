@@ -4,7 +4,7 @@ like `claude -p --output-format stream-json`, so the drivers read it as they rea
 
 It reads its plan from BENCH_FAKE_PLAN (a JSON file the bench writes into the run's folder):
 
-  {"contract": {"tier": "AUTO", "scope": ["calc/**"], "check": "...", "why": "..."},
+  {"contract": {"tier": "AUTO", "scope": ["calc/**"], "check": "...", "why": "...", "person_reason": "..."},
    "work": [ACTION, ...],      the Nth implementing run of the ticket (TICKET_LINT runs not counted) does work[N]
    "review": [REVIEW, ...],    the Nth review round answers review[N]; past the end, a clean review
    "plain": ACTION}            a plain arm's one run
@@ -131,7 +131,10 @@ def contract(nn, spec):
     branches = git("for-each-ref", "--format=%(refname:short)", f"refs/heads/{nn}-*").stdout.split()
     text = git("show", f"{branches[0]}:.rail/tickets/{nn}.md").stdout
     scope = ", ".join(json.dumps(s) for s in spec.get("scope", ["**"]))
-    text = text.replace('tier = ""', f'tier = "{spec.get("tier", "AUTO")}"', 1)
+    tier = f'tier = "{spec.get("tier", "AUTO")}"'
+    if spec.get("person_reason"):  # a PERSON ticket names its kind, or ticket lint refuses it
+        tier += f"\nperson_reason = {json.dumps(spec['person_reason'])}"
+    text = text.replace('tier = ""', tier, 1)
     text = text.replace("scope_paths = []", f"scope_paths = [{scope}]", 1)
     text = text.replace("## Why\n", f"## Why\n{spec.get('why', 'The request asks for it.')}\n", 1)
     text = text.replace("## Done Contract\n", f"## Done Contract\n- Check: `{spec['check']}`\n", 1)

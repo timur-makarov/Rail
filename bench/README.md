@@ -21,8 +21,9 @@ Run it as `bench/bench VERB ...` from anywhere. Everything it builds goes into t
      `regex:PATTERN` (the pattern's first group).
    - `failed` is a regex whose first group names a failing test in the output, such as `^--- FAIL: (\S+)` for Go.
    - `env` is set for every command, such as `CARGO_NET_OFFLINE = "true"`.
-4. `[rail.config]` is the project's `.rail/config.toml`, written once before any situation is read. Its
-   `[rail.config.commands]` needs `setup` and `verify`.
+4. `[rail.config]` is what the init task would write into the project's `.rail/config.toml`: its tables go on top of
+   the config `rail init` wrote, table by table, so the seed's guides, rules and models stay unless it sets its own.
+   Its `[rail.config.commands]` needs `setup` and `verify`.
 
 The loader refuses a key it does not know, and says which.
 
@@ -102,8 +103,9 @@ folder, `store/runs/PROJECT.ID.ARM.N/`, with its own HOME and TMPDIR. A child ge
 names, so no forge token reaches it. The driver ends a run after `run_minutes`.
 
 A Rail run installs Rail with no agent, files the request as `rail intake` does, and follows `rail next --json` as
-a script. A PERSON ticket's wait for a person is answered with `rail accept` and counted. Any other wait ends the
-run, and its code says how.
+a script. A PERSON ticket's wait for a person is answered with `rail accept` and counted. `STUCK` (an AUTO ticket at
+the retry cap) ends the run before Rail drops the ticket, so the change at the stop is still there to grade. Any
+other wait ends the run, and its code says how.
 
 A plain run counts as merged when the agent exits 0 with a success result whose last line is DONE.
 
