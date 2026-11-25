@@ -123,6 +123,23 @@ half run.
 `bench/bench run --from RUN --stage NAME --arm ARM` starts a new run from the state saved before stage NAME of RUN,
 and goes on with ARM's roles. So two arms can be compared from the same contract.
 
+## Cost and the network
+
+Each role (worker, contract, review, consult) has its own cost proxy. The proxy logs only the path, the status
+and the tokens of each call. It never logs a header or a body. It refuses Claude Code's
+`/v1/code/agent-proxy/ws` tunnel. A consult the worker asks for is counted as the worker's.
+
+On Linux as root, each child runs in a network of its own that reaches only the proxies. Elsewhere the run goes on
+unlocked, and its result says so. `network_lock = "required"` refuses to run unlocked.
+
+## Report
+
+`bench/bench report [--arms A,B] [--seed N]` prints, per arm, the numbers of PLAN section 5 on the situations every
+compared arm has a scored run on. Ranges come from resampling whole situations within each project, with the stated
+seed. Every rate has its counts beside it. Tainted runs and runs to run again are left out and counted. Unlocked
+runs are shown apart. Fill `[cutoffs]` in `bench/config.toml` so a situation closed before a model's training cutoff
+is left out.
+
 ## Not built yet
 
 - Planted faults and invited vulnerabilities: a situation's `extra` key, refused until they are built (`bench/sets.py`).

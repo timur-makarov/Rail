@@ -12,8 +12,8 @@ It reads its plan from BENCH_FAKE_PLAN (a JSON file the bench writes into the ru
 An ACTION may hold: "patch" (a file `git apply` applies in the cwd), "write" {path: text}, "answer" [[finding,
 outcome, reason]] (rail answer), "calls" [[tool, input]] (tool calls it prints, such as a planted leak), "sleep"
 seconds, "say" (its last words; a plain run's default is "DONE"), "dump_env" (a file to write its environment to),
-"error" ("rate_limit" ends the run as
-the CLI does on a 429, "sign_in" as it does with no sign-in), "exit" (its exit code).
+"request" (a path it posts to $ANTHROPIC_BASE_URL, as the CLI calls the model), "error" ("rate_limit" ends the run as
+the CLI does on a 429, "sign_in" as it does with no sign-in), "exit" (its exit code). A REVIEW may hold "request" too.
 
 The plan index comes from the ticket's journal on its branch, so a run restarted from a saved stage does the same.
 
@@ -27,6 +27,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 
 SESSION = "fake-session"
 
@@ -54,6 +56,19 @@ def plan():
         return {}
     with open(path) as f:
         return json.load(f)
+
+
+def request(path):
+    """One call to the model API at $ANTHROPIC_BASE_URL, as the CLI makes it."""
+    base = os.environ.get("ANTHROPIC_BASE_URL")
+    if not path or not base:
+        return
+    req = urllib.request.Request(base.rstrip("/") + path, data=b'{"model": "fake"}', method="POST",
+                                 headers={"Content-Type": "application/json", "x-api-key": "fake-key"})
+    try:
+        urllib.request.urlopen(req, timeout=60).read()
+    except (urllib.error.URLError, OSError):
+        pass
 
 
 def calls_of(action):
@@ -85,6 +100,7 @@ def act(action, nn=None):
             json.dump(dict(os.environ), f)
     if action.get("sleep"):
         time.sleep(action["sleep"])
+    request(action.get("request"))
     return done
 
 
@@ -133,7 +149,8 @@ def review():
     nn = os.environ.get("RAIL_TICKET", "")
     rounds = sum(1 for e in journal(nn) if e.get("event") == "step" and e.get("step") == "review")
     answers = p.get("review") or []
-    response = answers[rounds] if rounds < len(answers) else {"summary": "Read the diff.", "findings": []}
+    response = dict(answers[rounds]) if rounds < len(answers) else {"summary": "Read the diff.", "findings": []}
+    request(response.pop("request", None))
     print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "", "total_cost_usd": 0.02,
                       "structured_output": response}))
     return 0
