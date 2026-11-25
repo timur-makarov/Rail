@@ -8,7 +8,7 @@ import tomllib
 from .util import RailError
 
 REVIEW_COMMAND = (
-    "claude -p --safe-mode --system-prompt-file .rail/engine/reviewer.md "
+    "claude -p --safe-mode --effort high --system-prompt-file .rail/engine/reviewer.md "
     "--tools Read,Grep,Glob,Bash,Edit,Write --allowedTools Bash,Edit,Write "
     "--disallowedTools 'Bash(git push *)' --output-format json "
     "--json-schema \"$(cat .rail/engine/review-v1.json)\""
@@ -22,7 +22,7 @@ DEFAULTS = {
     "size": {"cap": 600, "exclude": []},
     "review": {"command": REVIEW_COMMAND, "model": "", "skip_paths": []},
     "retry": {"budget": 2, "cap": 5},
-    "consult": {"command": "claude -p --safe-mode --tools Read,Grep,Glob", "model": ""},
+    "consult": {"command": "claude -p --safe-mode --effort high --tools Read,Grep,Glob", "model": ""},
     "claim": {"stale_minutes": 30, "save_minutes": 10},
     "worker": {"ladder": ["claude-sonnet-5-5:medium", "claude-sonnet-5-5:high", "claude-opus-5-5:medium"],
                "person_ladder": ["claude-opus-5-5:medium", "claude-opus-5-5:high"],

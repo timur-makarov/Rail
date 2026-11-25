@@ -14,7 +14,7 @@ request = json.load(sys.stdin)
 root = os.environ.get("RAIL_ROOT", os.getcwd())
 with open(os.path.join(root, ".rail", "config.toml"), "rb") as f:
     config = tomllib.load(f)
-command = config.get("consult", {}).get("command") or "claude -p --safe-mode --tools Read,Grep,Glob"
+command = config.get("consult", {}).get("command") or "claude -p --safe-mode --effort high --tools Read,Grep,Glob"
 timeout = config.get("commands", {}).get("timeout_secs", 900)
 
 brief = f"""You advise a coding agent that is stuck on one ticket. Read the repository as you need. Change nothing.
