@@ -1,8 +1,3 @@
----
-name: rail-findings
-description: Answer the findings of a Rail review so the ticket passes in the next round. Use when rail next returns a ticket with open review findings.
----
-
 # Answer review findings
 
 - **Assumes:** a review left findings on your ticket, and the brief lists them. You are in the ticket's

@@ -42,8 +42,8 @@ DEFAULTS = {
     "sweep": {"after": 20, "every": 20},
     "map": {"depth": 1, "ignore": []},
     "tests": {"paths": []},
-    # A page named in the brief when its situation applies. The pages come with the seed config only: a project
-    # whose config has no [guides] table gets no guide.
+    # A page whose text the brief carries when its situation applies. The pages come with the seed config only: a
+    # project whose config has no [guides] table gets no guide.
     "guides": {key: "" for key in ("start", "stuck", "findings", "conflict", "contract", "split", "setup")},
     "rules": [],
     "profiles": [],

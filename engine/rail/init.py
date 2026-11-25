@@ -43,9 +43,9 @@ Read the repository to learn its stack, then propose each of these to the person
 2. ARCHITECTURE.md with a `## Areas` table: | Area | Paths | Holds |, one row per area. Paths are globs, separated
    by commas; Holds says what lives there in a bug reporter's words. Cover every directory at depth {depth}; hidden
    directories such as .rail and .claude need no row, and neither do files at the root. At most 150 lines.
-3. [kinds] in .rail/config.toml: a person is asked only about changes a revert doesn't undo. Read rail docs kinds,
-   keep the defaults, and for each kind id list the paths that hold it in this project: schemas (data-shape), auth
-   (access), infrastructure code (infrastructure), payment code (money), code that emails or pays real people
+3. [kinds] in .rail/config.toml: a person is asked only about changes a revert doesn't undo. Keep the defaults,
+   and for each kind id list the paths that hold it in this project: schemas (data-shape), auth (access),
+   infrastructure code (infrastructure), payment code (money), code that emails or pays real people
    (external-effect), and the files that set an agent's permissions, tools or spend (controls). A ticket that touches
    one is PERSON, so a person approves its contract and merges it. Every other ticket is AUTO and gets the reviewer
    before the engine merges it. [review] skip_paths lists paths whose changes need no reviewer, such as docs; leave
@@ -77,9 +77,9 @@ once by reading and merging one pull request. Read the repository to learn its s
 2. ARCHITECTURE.md with a `## Areas` table: | Area | Paths | Holds |, one row per area. Paths are globs, separated
    by commas; Holds says what lives there in a bug reporter's words. Cover every directory at depth {depth}; hidden
    directories such as .rail and .claude need no row, and neither do files at the root. At most 150 lines.
-3. [kinds] in .rail/config.toml: a person is asked only about changes a revert doesn't undo. Read rail docs kinds,
-   keep the defaults, and for each kind id list the paths that hold it in this project: schemas (data-shape), auth
-   (access), infrastructure code (infrastructure), payment code (money), code that emails or pays real people
+3. [kinds] in .rail/config.toml: a person is asked only about changes a revert doesn't undo. Keep the defaults,
+   and for each kind id list the paths that hold it in this project: schemas (data-shape), auth (access),
+   infrastructure code (infrastructure), payment code (money), code that emails or pays real people
    (external-effect), and the files that set an agent's permissions, tools or spend (controls). A ticket that touches
    one is PERSON, so a person approves its contract and merges it. Every other ticket is AUTO and gets the reviewer
    before the engine merges it. [review] skip_paths lists paths whose changes need no reviewer, such as docs; leave
@@ -97,6 +97,22 @@ the person can do, because a cloud session can't change a repository's settings:
   default message, and turn on "Automatically delete head branches".
 Finally run `rail doctor`. It prints the lines for the cloud environment's setup script: propose them with your
 environment tool, so the person approves them once and every later session starts ready."""
+
+
+INCLUDE = re.compile(r"^<!-- include (\S+) -->$", re.M)
+
+
+def include(text):
+    """A seed file's `<!-- include PAGE[#Heading...] -->` lines, replaced by that text of the framework's page: a
+    skill carries what it would otherwise tell the agent to go and read."""
+    from .docs import read_part
+
+    def page(m):
+        found = read_part(m.group(1), FRAMEWORK)
+        if found is None:
+            raise RailError(f"the seed includes {m.group(1)}, which isn't there")
+        return found
+    return INCLUDE.sub(page, text)
 
 
 def _write(path, text, mode=None):
@@ -273,7 +289,8 @@ def init(cwd):
         "ruleset.json": ".rail/ruleset.json",  # for the person to import in GitHub: a session can't set it. It
                                                # names the default branch, so one file fits every repository
     }
-    # The skills, as Claude Code skills: the grilling, and the pages [guides] names in the briefs.
+    # The skills a person's session starts, as Claude Code skills. The engine's own pages for the briefs stay in
+    # .rail/engine/guides; [guides] names both kinds.
     skills = os.path.join(seed, "skills")
     for name in sorted(os.listdir(skills)):
         if os.path.isfile(os.path.join(skills, name, "SKILL.md")):
@@ -296,6 +313,7 @@ def init(cwd):
         if src == "config.toml":
             text = text.replace('base_branch = "main"', f'base_branch = "{_base_branch(root)}"', 1)
             text = with_profiles(text, found)
+        text = include(text)
         _write(target, text)
         step(dest, True, "added")
 

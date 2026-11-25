@@ -99,9 +99,11 @@ def checks(project):
     found.append(("config", True, ".rail/config.toml is valid"))  # Project() failed otherwise
     guides = {key: path for key, path in project.config["guides"].items() if path}
     if guides:
-        gone = [f"{key} = {path}" for key, path in guides.items() if not os.path.isfile(os.path.join(root, path))]
+        from .docs import read_part
+        gone = [f"{key} = {path}" for key, path in guides.items() if not read_part(path, root)]
         found.append(("guides", not gone, f"the {len(guides)} pages [guides] names are there" if not gone else
-                      f"[guides] names pages that aren't there, so no brief names them: {', '.join(gone)}"))
+                      f"[guides] names pages or sections that aren't there, so no brief carries them:"
+                      f" {', '.join(gone)}"))
     from . import sources
     if sources.names(project):
         bad = sources.problems(project)
@@ -152,7 +154,7 @@ def cloud_checks(project):
                       " project thread); the machine's hooks do their work" if machine else
                       "Rail's hooks didn't run in this session (it holds several repositories, or is a project"
                       " thread), so the guard and the saves aren't active here. The environment's setup script puts"
-                      " them on the machine before a session starts (rail docs cloud); rail provision does it now if"
+                      " them on the machine before a session starts; rail provision does it now if"
                       " this session lets it. Until then GitHub's ruleset is the guard"))
     return found
 

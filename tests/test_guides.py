@@ -1,32 +1,56 @@
-"""Guides: the [guides] page a brief names when its situation applies, the `guided` event, and what stats makes of it."""
+"""Guides: the [guides] page whose text a brief carries when its situation applies, the `guided` event, and what
+stats makes of it."""
 
 import json
 import os
+import re
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from railtest import CONFIG, Fixture, RailTest, ticket
 
-SEED = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "seed")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SEED = os.path.join(ROOT, "seed")
+sys.path.insert(0, os.path.join(ROOT, "engine"))
+from rail import docs  # noqa: E402
+from rail.init import include  # noqa: E402
+
 SKILL = ".claude/skills/{}/SKILL.md"
-PAGES = {"start": "rail-build", "stuck": "rail-debug", "findings": "rail-findings", "conflict": "rail-conflict",
-         "contract": "rail-blast-radius", "split": "rail-slice", "setup": "rail-verify"}
+# The seed config's [guides] table: situation -> the page, with any #Heading sections.
+with open(os.path.join(SEED, "config.toml")) as _f:
+    PAGES = dict(re.findall(r'^(\w+) = "(\.[^"]+)"$', _f.read().split("[guides]", 1)[1].split("[[rules]]")[0], re.M))
 BLOCKING = {"severity": "blocking", "file": "src/calc.py", "line": 2, "claim": "add(-1, 1) returns the wrong sign."}
+
+
+def source(path):
+    """Where a project's page comes from in the framework: the engine's guides, or a seed skill."""
+    path = path.split("#")[0]
+    if path.startswith(".rail/engine/"):
+        return os.path.join(ROOT, "engine", path[len(".rail/engine/"):])
+    return os.path.join(SEED, "skills", path.split("/")[2], "SKILL.md")
 
 
 def guides(**pages):
     """A [guides] table: the seed's pages, with any key given here set to that path, or left out when None."""
     lines = ["", "[guides]"]
-    for key, name in PAGES.items():
-        path = pages.get(key, SKILL.format(name))
+    for key, spec in PAGES.items():
+        path = pages.get(key, spec)
         if path is not None:
             lines.append(f'{key} = "{path}"')
     return CONFIG + "\n".join(lines) + "\n"
 
 
+def text(situation):
+    """The text the brief carries for a situation: the seed page, or the sections its key names."""
+    with open(source(PAGES[situation])) as f:
+        found = docs.part(f.read(), PAGES[situation])
+    assert found, situation
+    return found
+
+
 def line(situation):
-    return f"Guide: read {SKILL.format(PAGES[situation])} and follow it."
+    return "\n\n" + text(situation)
 
 
 def events(p, branch="1-fix-add", nn="1", kind="guided"):
@@ -40,12 +64,12 @@ class Situations(RailTest):
         p.add(ticket())
         first = p.rail("next")
         self.assertEqual(first["reason"]["code"], "IMPLEMENT")
-        self.assertTrue(first["action"]["brief"].endswith("\n\n" + line("start")), first["action"]["brief"])
-        self.assertEqual(first["guide"], {"situation": "start", "path": SKILL.format("rail-build")})
-        self.assertEqual([(e["situation"], e["path"]) for e in events(p)], [("start", SKILL.format("rail-build"))])
+        self.assertTrue(first["action"]["brief"].endswith(line("start")), first["action"]["brief"])
+        self.assertEqual(first["guide"], {"situation": "start", "path": PAGES["start"]})
+        self.assertEqual([(e["situation"], e["path"]) for e in events(p)], [("start", PAGES["start"])])
         again = p.rail("next")
         self.assertEqual(again["reason"]["code"], "IMPLEMENT")
-        self.assertNotIn("Guide:", again["action"]["brief"])
+        self.assertNotIn(text("start"), again["action"]["brief"])
         self.assertNotIn("guide", again)
         self.assertEqual(len(events(p)), 1)
 
@@ -55,7 +79,7 @@ class Situations(RailTest):
         p.rail("next")
         first = p.rail("advance", "1", expect=3)
         self.assertEqual(first["reason"]["code"], "STEP_FAILED")
-        self.assertNotIn("Guide:", first["action"]["brief"])
+        self.assertNotIn(text("stuck"), first["action"]["brief"])
         second = p.rail("advance", "1", expect=3)  # the same failure again: consult advises, and the guide is named
         self.assertEqual(second["reason"]["code"], "STEP_FAILED")
         self.assertIn("consult says", second["action"]["brief"])
@@ -104,7 +128,7 @@ class Situations(RailTest):
         task = p.rail("next")
         self.assertEqual(task["reason"]["code"], "INIT_TASK")
         self.assertIn(line("setup"), task["action"]["brief"])
-        self.assertEqual(task["guide"], {"situation": "setup", "path": SKILL.format("rail-verify")})
+        self.assertEqual(task["guide"], {"situation": "setup", "path": PAGES["setup"]})
 
     def test_conflict_is_named_by_the_ship_that_met_the_conflict(self):
         # The agent starts the rebase from this brief, so the page for it is named here and not only mid-rebase.
@@ -147,7 +171,7 @@ class Off(RailTest):
         p = self.fixture()  # the test config has no [guides] table, as no project before this change had
         p.add(ticket())
         for answer in (p.rail("next"), p.rail("advance", "1", expect=3), p.rail("advance", "1", expect=3)):
-            self.assertNotIn("Guide:", answer["action"]["brief"])
+            self.assertFalse(any(text(k) in answer["action"]["brief"] for k in PAGES))
             self.assertNotIn("guide", answer)
         self.assertEqual(events(p), [])
         self.assertNotIn("guides", {s["step"] for s in p.rail("doctor", expect=None)["steps"]})
@@ -155,13 +179,13 @@ class Off(RailTest):
     def test_a_deleted_key_names_no_guide(self):
         p = self.fixture(config=guides(start=None))
         p.add(ticket())
-        self.assertNotIn("Guide:", p.rail("next")["action"]["brief"])
+        self.assertNotIn(text("start"), p.rail("next")["action"]["brief"])
         self.assertEqual(events(p), [])
 
     def test_a_page_that_is_not_there_names_nothing_and_doctor_says_so(self):
         p = self.fixture(config=guides(start="docs/build.md"))
         p.add(ticket())
-        self.assertNotIn("Guide:", p.rail("next")["action"]["brief"])
+        self.assertNotIn(text("start"), p.rail("next")["action"]["brief"])
         self.assertEqual(events(p), [])
         found = {s["step"]: s for s in p.rail("doctor", expect=None)["steps"]}
         self.assertEqual(found["guides"]["result"], "fail")
@@ -213,4 +237,40 @@ class Init(RailTest):
         self.assertIn("rail-grill", names)
         for name in names:
             with open(os.path.join(SEED, "skills", name, "SKILL.md")) as f, open(p.path(SKILL.format(name))) as g:
-                self.assertEqual(f.read(), g.read(), name)
+                self.assertEqual(include(f.read()), g.read(), name)
+        for name in ("rail-build", "rail-findings", "rail-conflict"):  # the engine's pages now: briefs carry them
+            self.assertFalse(os.path.exists(p.path(SKILL.format(name))), name)
+
+    def test_init_puts_the_page_a_skill_includes_into_the_skill(self):
+        p = Fixture(os.path.join(self.tmp, "fresh"), init=False)
+        p.rail("init")
+        with open(p.path(SKILL.format("rail-grill"))) as f:
+            skill = f.read()
+        with open(os.path.join(ROOT, "engine", "docs", "grill.md")) as f:
+            self.assertIn(f.read().strip(), skill)
+        self.assertNotIn("<!-- include", skill)
+
+
+class Sections(RailTest):
+    def test_a_key_with_headings_gives_those_sections_only(self):
+        self.assertIn("#", PAGES["split"])
+        split = text("split")
+        self.assertTrue(split.startswith("## 2. Three tests for each draft"), split)
+        self.assertIn("## When the engine offered the split", split)
+        self.assertNotIn("## 1. Cut by behaviour", split)
+        self.assertNotIn("name: rail-slice", text("stuck") + text("setup") + text("contract"))  # no front matter
+
+    def test_a_heading_inside_a_fence_ends_no_section(self):
+        page = "# A\n\n## B\nb\n```markdown\n## C\n```\nstill b\n## D\nd\n"
+        self.assertEqual(docs.part(page, "x.md#B"), "## B\nb\n```markdown\n## C\n```\nstill b")
+        self.assertEqual(docs.part(page, "x.md#D#B").split("\n\n")[0], "## D\nd")
+        self.assertIsNone(docs.part(page, "x.md#E"))
+
+    def test_a_section_that_is_not_there_adds_nothing_and_doctor_says_so(self):
+        p = self.fixture(config=guides(start=PAGES["start"] + "#No such heading"))
+        p.add(ticket())
+        self.assertNotIn(text("start"), p.rail("next")["action"]["brief"])
+        self.assertEqual(events(p), [])
+        found = {s["step"]: s for s in p.rail("doctor", expect=None)["steps"]}
+        self.assertEqual(found["guides"]["result"], "fail")
+        self.assertIn("No such heading", found["guides"]["detail"])

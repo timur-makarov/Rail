@@ -84,16 +84,17 @@ READERS = {
     "rules": "ship and CI: structure rules on added lines and files (rail docs rules)",
     "profiles": "nothing yet: the language profiles rail init found, each a name and the paths that hold its files"
                 " (rail docs languages)",
-    "guides.start": "next and advance: the page named in a ticket's first IMPLEMENT brief, once per ticket. Each"
-                    " guides key is a path from the repository root, or empty for none; the seed config names the"
-                    " rail-* skills, and a config with no [guides] table names none (rail docs guides)",
-    "guides.stuck": "next and advance: the page named in a STEP_FAILED brief once the same failure has repeated",
-    "guides.findings": "next and advance: the page named in the brief that asks for answers to review findings",
-    "guides.conflict": "next and advance: the page named in the brief while a rebase is stopped on a conflict",
-    "guides.contract": "next: the page named in the brief that asks for the contract of a ticket that came in as a"
+    "guides.start": "next and advance: the page whose text a ticket's first IMPLEMENT brief carries, once per"
+                    " ticket. Each guides key is a path from the repository root, optionally followed by #Heading"
+                    " for each section to take, or empty for none; a config with no [guides] table adds none"
+                    " (rail docs guides)",
+    "guides.stuck": "next and advance: the page a STEP_FAILED brief carries once the same failure has repeated",
+    "guides.findings": "next and advance: the page the brief that asks for answers to review findings carries",
+    "guides.conflict": "next and advance: the page the brief carries while a rebase is stopped on a conflict",
+    "guides.contract": "next: the page the brief carries that asks for the contract of a ticket that came in as a"
                        " request",
-    "guides.split": "advance and next: the page named in the SPLIT brief",
-    "guides.setup": "next: the page named in the init task",
+    "guides.split": "advance and next: the page the SPLIT brief carries",
+    "guides.setup": "next: the page the init task carries",
 }
 
 
@@ -136,6 +137,40 @@ def cli_page(parser):
         usage = re.sub(r"\s+", " ", sub.format_usage().replace("usage: ", "")).strip()
         lines += [f"## rail {name}", "", helps[name] + ".", "", f"    {usage}", ""]
     return "\n".join(lines)
+
+
+def part(text, spec):
+    """The text a brief takes from a page. `spec` is "PATH" for the whole page, or "PATH#Heading#Heading" for those
+    sections, in that order: each runs from its heading line to the next heading of any level, and a # inside a
+    fenced block is no heading. A skill's front matter is left out. None when a named heading isn't there."""
+    headings = spec.split("#")[1:]
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        text = text[end + 5:] if end >= 0 else text
+    if not headings:
+        return text.strip()
+    found, current, fenced = {}, None, False
+    for line in text.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif not fenced and (m := re.match(r"#+\s+(.+?)\s*$", line)):
+            current = m.group(1) if m.group(1) in headings else None
+        if current:
+            found.setdefault(current, []).append(line)
+    if any(h not in found for h in headings):
+        return None
+    return "\n\n".join("\n".join(found[h]).strip() for h in headings)
+
+
+def read_part(spec, *roots):
+    """`part` of the page at PATH, from the first root that has the file; None when none has it."""
+    path = spec.split("#")[0]
+    for root in roots:
+        full = os.path.join(root, path)
+        if root and os.path.isfile(full):
+            with open(full) as f:
+                return part(f.read(), spec)
+    return None
 
 
 def topics():

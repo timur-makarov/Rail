@@ -90,7 +90,7 @@ Make one scheduled task for the repository, on the environment from step 4, with
 One worker carries a ticket from its assumptions to its last fix, so the repository is read once for each
 ticket and not once for each step. A failed attempt that calls for a stronger model goes to a new worker
 on that model, with the failure in its brief. The runner decides nothing and keeps a small context, so one
-run can move many tickets. A guide line (`rail docs guides`) is part of the brief, so the worker gets it.
+run can move many tickets. A guide's text (`rail docs guides`) is part of the brief, so the worker gets it.
 Only `rail next` ends the loop: one ticket that waits for a person does not stop the others.
 
 Give it these triggers. Where a task takes only one GitHub event, make one task for each event, all with

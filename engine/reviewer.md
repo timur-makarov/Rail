@@ -29,7 +29,7 @@ On a re-review, review the whole change again. When an earlier finding still sta
 report it with its id in `repeats` and keep its severity.
 
 List in `kinds` each thing in the change that can't be undone, whatever the ticket's
-tier. The kinds are in `rail docs kinds`: data-loss, data-shape, data-exposure,
+tier. The kinds are: data-loss, data-shape, data-exposure,
 external-effect, access, runs-with-secrets, controls, infrastructure, money, licence. For
 each, give the id, the file and line, and one sentence on what the change does. Among
 them: a renamed or removed key, column or format of stored or shared data (data-shape); a

@@ -194,12 +194,12 @@ session is for work you are there for; unattended work runs in the cloud (`rail 
 with `rail adopt BRANCH`: the agent writes its ticket, and its checks must fail on the base and pass on the
 branch.
 
-**Guides and skills.** `rail init` adds Claude Code skills to `.claude/skills/`: some help a person turn
-an idea into a ticket (`rail-blast-radius`, `rail-grill`, `rail-slice`), and
-some are craft for the work itself, such as building a ticket, debugging a repeated failure or answering
-review findings. The `[guides]` table in `.rail/config.toml` names the right one in the brief when its
-situation comes up. A guide is a hint: nothing fails when an agent ignores it, and `rail stats` shows whether
-it helps. [`guides`](engine/docs/guides.md) has the situations and how to write a page.
+**Guides and skills.** Whatever Rail wants an agent to read, the engine puts in the brief: a page of craft
+for building a ticket, debugging a repeated failure, answering review findings or resolving a conflict. The
+`[guides]` table in `.rail/config.toml` says which page, or which of its sections, each situation's brief
+carries. `rail init` also adds Claude Code skills to `.claude/skills/` that help a person turn an idea into a
+ticket (`rail-blast-radius`, `rail-grill`, `rail-slice`). A guide is a hint: nothing fails when an agent
+ignores it, and `rail stats` shows whether it helps. [`guides`](engine/docs/guides.md) has the situations and how to write a page.
 
 Everything else is in the docs that ship with the engine, readable before `rail init` too. `rail docs` lists
 the pages, which are also in [`engine/docs/`](engine/docs):

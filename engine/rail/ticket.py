@@ -210,9 +210,10 @@ def lint(ticket, expect_id=None):
     reason = ticket.get("person_reason", "")
     if isinstance(reason, str) and (reason.strip() or ticket.tier == "PERSON") and not ticket.kinds:
         bad = next((part for kind, part in ticket.reason_parts() if not kind), reason)
-        errors.append("a PERSON ticket needs person_reason: the id of what in the change can't be undone (rail docs"
-                      " kinds), a colon, and where, such as person_reason = \"access: src/auth/session.py\"."
-                      " Separate several with \"; \". A change with none of those kinds is AUTO"
+        errors.append(f"a PERSON ticket needs person_reason: the id of what in the change can't be undone"
+                      f" ({', '.join(KINDS)}), a colon, and where, such as"
+                      " person_reason = \"access: src/auth/session.py\". Separate several with \"; \". A change with"
+                      " none of those kinds is AUTO"
                       if not reason.strip() else
                       f"person_reason must start with a kind's id and a colon, and so must each part after a \"; \""
                       f" ({', '.join(KINDS)}); got '{bad}'")

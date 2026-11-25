@@ -1,8 +1,3 @@
----
-name: rail-build
-description: Work a claimed Rail ticket from its contract to a change that is ready for rail advance. Use at the start of work on a ticket, when rail next returns an agent_task for a ticket in implementing.
----
-
 # Build a ticket
 
 - **Assumes:** you hold a claimed ticket and work in its worktree (`cwd` in the answer of `rail next`). The

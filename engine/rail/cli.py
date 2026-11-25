@@ -52,18 +52,23 @@ GUIDED = {"IMPLEMENT": "start", "STEP_FAILED": "stuck", "ANSWER_FINDINGS": "find
 
 
 def guide(project, code, action, f=None):
-    """The [guides] page for the brief's situation: a line in the brief, and the first time for a ticket a `guided`
-    event. A hint only: a page that isn't there names nothing, and `rail doctor` says so. `start` is named once per
-    ticket, and `stuck` only once the same failure has repeated. Returns {situation, path}, or None."""
+    """The [guides] page for the brief's situation: its text (or the sections the key names) at the end of the
+    brief, and the first time for a ticket a `guided` event. The engine puts the text in front of the agent rather
+    than naming a page it may not open. A page or section that isn't there adds nothing, and `rail doctor` says so.
+    `start` is given once per ticket, and `stuck` only once the same failure has repeated. Returns {situation,
+    path}, or None."""
+    from . import docs
+
     situation = GUIDED.get(code)
     path = project.config["guides"][situation] if situation else ""
     given = {e.get("situation") for e in f.t.events if e.get("event") == "guided"} if f else set()
     if not path or (situation == "start" and "start" in given) or (
             situation == "stuck" and f.same.get(f.failing, 0) < 2):
         return None
-    if not os.path.isfile(os.path.join(f.t.worktree if f and f.t.worktree else project.root, path)):
+    text = docs.read_part(path, f.t.worktree if f and f.t.worktree else project.root)
+    if not text:
         return None
-    action["brief"] += f"\n\nGuide: read {path} and follow it."
+    action["brief"] += "\n\n" + text
     if f and situation not in given and not f.rebasing:  # mid-rebase the engine writes nothing to the ticket
         ensure_local(project, f.t)
         project.append_events(f.t, [event(f.id, "guided", situation=situation, path=path)], f"guide: {situation}")
@@ -869,7 +874,7 @@ def cmd_sweep(project, args):
 def cmd_source(project, args):
     """`rail source NAME`: run the source's fetch and hand the agent a brief that files tickets from its output.
     With no name, the sources and how many of each one's tickets are open."""
-    from . import sources
+    from . import docs, sources
     from .util import run_shell, tail
 
     project.sync()
@@ -881,7 +886,7 @@ def cmd_source(project, args):
             open_ = sum(state not in sources.ENDED for _, _, state in sources.tickets_of(facts, name))
             rows.append({"name": name, "open": open_, "max_open": source.max_open})
         text = "\n".join(f"{r['name']}: {r['open']}/{r['max_open']} open" for r in rows) or \
-            f"No sources: add one as {sources.DIR}/NAME.md (rail docs sources)."
+            f"No sources: add one as {sources.DIR}/NAME.md.\n\n" + docs.read_part("sources.md#Sources", docs.DOCS)
         return answer(code="SOURCES", sources=rows, text=text)
     source = sources.load(project, args.name)
     mine = sources.tickets_of(facts, source.name)
@@ -905,8 +910,10 @@ def cmd_source(project, args):
         return answer(code="SOURCE_EMPTY", steps_=[step], source=source.name, action={"kind": "rest", "brief": (
             f"The fetch of source {source.name} printed nothing, so there is nothing to file.")})
     step = {"step": "fetch", "status": "ran", "result": "pass", "detail": f"{len(output)} characters"}
+    spec = f"{project.base_ref}:.rail/tickets/TEMPLATE.md"
+    template = gitx.read_blobs([spec], project.root).get(spec) or ""
     return answer(owner="agent", code="SOURCE", steps_=[step], source=source.name, room=room,
-                  action={"kind": "agent_task", "brief": sources.brief(source, output, room, mine)})
+                  action={"kind": "agent_task", "brief": sources.brief(source, output, room, mine, template)})
 
 
 def cmd_consult(project, args):
@@ -1784,8 +1791,11 @@ def provision_task(project):
     refused the change to its own settings, and work must not wait for that."""
     if not cloud() or not project.config["commands"]["provision"] or provisioned(project):
         return None
+    from . import docs
+
     brief = ("rail provision\nIt installs what this project's checks need ([commands] provision). If this session"
-             " refuses it, the environment's setup script runs it before a session starts: rail docs cloud")
+             " refuses it, the environment's setup script runs it before a session starts.\n\n"
+             + docs.read_part("cloud.md#Set up, once", docs.DOCS))
     return answer(owner="agent", code="PROVISION", cwd=".",
                   action={"kind": "script", "brief": brief, "command": "rail provision"})
 
