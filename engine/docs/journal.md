@@ -164,7 +164,7 @@ sweep. The schema is `.rail/engine/review-v1.json`; the default command passes i
 | `findings[].evidence.reproduced` | Added by the engine: true when every non-empty line of `output`, normalised as failure signatures are (numbers, hashes, paths and spacing left out), is in the re-run's output. Nothing is decided from it | `rail stats` |
 | `findings[].evidence.scripts` | Added by the engine: `{path: text}` of each untracked file the command names (at most 3, each cut at 8,000 characters), which the clean-up removes | The author's brief, with the finding |
 | `findings[].repeats` | On a re-review: the id of the earlier finding this one repeats | The engine: the finding keeps its id and is open again |
-| `kinds` | Optional, usually empty: each thing in the change a revert doesn't undo, as `kind` (an id from `rail docs kinds`; an unknown one makes the output invalid), `file`, `line` and `why` | `advance`: from a `review` or `security` run, an AUTO ticket becomes PERSON; on a PERSON ticket they are only recorded. A refuter's or a sweep's are ignored |
+| `kinds` | Optional: each thing in the change a revert doesn't undo, as `kind` (an id from `rail docs kinds`; an unknown one makes the output invalid), `file`, `line` and `why` | `advance`: from a `review` or `security` run, an AUTO ticket becomes PERSON; on a PERSON ticket they are only recorded. A refuter's or a sweep's are ignored |
 
 After the schema, the engine checks what only it can: `file` is a tracked path at the reviewed commit and
 `line` is inside it (within two lines, because reviewers are sometimes off by one or two); `repeats` names

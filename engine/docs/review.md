@@ -78,15 +78,14 @@ counts only once a later run doesn't repeat it.
 A PERSON ticket adds a security seat: a second run whose brief asks only about security. Each blocking
 finding it reports goes to a refuter at once. A person merges a PERSON ticket.
 
-**The reviewer lists what a revert doesn't undo.** A review or security run returns `kinds`: each thing in
-the change of a kind in `rail docs kinds`, as `{kind, file, line, why}`, on every ticket; it is usually
-empty. The engine checks each `kind` against the list, and an unknown id makes the output invalid: the run
-is started once more and counts against no one. On an AUTO ticket a non-empty `kinds` writes `tier_raised`
-with the reason `reviewer` and the kinds, and the ticket is PERSON from then on: the security seat runs
-next, and a person merges. A later run with none never lowers it. On a PERSON ticket the kinds are only
-recorded. Either way they are kept with the run and shown in the pull request's Risk section and in the
-wait for a person. A refuter's are ignored. A change that is large or new but can be reverted is not a
-kind: the reviewer reports its problems as findings.
+**The reviewer lists what a revert doesn't undo.** A review or security run returns `kinds`: each thing in the
+change of a kind in `rail docs kinds`, as `{kind, file, line, why}`, on every ticket. The engine checks each
+`kind` against the list, and an unknown id makes the output invalid: the run is started once more and counts
+against no one. On an AUTO ticket a non-empty `kinds` writes `tier_raised` with the reason `reviewer` and the
+kinds, and the ticket is PERSON from then on: the security seat runs next, and a person merges. A later run
+with none never lowers it. On a PERSON ticket the kinds are only recorded. Either way they are kept with the
+run and shown in the pull request's Risk section and in the wait for a person. A refuter's are ignored. A
+change that is large or new but can be reverted is not a kind: the reviewer reports its problems as findings.
 
 The reviewer's prompt says what the common kinds look like, not only their ids. In a test of 136 model runs,
 a prompt with the ids alone listed a permission check the ticket asked to widen (`access`) in 1 of 4 runs;
