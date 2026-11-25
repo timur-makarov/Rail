@@ -1,0 +1,15 @@
+# The Go profile. rail init reads it when a tracked manifest below marks Go, and writes what it holds into the
+# project's own files (rail docs languages). After init the project's files are the project's.
+
+manifests = ["go.mod"]                                     # file names, matched in any folder
+domains = ["proxy.golang.org", "sum.golang.org"]           # the module proxy and the checksum database
+generated = ["**/*.pb.go"]                                 # protobuf and gRPC output, left out of the size count
+migration_paths = []
+tests = ["**/*_test.go", "**/testdata/**"]
+
+[[rules]]
+id = "no-new-go-suppressions"
+files = "**/*.go"
+forbid = ["//nolint", "t.Skip("]
+fix = "Fix the cause instead of silencing the check."
+why = "the Go profile: a linter silenced, or a test skipped"

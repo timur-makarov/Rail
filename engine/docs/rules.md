@@ -21,9 +21,13 @@ fix = "Create migrations with make migration."
 - `fix` is printed to the agent when the rule breaks.
 - `why` is a note for whoever reads the config, such as the ticket that added the rule. The engine prints it nowhere.
 - `allow` lists paths the rule skips.
+- Globs, here and everywhere in the config: `**` matches across folders, `*` and `?` stay inside one, and
+  `{ts,tsx}` matches either word, as in `**/*.{ts,tsx}`.
 - A rule prevents mistakes; real dependency analysis belongs in `verify`, with any checker the project likes.
 - A finding a rule already covers is not a review finding.
 - The seed ships two rules: no new suppressions or skipped tests, and a `SHORTCUT` marker must carry its
   ticket's number. The marker is how an agent says "I cut this corner on purpose": `SHORTCUT(41): linear
   scan, fine under 1,000 rows; index it past that`. A rule is a text match, so it refuses the marker without
   a number; it can't find a shortcut nobody marked.
+- `rail init` adds one rule per language it finds, forbidding that language's suppression markers in its own
+  files only (`rail docs languages`).

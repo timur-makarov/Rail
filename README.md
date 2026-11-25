@@ -3,6 +3,8 @@
 Rail keeps coding agents on a railroad: it says what is legal next, what counts as done, and when a person
 must act. The agent writes the code; the engine owns ticket state. It is built for git, GitHub and Claude
 Code, first of all for Claude Code cloud sessions, and for macOS and Linux, with Python 3.11 or newer.
+It serves projects in Python, TypeScript, Rust and Go first: `rail init` finds them and writes what it knows
+about each (`rail docs languages`).
 
 ## How it works
 

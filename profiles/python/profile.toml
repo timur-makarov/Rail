@@ -1,0 +1,15 @@
+# The Python profile. rail init reads it when a tracked manifest below marks Python, and writes what it holds
+# into the project's own files (rail docs languages). After init the project's files are the project's.
+
+manifests = ["pyproject.toml", "setup.cfg", "requirements*.txt"]   # file names, matched in any folder
+domains = ["pypi.org", "files.pythonhosted.org"]           # the package index, for the agent's own installs
+generated = ["**/*_pb2.py", "**/*_pb2_grpc.py"]            # protobuf and gRPC output, left out of the size count
+migration_paths = ["**/alembic/versions/**"]               # Alembic's migrations
+tests = ["**/tests/**", "**/test_*.py", "**/*_test.py", "**/conftest.py", "**/pytest.ini"]
+
+[[rules]]
+id = "no-new-python-suppressions"
+files = "**/*.py"
+forbid = ["# type: ignore", "# pyright: ignore", "@pytest.mark.skip", "@pytest.mark.xfail"]
+fix = "Fix the cause instead of silencing the check."
+why = "the Python profile: a type checker silenced, or a test skipped or expected to fail"

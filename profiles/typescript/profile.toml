@@ -1,0 +1,17 @@
+# The TypeScript profile, which JavaScript gets too. rail init reads it when a tracked manifest below marks it, and
+# writes what it holds into the project's own files (rail docs languages). After init the files are the project's.
+
+manifests = ["package.json"]                               # file names, matched in any folder
+type_check_file = "tsconfig.json"                          # type checking is on only where one is tracked
+domains = ["registry.npmjs.org", "registry.yarnpkg.com"]   # npm's registry (npm, pnpm, Bun) and Yarn's default
+generated = []
+migration_paths = ["**/drizzle/**"]                        # Drizzle Kit's migrations
+tests = ["**/*.test.*", "**/*.spec.*", "**/__tests__/**", "**/e2e/**", "**/vitest.config.*",
+         "**/playwright.config.*"]
+
+[[rules]]
+id = "no-new-typescript-suppressions"
+files = "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"
+forbid = ["@ts-expect-error", "@ts-nocheck", "oxlint-disable", "biome-ignore", ".only("]
+fix = "Fix the cause instead of silencing the check."
+why = "the TypeScript profile: a type error or lint silenced, or a focused test (.only) that skips the rest"

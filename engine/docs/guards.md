@@ -96,5 +96,6 @@ process with the repository's settings: their hooks run in it, the guard include
 apply only in a folder Claude Code trusts. The default `[worker] command` uses auto mode, and
 `--permission-prompts none` turns a call nobody can approve into a denial the worker reads.
 `api.anthropic.com` is an allowed domain, so the reviewer, which is a `claude -p` process the engine starts,
-can answer when `rail advance` is one command of a longer call and stays sandboxed. Add the hosts your own
-`verify` needs to `sandbox.network.allowedDomains`.
+can answer when `rail advance` is one command of a longer call and stays sandboxed. `rail init` adds the
+package registries of the languages it finds (`rail docs languages`). Add the other hosts your own `verify`
+needs to `sandbox.network.allowedDomains`.

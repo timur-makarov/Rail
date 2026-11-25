@@ -129,12 +129,20 @@ class Validation(RailTest):
             '[[rules]]\nid = "x"\nforbids = ["# noqa"]\n': "config: unknown key 'rules[0].forbids' (did you mean 'forbid'?)",
             '[[rules]]\nid = "x"\nforbid = "# noqa"\n': "config: rules[0].forbid must be list",
             '[[rules]]\nforbid = ["# noqa"]\n': "config: rules[0] needs an id",
+            '[[profiles]]\nname = "go"\npath = "**"\n': "config: unknown key 'profiles[0].path' (did you mean 'paths'?)",
+            '[[profiles]]\npaths = "**"\n': "config: profiles[0] needs a name",
+            'profiles = "go"\n': "config: profiles must be an array of tables ([[profiles]])",
+            '[tests]\npaths = "tests/**"\n': "config: tests.paths must be list",
             "[commands]\nverify = make test\n": "config: .rail/config.toml is not valid TOML",
         }
         for text, message in cases.items():
             with self.subTest(message):
                 p.write(".rail/config.toml", text)
                 self.assertIn(message, p.rail("status", expect=2)["reason"]["message"])
+
+    def test_a_config_with_profiles_and_test_paths_loads(self):
+        p = self.fixture(config=CONFIG + '\n[tests]\npaths = ["**/*_test.go"]\n\n[[profiles]]\nname = "go"\npaths = "api/**"\n')
+        self.assertEqual(p.rail("status")["reason"]["code"], "STATUS")
 
     def test_a_packs_own_section_is_taken_only_when_the_pack_is_there(self):
         p = self.fixture(config=CONFIG + '\n[hello]\ngreeting = "hi"\n')

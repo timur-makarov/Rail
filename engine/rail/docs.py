@@ -74,7 +74,11 @@ READERS = {
                    " gathers the findings reviewers parked and the checks they proposed. 0 switches this off",
     "map.depth": "doc-lint: the directory depth ## Areas must cover",
     "map.ignore": "doc-lint: directories that need no ## Areas row",
+    "tests.paths": "nothing yet: globs of the files that hold tests and their runner's settings, which rail init"
+                   " writes from the language profiles it finds (rail docs languages)",
     "rules": "ship and CI: structure rules on added lines and files (rail docs rules)",
+    "profiles": "nothing yet: the language profiles rail init found, each a name and the paths that hold its files"
+                " (rail docs languages)",
     "guides.start": "next and advance: the page named in a ticket's first IMPLEMENT brief, once per ticket. Each"
                     " guides key is a path from the repository root, or empty for none; the seed config names the"
                     " rail-* skills, and a config with no [guides] table names none (rail docs guides)",
@@ -109,7 +113,8 @@ def config_page():
         else:
             shown = f"`{str(default).lower() if isinstance(default, bool) else repr(default)}`"  # TOML spells true
         lines.append(f"| `{name}` | {shown} | {READERS.get(name, '')} |")
-    lines += ["", "A `[[rules]]` table takes: " + ", ".join(f"`{k}`" for k in configmod.RULE_KEYS) + "."]
+    for name, (keys, needed) in configmod.TABLE_ARRAYS.items():
+        lines += ["", f"A `[[{name}]]` table takes: " + ", ".join(f"`{k}`" for k in keys) + f"; `{needed}` is needed."]
     for name, default in long:
         lines += ["", f"## Default `{name}`", "", "```text", default, "```"]
     return "\n".join(lines) + "\n"

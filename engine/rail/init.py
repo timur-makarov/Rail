@@ -2,14 +2,17 @@
 
 import json
 import os
+import re
 import shutil
 import stat
+import tomllib
 
 from . import gitx
-from .util import RailError
+from .util import RailError, globmatch, match_any
 
 # The framework this engine came from: engine/rail/init.py -> the framework's root.
 FRAMEWORK = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+PROFILES = os.path.join(FRAMEWORK, "profiles")
 
 LAUNCHER = '''#!/usr/bin/env python3
 """This project's rail launcher: it runs the engine in ../engine. The SessionStart hook puts this folder on PATH."""
@@ -110,6 +113,87 @@ def _merge(project_value, ours):
     return project_value
 
 
+def _load_profile(name):
+    with open(os.path.join(PROFILES, name, "profile.toml"), "rb") as f:
+        return tomllib.load(f)
+
+
+def detect(root):
+    """The language profiles the tracked manifests mark: [{name, paths, profile, type_check}]. A manifest at the root
+    gives paths "**"; manifests only below it give the top-most folders that hold one, as "web/**" or "{a,b}/**".
+    type_check is None for a profile with no type_check_file, else whether one is tracked under its paths."""
+    if not os.path.isdir(PROFILES):
+        return []
+    skip = set(_load_profile("common")["ignore"])
+    tracked = [path for path in gitx.git(["ls-files", "-z"], root).stdout.split("\0")
+               if path and not skip.intersection(path.split("/")[:-1])]
+    found = []
+    for name in sorted(os.listdir(PROFILES)):
+        if name == "common" or not os.path.isfile(os.path.join(PROFILES, name, "profile.toml")):
+            continue
+        profile = _load_profile(name)
+        folders = {os.path.dirname(path) for path in tracked if match_any(profile["manifests"], os.path.basename(path))}
+        if not folders:
+            continue
+        top = sorted(f for f in folders if not any(f.startswith(other + "/") for other in folders))
+        paths = "**" if "" in folders else f"{top[0]}/**" if len(top) == 1 else "{" + ",".join(top) + "}/**"
+        type_check = None
+        if profile.get("type_check_file"):
+            type_check = any(os.path.basename(path) == profile["type_check_file"] and globmatch(paths, path)
+                             for path in tracked)
+        found.append({"name": name, "paths": paths, "profile": profile, "type_check": type_check})
+    return found
+
+
+def _union(*lists):
+    """The lists joined in order, each item once."""
+    out = []
+    for items in lists:
+        out += [item for item in items if item not in out]
+    return out
+
+
+def _set_list(text, table, key, values):
+    """The seed config's text with a list's value replaced, the line's comment kept. table None: a top-level key."""
+    start = 0 if table is None else text.index(f"\n[{table}]")
+    found = re.compile(rf"^{key} = \[[^\]]*\]", re.M).search(text, start)
+    if not found:
+        raise RailError(f"the seed config has no {key} to fill in" + (f" under [{table}]" if table else ""))
+    return text[:found.start()] + f"{key} = {json.dumps(values)}" + text[found.end():]
+
+
+def _toml_table(header, item, comment):
+    lines = [f"[[{header}]]".ljust(42) + f"# {comment}"]
+    lines += [f"{key} = {json.dumps(value)}" for key, value in item.items()]
+    return "\n".join(lines) + "\n"
+
+
+def with_profiles(text, found):
+    """The seed config's text with what the profiles found add: migration paths, generated files left out of the
+    size count, [tests] paths, a [[profiles]] entry each and their suppression-marker rules."""
+    if not found:
+        return text
+    seed = tomllib.loads(text)
+    profiles = [f["profile"] for f in found]
+    text = _set_list(text, None, "migration_paths",
+                     _union(seed["migration_paths"], *(p["migration_paths"] for p in profiles)))
+    text = _set_list(text, "size", "exclude", _union(seed["size"]["exclude"], *(p["generated"] for p in profiles)))
+    text = _set_list(text, "tests", "paths", _union(seed["tests"]["paths"], *(p["tests"] for p in profiles)))
+    tables = [_toml_table("profiles", {"name": f["name"], "paths": f["paths"]},
+                          "written by rail init from the manifests it found (rail docs languages)") for f in found]
+    tables += [_toml_table("rules", rule, f"from the {f['name']} profile")
+               for f in found for rule in f["profile"]["rules"]]
+    return text.rstrip("\n") + "\n\n" + "\n".join(tables)
+
+
+def _describe(found):
+    words = []
+    for f in found:
+        note = f", no {f['profile']['type_check_file']}: type checking off" if f["type_check"] is False else ""
+        words.append(f"{f['name']} ({f['paths']}{note})")
+    return ", ".join(words)
+
+
 def _base_branch(root):
     """The remote's default branch; with no remote, the branch init runs on."""
     head = gitx.git(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], root, check=False).stdout.strip()
@@ -166,6 +250,15 @@ def init(cwd):
         _write(source, f'url = "{url}"\ncommit = "{commit}"\n')
         step("source", True, f"framework {url} at {commit[:12]}")
 
+    found = detect(root)
+    config_new = not os.path.exists(os.path.join(rail_dir, "config.toml"))
+    if not found:
+        step("profiles", False, "no tracked Python, TypeScript, Rust or Go manifest: nothing language-specific written")
+    else:
+        step("profiles", True, f"found {_describe(found)}; " + (
+            "wrote each to .rail/config.toml with its rules, migration paths, generated files and [tests] paths"
+            if config_new else ".rail/config.toml was there already, so nothing was written to it"))
+
     copies = {
         "config.toml": ".rail/config.toml",
         "tickets/TEMPLATE.md": ".rail/tickets/TEMPLATE.md",
@@ -196,6 +289,7 @@ def init(cwd):
             text = f.read()
         if src == "config.toml":
             text = text.replace('base_branch = "main"', f'base_branch = "{_base_branch(root)}"', 1)
+            text = with_profiles(text, found)
         _write(target, text)
         step(dest, True, "added")
 
@@ -223,6 +317,8 @@ def init(cwd):
     settings = os.path.join(root, ".claude", "settings.json")
     with open(os.path.join(seed, "settings.json")) as f:
         ours = json.load(f)
+    domains = _union(*(f["profile"]["domains"] for f in found))  # the package registries, for the agent's own installs
+    ours["sandbox"]["network"]["allowedDomains"] += domains
     try:
         theirs = json.load(open(settings)) if os.path.exists(settings) else {}
     except ValueError:
@@ -235,7 +331,8 @@ def init(cwd):
             step(".claude/settings.json", False, "it has Rail's settings already")
         else:
             _write(settings, json.dumps(merged, indent=2) + "\n")
-            step(".claude/settings.json", True, "merged hooks, permissions, sandbox and Bash timeouts")
+            step(".claude/settings.json", True, "merged hooks, permissions, sandbox and Bash timeouts"
+                 + (f"; the sandbox allows {', '.join(domains)}" if domains else ""))
 
     gitignore = os.path.join(root, ".gitignore")
     lines = open(gitignore).read().splitlines() if os.path.exists(gitignore) else []
