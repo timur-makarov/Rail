@@ -255,7 +255,8 @@ class Sweep(RailTest):
         parked = {"severity": "parked", "file": "src/calc.py", "claim": "calc has no subtract, and callers negate add."}
         checked = {"severity": "advisory", "file": "src/calc.py", "claim": "add has no test.",
                    "check": "a test per public function"}
-        p.queue_reviews({"summary": "Read it.", "findings": [parked, checked]})
+        left = {"severity": "advisory", "file": "api/handlers.py", "claim": "handle has no docstring."}
+        p.queue_reviews({"summary": "Read it.", "findings": [parked, checked]}, {"summary": "Read it.", "findings": [left]})
         p.rail("advance", "1")
         p.rail("answer", "1", "F2", "fixed", "Added a test.")
         self.assertEqual(p.rail("advance", "1")["state"], "merged")
@@ -263,7 +264,7 @@ class Sweep(RailTest):
         p.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
         p.rail("next")
         p.write("api/handlers.py", "def handle():\n    return 201\n", base=p.worktree("2"))
-        p.rail("advance", "2")
+        self.assertEqual(p.rail("advance", "2")["state"], "merge-ready")  # an open advisory finding holds nothing
         self.assertEqual(p.rail("advance", "2")["state"], "merged")
 
         offer = p.rail("next")
@@ -276,6 +277,7 @@ class Sweep(RailTest):
         self.assertIn("2 tickets merged; 0 commits merged without a review", summary)
         self.assertIn("no review run", summary)
         self.assertIn("ticket 1 F1: calc has no subtract, and callers negate add.", summary)
+        self.assertIn("ticket 2 F1 (advisory, left open): handle has no docstring.", summary)
         self.assertIn("- a test per public function (1/F2)", summary)
         self.assertEqual(p.rail("advance", "3")["state"], "merge-ready")
         self.assertEqual(p.rail("advance", "3")["state"], "merged")

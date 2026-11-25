@@ -143,7 +143,8 @@ One file per ticket. The engine appends one entry per run.
 1. A `review` run exists with this `patch_id`. On a PERSON ticket, a `security` run exists too. An AUTO
    ticket whose every changed product file is in `[review] skip_paths`, or that changes no product file,
    needs no run.
-2. No finding is open: the last `finding` event for every id has another outcome.
+2. No blocking finding is open: the last `finding` event for every blocking id has another outcome. An
+   advisory finding may stay open.
 3. A blocking finding marked `fixed` counts only once a later run of the same role didn't repeat it. Marking
    it fixed and changing nothing doesn't pass.
 
@@ -156,7 +157,7 @@ sweep. The schema is `.rail/engine/review-v1.json`; the default command passes i
 | Field | Holds | Read by |
 |---|---|---|
 | `summary` | One or two sentences: what was checked and how. In a refuter run: why the finding holds or doesn't | The pull request's Evidence row; the reason on a finding the refuter dismisses |
-| `findings[].severity` | `blocking` (must not merge as it is), `advisory` (worth fixing, safe to merge), `parked` (a real problem this change didn't cause) | `advance`: a blocking finding holds the ticket; a parked one needs no answer |
+| `findings[].severity` | `blocking` (must not merge as it is), `advisory` (worth fixing, safe to merge), `parked` (a real problem this change didn't cause) | `advance`: a blocking finding holds the ticket; an advisory one may stay open, and the sweep gathers it; a parked one needs no answer |
 | `findings[].file`, `line` | A path from the repository root, and a line in the file as it is after the change | The author's next brief |
 | `findings[].claim` | What is wrong, and the input or sequence that shows it | The author, the refuter and the person |
 | `findings[].check` | A deterministic check that would catch this kind of mistake, when one exists | The sweep, which turns repeated kinds into checks |

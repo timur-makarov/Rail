@@ -36,11 +36,12 @@ def _findings(f, intro):
         return ""
     return "\n".join([
         "", intro,
-        f"Fix each blocking finding in the worktree. Then answer every finding: rail answer {f.id} F1 fixed \"what you"
+        f"Fix each blocking finding in the worktree. Then answer each one: rail answer {f.id} F1 fixed \"what you"
         f" changed\", or declined \"why it is not a problem\", or parked \"a real problem this change didn't cause\".",
         "Declining or parking a blocking finding disputes it, and a fresh refuter decides whether it holds and whether"
-        " this change caused it.",
-        *[f"- {f.ledger.describe(fid, scripts=True)}" for fid in ids],
+        " this change caused it. An advisory finding doesn't hold the ticket: fix and answer it too, or leave it"
+        " unanswered for the sweep.",
+        *[f"- {f.ledger.describe(fid, scripts=True)}" for fid in ids + f.ledger.open_advisory()],
     ])
 
 

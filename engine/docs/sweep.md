@@ -7,7 +7,8 @@ The sweep looks back over what merged since the last sweep. It does two things:
   that have no `Ticket:` trailer, or whose `Review:` trailer says `none`. A merge commit counts once, however
   many commits it holds.
 - It gathers what reviewers left behind in every ticket that merged, reviewed or not: the findings they
-  parked, and the checks they proposed for findings that were fixed. Nothing else reads these.
+  parked, the advisory findings the author left open, and the checks they proposed for findings that were
+  fixed. Nothing else reads these.
 
 `rail next` offers `rail sweep` when no ticket work is waiting and either is true:
 
@@ -25,17 +26,17 @@ next sweep starts. The first sweep starts where Rail was set up.
 - **Free part:** doc-lint on the base branch, and each structure rule counted over the whole tree.
 - **Review part:** only when something merged with no review. One pass of the reviewer over those changes,
   looking for duplication across tickets, logic in the wrong area, weak checks, security and stale docs. It
-  also reads the parked findings and the proposed checks. With nothing unreviewed there is no model run: the
+  also reads the parked and open advisory findings and the proposed checks. With nothing unreviewed there is no model run: the
   journal gets a `harvest` step instead.
 - **Output:** tickets, never edits, and a one-page summary in `.rail/journal/NN-summary.md`: the free part,
-  the review's findings, the parked findings and the proposed checks by kind. The agent opens a ticket for
+  the review's findings, the parked and open advisory findings and the proposed checks by kind. The agent opens a ticket for
   each finding that names something wrong (a finding about style gets none), and one ticket
   "make it a check: ..." for each kind of proposed check, so a mistake that could happen again ends as a
   test, a rule or a lint. Filing tickets is writing contracts, so the answer (`SWEEP_TICKETS`) names
   `[worker] contract`'s model and effort, and `rail work NN` runs it like any ticket's work: a script that
   drives Rail with `rail next`, `rail work` and `rail advance` goes through a sweep with no step of its own.
 
-When the sweep finds nothing (no unreviewed change, no parked finding, no proposed check, and doc-lint is
+When the sweep finds nothing (no unreviewed change, no parked or open advisory finding, no proposed check, and doc-lint is
 clean), the agent gets no task: `rail next` answers `SWEEP_EMPTY` with `rail advance NN`, and the sweep's
 ticket merges, which moves the marker.
 

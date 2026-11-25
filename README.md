@@ -52,7 +52,7 @@ again to retry. A stuck PERSON ticket waits for a person.
 
 **A fresh agent reviews every change, and the author can't steer it.** The engine starts the reviewer
 itself, in the ticket's worktree, with a brief built from the ticket and the diff, and binds the result to
-the exact patch. A blocking finding holds the merge. The author answers every finding. When it disputes a
+the exact patch. A blocking finding holds the merge. The author answers every blocking finding. When it disputes a
 blocking one, a second fresh agent, the refuter, decides: it sees the finding and its evidence, not the
 author's argument. The only changes that skip the reviewer are those to paths you list in
 `[review] skip_paths`, such as docs, and a sweep reads those afterwards.

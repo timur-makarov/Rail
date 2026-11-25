@@ -399,11 +399,13 @@ def describe(project, t, ticket, tier):
     risk = (f"{tier}. Touches {', '.join(ticket.scope)}. {migrations} "
             f"Changed lockfiles: {', '.join(lockfiles) or 'none'}.")
     risk += "".join(f"\n\nThe reviewer found what a revert doesn't undo: {said}" for said in ledger.asked_for_person())
+    advisory = [ledger.describe(fid, with_answer=False) for fid in ledger.open_advisory()]
     external = ticket.get("external_id", "") or ""
     body = [
         "## Why", f"{ticket.sections.get('Why', '')} (ticket {t.id})", "",
         "## Look at", ticket.sections.get("Look at") or "(not written)", "",
         "## Evidence", "| Step | Status |", "|---|---|", *rows, "",
+        *(["Advisory findings left open, for the sweep:", *[f"- {line}" for line in advisory], ""] if advisory else []),
         "## Risk", risk, "",
         # Trailers. The sweep reads Review: to find what merged with no reviewer.
         f"Ticket: {t.id}", f"Tier: {tier}",
