@@ -93,8 +93,9 @@ restarted from a saved stage starts every worker fresh.
 
 Before an arm joins a run, check it: `bench/bench check-arm NAME`. It runs one trivial situation end to end.
 
-The arms here: `rail` (Rail as the pinned commit has it), `plain-sonnet`, `plain-opus`, `plain-haiku`, and the fake
-arms `fake` and `fake-plain` the suite uses.
+The arms here: `rail` (Rail as the pinned commit has it), `rail-ladder` (arm 1 of the first run; its two-rung ladder
+is in the project files of set 2026-12, since an arm names one rung only), `plain-sonnet`, `plain-opus`, `plain-haiku`,
+and the fake arms `fake` and `fake-plain` the suite uses.
 
 ## Run
 
@@ -141,6 +142,12 @@ compared arm has a scored run on. Ranges come from resampling whole situations w
 seed. Every rate has its counts beside it. Tainted runs and runs to run again are left out and counted. Unlocked
 runs are shown apart. Fill `[cutoffs]` in `bench/config.toml` so a situation closed before a model's training cutoff
 is left out.
+
+## The first set and the cloud
+
+`bench/sets/2026-12/` holds the eight projects of the first run and their eight reserves, every candidate in each
+(`notes/` says how each project's commands were found and which are unverified). `bench/cloud/` holds the scripts the
+cloud sessions run them with (its README).
 
 ## Not built yet
 

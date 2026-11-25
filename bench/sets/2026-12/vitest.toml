@@ -1,0 +1,3552 @@
+# vitest: vitest-dev/vitest, typescript, reserve project of set 2026-12 (fulltest PLAN sections 3 and 4).
+# Settings: written by reading the project's CI and docs at the oldest and newest start commit, nothing run;
+# every command marked `unverified` is for the admission session to try and fix. Notes: notes/vitest.md.
+# Situations: every candidate of bench-candidates/vitest.toml (REPORT-window-rule.md, 2026-11-26), in its order,
+# all 35 of them.
+# half is `work` for every candidate until the split after admission and the hardness runs (cloud/README.md).
+# hidden_tests: the fix's changed files (start..fix, compare API) that match [project] tests or the travel
+# globs ["test/**", "packages/ui/client/**/__snapshots__/**"],
+# and not []; deleted files left out.
+# self_filed: the issue's author opened the fix. bot_filed: the issue's author is an automation account
+# (a login ending in bot or -ci, or turso-github-handyman, roboturso). security_trap: the reading pass's
+# flag for a request whose natural fix invites a flaw. kind race is the race flag.
+
+# vitest-dev/vitest for Rail's bench: [project], [commands], [rail.config.commands]. No [[situation]] tables here.
+# Read at the oldest start d758b4755dc7534118fa0f62f16758881a8a6123 (vitest-35, pnpm 11.6.0, eslint) and the newest
+# start 68dc42ccc9ac8ee74b71416b659630296ee97e9b (vitest-01, pnpm 11.28.6, oxlint). See vitest.md.
+#
+# Shape of every test command: (1) use the pnpm that package.json pins, installed by setup into $BENCH_CACHE/pnpm/V;
+# (2) if pnpm-lock.yaml differs from HEAD, install offline from the store; (3) rebuild packages/*/dist when the
+# packages/ tree differs from the last build (tests run the BUILT packages, never src); (4) run vitest from the
+# suite's own folder test/SUITE with CI=true, as CI and AGENTS.md do; ANSI colour is stripped from the output only.
+
+[project]
+name = "vitest"
+repo = "https://github.com/vitest-dev/vitest"
+language = "typescript"
+package = "vitest"
+tests = [
+  "test/**/*.test.ts", "test/**/*.test.mts", "test/**/*.test.cts", "test/**/*.test.js", "test/**/*.test.mjs",
+  "test/**/*.test.cjs", "test/**/*.test.tsx", "test/**/*.test.jsx", "test/**/*.test-d.ts", "test/**/*.spec.ts",
+  "test/**/*.spec.js", "test/**/*.spec.tsx", "packages/ui/client/**/*.spec.ts",
+]
+# default typescript build_dirs (node_modules dist) are enough: no tracked file lives in a folder named dist; two
+# fixture folders named node_modules ARE tracked (see vitest.md). Do not add "coverage" or ".cache": tracked source
+# lives in packages/vitest/src/integrations/coverage and test/e2e/fixtures/dotted-files/**/.cache.
+
+[commands]
+# from: .github/workflows/ci.yml@68dc42ccc9 (pnpm i --filter '!docs'; setup-playwright: playwright install chromium
+#   --only-shell; pnpm run build) and the same steps at d758b4755d; CONTRIBUTING.md and AGENTS.md@68dc42ccc9
+# unverified: installing the pinned pnpm with npm into $BENCH_CACHE, the --store-dir, and `playwright install-deps`
+#   as root on Ubuntu 24.04 (CI's ubuntu runner has the libraries already) were not run anywhere.
+setup = '''
+set -euo pipefail
+unset CLAUDECODE CLAUDE_CODE AI_AGENT
+V=$(node -p 'require("./package.json").packageManager.split("@")[1].split("+")[0]')
+P="$BENCH_CACHE/pnpm/$V"
+if [ ! -x "$P/bin/pnpm" ]; then
+  mkdir -p "$BENCH_CACHE/pnpm"
+  rm -rf "$P.tmp.$$"
+  npm_config_cache="$BENCH_CACHE/npm-cache" npm install -g --no-fund --no-audit --prefix "$P.tmp.$$" "pnpm@$V"
+  mv -T "$P.tmp.$$" "$P" 2>/dev/null || rm -rf "$P.tmp.$$"
+fi
+export PATH="$P/bin:$PATH" PLAYWRIGHT_BROWSERS_PATH="$BENCH_CACHE/ms-playwright"
+[ "$(pnpm --version)" = "$V" ] || { echo "bench: pnpm on PATH is not $V"; exit 1; }
+pnpm install --frozen-lockfile --store-dir "$BENCH_CACHE/pnpm-store" --filter '!docs'
+pw=test/e2e/node_modules/playwright/cli.js
+[ -f "$pw" ] || pw=test/browser/node_modules/playwright/cli.js
+if [ "$(id -u)" = 0 ] && command -v apt-get >/dev/null; then
+  node "$pw" install-deps chromium || echo "bench: playwright install-deps failed; browser-mode tests may fail"
+fi
+env -u PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD node "$pw" install chromium --only-shell
+rm -f node_modules/.bench-build node_modules/.bench-build.log
+pnpm run build > node_modules/.bench-build.log 2>&1 || { tail -n 80 node_modules/.bench-build.log; exit 1; }
+st=$( { git rev-parse HEAD:packages; git diff HEAD --binary -- packages; git ls-files -o --exclude-standard -z -- packages | xargs -0r sha256sum; } | sha256sum | cut -c1-64 )
+printf '%s\n' "$st" > node_modules/.bench-build
+echo "bench: files setup left visible to git (should be none):"
+git status --porcelain --untracked-files=all | head -n 20
+'''
+
+# from: AGENTS.md@68dc42ccc9 ("CI=true cd test/<test-folder> && pnpm test <test-file>"; "Tests execute built output
+#   ... rebuild before re-running tests"), test/*/package.json "test" scripts (vitest; node --test for node-runner)
+# unverified: the stamp-gated rebuild, the offline install when pnpm-lock.yaml changed, running vitest.mjs by path,
+#   the fixture->importer fallback (vitest-27 hides only test/unit/test/fixtures/timers.suite.ts) and node --test's
+#   tap reporter were not run; the build step itself is CI's (`pnpm run build`, about 18 s on CI's 4-core runner).
+test_files = '''
+set -o pipefail
+unset CLAUDECODE CLAUDE_CODE AI_AGENT NO_COLOR FORCE_COLOR GITHUB_ACTIONS
+R=$PWD
+V=$(node -p 'require("./package.json").packageManager.split("@")[1].split("+")[0]')
+export PATH="$BENCH_CACHE/pnpm/$V/bin:$PATH" PLAYWRIGHT_BROWSERS_PATH="$BENCH_CACHE/ms-playwright"
+[ "$(pnpm --version 2>/dev/null)" = "$V" ] || { echo "bench: pnpm $V is not in \$BENCH_CACHE/pnpm (run setup)"; exit 2; }
+if ! git diff --quiet HEAD -- pnpm-lock.yaml; then
+  pnpm install --offline --frozen-lockfile --ignore-scripts --store-dir "$BENCH_CACHE/pnpm-store" --filter '!docs' || exit 2
+fi
+st=$( { git rev-parse HEAD:packages; git diff HEAD --binary -- packages; git ls-files -o --exclude-standard -z -- packages | xargs -0r sha256sum; } | sha256sum | cut -c1-64 )
+if [ ! -f packages/vitest/dist/cli.js ] || [ "$(cat node_modules/.bench-build 2>/dev/null)" != "$st" ]; then
+  rm -f node_modules/.bench-build node_modules/.bench-build.log
+  pnpm run build > node_modules/.bench-build.log 2>&1 || { tail -n 60 node_modules/.bench-build.log; echo "bench: build failed"; exit 2; }
+  printf '%s\n' "$st" > node_modules/.bench-build.tmp && mv -f node_modules/.bench-build.tmp node_modules/.bench-build
+fi
+L=""
+for f in {files}; do
+  case "$f" in
+    test/*/*) s=${f#test/}; s=${s%%/*}; r=${f#test/$s/} ;;
+    packages/ui/*) s=@ui; r=${f#packages/ui/} ;;
+    *) continue ;;
+  esac
+  k=x
+  case "/$r" in
+    */fixtures/*|/deps/*|*/__snapshots__/*) ;;
+    *) case "$r" in *.test.[cm][jt]s|*.test.[jt]s|*.test.[jt]sx|*.test-d.ts|*.spec.[jt]s|*.spec.[jt]sx) k=t ;; esac ;;
+  esac
+  L="$L$s $k $r
+"
+done
+rc=0; n=0
+for s in $(printf '%s' "$L" | awk 'NF{print $1}' | sort -u); do
+  if [ "$s" = @ui ]; then d=packages/ui; else d=test/$s; fi
+  T=$(printf '%s' "$L" | awk -v s="$s" '$1==s && $2=="t"{print $3}' | sort -u)
+  if [ -z "$T" ]; then
+    for r in $(printf '%s' "$L" | awk -v s="$s" '$1==s && $2=="x"{print $3}'); do
+      case "$r" in *.ts|*.js|*.mts|*.mjs|*.cts|*.cjs|*.tsx|*.jsx) ;; *) continue ;; esac
+      b=${r##*/}; b=${b%.*}
+      T="$T $(cd "$d" && grep -rlF --include='*.test.*' --include='*.spec.*' --exclude-dir=node_modules --exclude-dir=fixtures -e "$b" . | sed 's|^\./||')"
+    done
+    T=$(printf '%s\n' $T | sort -u)
+  fi
+  [ -n "$(printf '%s' "$T" | tr -d '[:space:]')" ] || continue
+  n=$((n+1))
+  echo "bench: $d:" $T
+  case "$s" in
+    node-runner) (cd "$d" && node --test --test-reporter=tap $T) || rc=1 ;;
+    ui|browser|workspaces-browser) echo "bench: $d needs Playwright Test or every browser: not run"; rc=1 ;;
+    *) (cd "$d" && CI=true node "$R/packages/vitest/vitest.mjs" run $T 2>&1 | sed -u -e 's/\x1b\[[0-9;]*[A-Za-z]//g' -e 's/\r$//') || rc=1 ;;
+  esac
+done
+[ "$n" -gt 0 ] || { echo "bench: no runnable test file among the given files"; exit 1; }
+exit $rc
+'''
+
+# from: .github/workflows/ci.yml@68dc42ccc9 (test:ci:unit, test:ci:e2e, test:ci:coverage run each suite whole;
+#   CI times on a 4-core runner: test/unit 63 s, test/e2e 355 s, test/coverage-test 199 s; build 18 s)
+# unverified: which suites stand for which package is a choice made here (vitest's tests all live in test/*);
+#   typical run for packages/vitest (unit + e2e) is 8 to 12 minutes on 4 cores.
+test_package = '''
+set -o pipefail
+unset CLAUDECODE CLAUDE_CODE AI_AGENT NO_COLOR FORCE_COLOR GITHUB_ACTIONS
+R=$PWD
+V=$(node -p 'require("./package.json").packageManager.split("@")[1].split("+")[0]')
+export PATH="$BENCH_CACHE/pnpm/$V/bin:$PATH" PLAYWRIGHT_BROWSERS_PATH="$BENCH_CACHE/ms-playwright"
+[ "$(pnpm --version 2>/dev/null)" = "$V" ] || { echo "bench: pnpm $V is not in \$BENCH_CACHE/pnpm (run setup)"; exit 2; }
+if ! git diff --quiet HEAD -- pnpm-lock.yaml; then
+  pnpm install --offline --frozen-lockfile --ignore-scripts --store-dir "$BENCH_CACHE/pnpm-store" --filter '!docs' || exit 2
+fi
+st=$( { git rev-parse HEAD:packages; git diff HEAD --binary -- packages; git ls-files -o --exclude-standard -z -- packages | xargs -0r sha256sum; } | sha256sum | cut -c1-64 )
+if [ ! -f packages/vitest/dist/cli.js ] || [ "$(cat node_modules/.bench-build 2>/dev/null)" != "$st" ]; then
+  rm -f node_modules/.bench-build node_modules/.bench-build.log
+  pnpm run build > node_modules/.bench-build.log 2>&1 || { tail -n 60 node_modules/.bench-build.log; echo "bench: build failed"; exit 2; }
+  printf '%s\n' "$st" > node_modules/.bench-build.tmp && mv -f node_modules/.bench-build.tmp node_modules/.bench-build
+fi
+p={package}
+case "$p" in
+  packages/coverage-v8|packages/coverage-istanbul) S="coverage-test" ;;
+  packages/ui) S="@ui" ;;
+  packages/*) S="unit e2e" ;;
+  test/unit|test/e2e|test/coverage-test|test/node-runner|test/typescript|test/workspaces) S=${p#test/} ;;
+  *) S="unit" ;;
+esac
+rc=0
+for s in $S; do
+  if [ "$s" = @ui ]; then d=packages/ui; else d=test/$s; fi
+  echo "bench: $d: every test"
+  case "$s" in
+    node-runner) (cd "$d" && node --test --test-reporter=tap test/*.test.js) || rc=1 ;;
+    typescript|workspaces) (cd "$d" && CI=true pnpm run test 2>&1 | sed -u -e 's/\x1b\[[0-9;]*[A-Za-z]//g' -e 's/\r$//') || rc=1 ;;
+    *) (cd "$d" && CI=true node "$R/packages/vitest/vitest.mjs" run 2>&1 | sed -u -e 's/\x1b\[[0-9;]*[A-Za-z]//g' -e 's/\r$//') || rc=1 ;;
+  esac
+done
+exit $rc
+'''
+
+package_of = 'regex:^((?:packages|test)/[^/]+)/'
+
+# from: the "Failed Tests" summary of packages/vitest/src/node/reporters/base.ts@68dc42ccc9 (printTaskErrors:
+#   " FAIL " + formatProjectName + full name + optional " (attempts)" + " [ file ]" for a file-level error) and the
+#   line ` FAIL   main  test/fs-module-cache-resiliency.test.ts:234 > parallel runs ...` in CI job 139492536662
+#   (colour stripped); the second branch is node --test's TAP (`not ok N - name`), unverified against a log.
+# The name keeps vitest's `:LINE` (includeTaskLocation is on in every suite config).
+failed = '^(?: ?FAIL +(?:\|[^|\n]+\| |[\w.-]+  )?| *not ok \d+ - (?!.*# (?:TODO|SKIP)))(\S.*?)(?: \((?:[^()\n]*(?:initial run|retry|repeat|times)[^()\n]*)\))?(?: \[ [^\]\n]+ \])? *$'
+timeout_minutes = 40
+
+[commands.env]
+BASH_DEFAULT_TIMEOUT_MS = "1800000"
+BASH_MAX_TIMEOUT_MS = "7200000"
+npm_config_manage_package_manager_versions = "false"
+pnpm_config_pm_on_fail = "ignore"
+PNPM_CONFIG_TRUST_LOCKFILE = "true"
+PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN = "false"
+PNPM_CONFIG_CONFIRM_MODULES_PURGE = "false"
+COREPACK_ENABLE_STRICT = "0"
+COREPACK_ENABLE_DOWNLOAD_PROMPT = "0"
+PUPPETEER_SKIP_DOWNLOAD = "1"
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
+SKIP_SIMPLE_GIT_HOOKS = "1"
+HUSKY = "0"
+
+[rail.config.commands]
+# from: the bench brief's worktree rule (copy from the main checkout) and CONTRIBUTING.md@68dc42ccc9 ("pnpm run build
+#   to build all monorepo packages")
+# unverified: cp -al of every node_modules folder of the main checkout, then an offline build in the worktree
+#   (about 20 to 60 s); never run.
+setup = '''
+set -euo pipefail
+unset CLAUDECODE CLAUDE_CODE AI_AGENT
+main=$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd -P)
+if [ "$main" != "$(pwd -P)" ]; then
+  while IFS= read -r -d '' d; do
+    [ -e "$d" ] && continue
+    [ -d "$(dirname "$d")" ] || continue
+    cp -al "$main/$d" "$d" 2>/dev/null || { rm -rf "$d"; cp -a "$main/$d" "$d"; }
+  done < <(cd "$main" && find . -path ./.claude -prune -o -type d -name node_modules -prune -print0)
+fi
+V=$(node -p 'require("./package.json").packageManager.split("@")[1].split("+")[0]')
+export PATH="$BENCH_CACHE/pnpm/$V/bin:$PATH"
+[ "$(pnpm --version 2>/dev/null)" = "$V" ] || { echo "bench: pnpm $V is not in \$BENCH_CACHE/pnpm"; exit 2; }
+if [ ! -d node_modules ] || ! git diff --quiet HEAD -- pnpm-lock.yaml; then
+  pnpm install --offline --frozen-lockfile --ignore-scripts --store-dir "$BENCH_CACHE/pnpm-store" --filter '!docs'
+fi
+st=$( { git rev-parse HEAD:packages; git diff HEAD --binary -- packages; git ls-files -o --exclude-standard -z -- packages | xargs -0r sha256sum; } | sha256sum | cut -c1-64 )
+if [ ! -f packages/vitest/dist/cli.js ] || [ "$(cat node_modules/.bench-build 2>/dev/null)" != "$st" ]; then
+  rm -f node_modules/.bench-build node_modules/.bench-build.log
+  pnpm run build > node_modules/.bench-build.log 2>&1 || { tail -n 60 node_modules/.bench-build.log; echo "bench: build failed"; exit 2; }
+  printf '%s\n' "$st" > node_modules/.bench-build.tmp && mv -f node_modules/.bench-build.tmp node_modules/.bench-build
+fi
+'''
+
+# from: .github/workflows/ci.yml@68dc42ccc9 lint job (build, `pnpm run lint`, `pnpm run typecheck`) and test job
+#   (test:ci:unit / e2e / coverage); same steps at d758b4755d, where lint is eslint instead of oxlint+oxfmt
+# unverified: the affected-suite choice; start commit with no change runs build + lint + typecheck + test/unit
+#   (about 5 to 7 min); a change under packages/ adds test/e2e (6 to 9 min), coverage packages add test/coverage-test.
+verify = '''
+set -euo pipefail
+unset CLAUDECODE CLAUDE_CODE AI_AGENT NO_COLOR FORCE_COLOR GITHUB_ACTIONS
+R=$PWD
+V=$(node -p 'require("./package.json").packageManager.split("@")[1].split("+")[0]')
+export PATH="$BENCH_CACHE/pnpm/$V/bin:$PATH" PLAYWRIGHT_BROWSERS_PATH="$BENCH_CACHE/ms-playwright"
+[ "$(pnpm --version 2>/dev/null)" = "$V" ] || { echo "bench: pnpm $V is not in \$BENCH_CACHE/pnpm"; exit 2; }
+if ! git diff --quiet HEAD -- pnpm-lock.yaml; then
+  pnpm install --offline --frozen-lockfile --ignore-scripts --store-dir "$BENCH_CACHE/pnpm-store" --filter '!docs'
+fi
+st=$( { git rev-parse HEAD:packages; git diff HEAD --binary -- packages; git ls-files -o --exclude-standard -z -- packages | xargs -0r sha256sum; } | sha256sum | cut -c1-64 )
+if [ ! -f packages/vitest/dist/cli.js ] || [ "$(cat node_modules/.bench-build 2>/dev/null)" != "$st" ]; then
+  rm -f node_modules/.bench-build node_modules/.bench-build.log
+  pnpm run build > node_modules/.bench-build.log 2>&1 || { tail -n 60 node_modules/.bench-build.log; echo "bench: build failed"; exit 2; }
+  printf '%s\n' "$st" > node_modules/.bench-build.tmp && mv -f node_modules/.bench-build.tmp node_modules/.bench-build
+fi
+pnpm run lint
+pnpm run typecheck
+base="${RAIL_BASE:-refs/heads/main}"
+ch=$( { git diff --name-only "$base" --; git ls-files --others --exclude-standard; } | sort -u )
+S="unit"
+if grep -qE '^packages/coverage-(v8|istanbul)/' <<<"$ch"; then S="$S coverage-test"; fi
+if awk '/^packages\// && !/^packages\/(coverage-v8|coverage-istanbul|ui)\//{f=1} END{exit !f}' <<<"$ch"; then S="$S e2e"; fi
+if grep -q '^packages/ui/' <<<"$ch"; then S="$S @ui"; fi
+for t in e2e coverage-test node-runner; do
+  if grep -q "^test/$t/" <<<"$ch"; then S="$S $t"; fi
+done
+rc=0
+for s in $(printf '%s\n' $S | awk '!seen[$0]++'); do
+  if [ "$s" = @ui ]; then d=packages/ui; else d=test/$s; fi
+  echo "bench: $d: every test"
+  case "$s" in
+    node-runner) (cd "$d" && node --test --test-reporter=tap test/*.test.js) || rc=1 ;;
+    *) (cd "$d" && CI=true node "$R/packages/vitest/vitest.mjs" run 2>&1 | sed -u -e 's/\x1b\[[0-9;]*[A-Za-z]//g' -e 's/\r$//') || rc=1 ;;
+  esac
+done
+exit $rc
+'''
+timeout_secs = 900
+setup_timeout_secs = 900
+verify_timeout_secs = 1800
+
+# The bench's additions, the same for every project file of this set:
+# - [commands] env BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS: the Bash tool limits Rail's own
+#   .claude/settings.json gives its worker, given to every child, so a plain arm's Bash tool is not cut at
+#   two minutes while Rail's runs for thirty.
+# - [rail.config.worker] ladder: the Rail arm of the first run (PLAN section 6, owner 2026-11-25): Sonnet 5.5
+#   medium, then Opus 5.5 medium. It sits here because an arm file can give only one rung (bench/arms.py);
+#   person_ladder and contract stay as Rail's seed has them.
+# - [rail.config.claim] stale_minutes: above the longest Rail command's limit plus save_minutes (10), as
+#   `rail docs config` asks.
+[rail.config.worker]
+ladder = ["claude-sonnet-5-5:medium", "claude-opus-5-5:medium"]
+
+[rail.config.claim]
+stale_minutes = 45
+
+# vitest-01: When globalSetup throws, reporters print 'No test files found' instead of reporting the setup error.
+# issue opened 2026-11-19, fix opened 2026-11-19, squash (or single commit); source files:
+# packages/vitest/src/node/core.ts (12 lines); request from body (never edited).
+# reading notes: filed by fixer; text names the cause
+[[situation]]
+id = "vitest-01"
+request = """
+Errors during `globalSetup` are misdiagnosed as "No test files found"
+
+### Describe the bug
+
+When a `globalSetup` throws, `runFiles` ends the test run in `finally` before the error reaches the state, so reporters print "No test files found" and the real error is shown afterwards as a separate unhandled error. 
+
+### Reproduction
+
+The existing`fixtures/global-setup-fail` reproduces the issue
+
+### System Info
+
+```shell
+System:
+    OS: macOS 26.6.2
+    CPU: (18) arm64 Apple M5 Pro
+    Memory: 21.66 GB / 48.00 GB
+    Shell: 5.9 - /bin/zsh
+  Binaries:
+    Node: 26.13.0
+    Yarn: 1.22.22
+    npm: 11.20.0
+    pnpm: 12.21.0
+    Watchman: 2026.06.29.00
+  Browsers:
+    Chrome: 158.0.8127.37
+    Safari: 26.6.2
+```
+
+### Used Package Manager
+
+pnpm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "68dc42ccc9ac8ee74b71416b659630296ee97e9b"
+fix = "b7572c1e61fe52dfc0271408b67a02d240dbc535"
+hidden_tests = ["test/e2e/test/global-setup.test.ts"]
+closed = 2026-11-19
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/12030"
+pull = 12031
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# vitest-02: After a timeout aborts the test context signal, later retry or repeat attempts reuse the aborted signal;
+# each attempt should get a new one.
+# issue opened 2026-11-11, fix opened 2026-11-17, squash (or single commit); source files:
+# packages/vitest/src/runtime/runner/context.ts, packages/vitest/src/runtime/runner/run.ts,
+# packages/vitest/src/runtime/runner/suite.ts (38 lines); request from body (never edited).
+# reading notes: filed by fixer; text names the cause; tests use 100ms timeouts
+[[situation]]
+id = "vitest-02"
+request = """
+`context.signal` stays aborted in retries after a timeout
+
+### Describe the bug
+
+The test context `signal` is created once for each test. When an attempt times out, Vitest aborts it, and every later attempt of the same test (`retry` or `repeats`) gets the same aborted signal. Code that stops on `signal.aborted`, or that passes the signal to `fetch`, fails at once in the retry.
+
+### Reproduction
+
+```ts
+import { expect, test } from 'vitest'
+
+let attempt = 0
+
+test('the retry gets a new signal', { retry: 1, timeout: 100 }, async ({ signal }) => {
+  attempt++
+  if (attempt === 1) {
+    // the first attempt times out
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+  expect(signal.aborted).toBe(false)
+})
+```
+
+```
+ FAIL  signal.test.js > the retry gets a new signal (initial run)
+Error: Test timed out in 100ms.
+
+ FAIL  signal.test.js > the retry gets a new signal (1st retry)
+AssertionError: expected true to be false // Object.is equality
+```
+
+### Expected behavior
+
+Each attempt gets its own `signal`, so the retry passes.
+
+### Notes
+
+`createTestContext` creates one `AbortController` for each test context (`packages/vitest/src/runtime/runner/context.ts`), and `runTest` uses the same context for every retry and repeat. Reproduced on `main` (5.1.0)."""
+start = "016581e5382aa79615c290096205d4296f44420f"
+fix = "77a306757d6291a0ce6f6adb7142e39886f08ffe"
+hidden_tests = ["test/e2e/test/signal.test.ts"]
+closed = 2026-11-17
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11938"
+pull = 11998
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# vitest-03: The JSON reporter marks a test file as passed with success true when its worker crashes before the file
+# finishes.
+# issue opened 2026-11-14, fix opened 2026-11-14, squash (or single commit); source files:
+# packages/vitest/src/node/reporters/json.ts (28 lines); request from oldest of 2 edit records.
+# reading notes: filed by fixer
+[[situation]]
+id = "vitest-03"
+request = """
+JSON reporter reports a test file as `passed` when its worker crashes
+
+### Describe the bug
+
+If a worker dies before a test file finishes (for instance, an OOM kill), the JSON reporter lists the file as `passed` and writes `success: true`. This does not match the exit code (1) or the default reporter, which shows `Errors 1 error`.
+
+Expected: the file is marked as `failed` and `success` is `false`.
+
+Jest 30.5.2 reports the same case as `failed`, with `success: false`.
+
+This is different from #8669. In #8669, the file really passes. Here, the file never finishes.
+
+I'd like to send a PR for this.
+
+### Reproduction
+
+https://github.com/magurotuna/vitest-json-reporter-crashed-worker
+
+```sh
+npm install
+npm test        # exits with code 1
+npm run show    # success: true, and crash.test.js is passed
+```
+
+### System Info
+
+```shell
+System:
+    OS: macOS 26.7.1
+    CPU: (12) arm64 Apple M3 Pro
+    Memory: 84.30 MB / 36.00 GB
+    Shell: 5.9 - /bin/zsh
+  Binaries:
+    Node: 24.21.0 - /Users/yt/.nix-profile/bin/node
+    npm: 11.19.0 - /Users/yt/.nix-profile/bin/npm
+    pnpm: 12.9.0 - /Users/yt/.nix-profile/bin/pnpm
+    bun: 1.4.2 - /Users/yt/.nix-profile/bin/bun
+    Deno: 2.9.7 - /Users/yt/.nix-profile/bin/deno
+    Watchman: 2026.07.27.00 - /Users/yt/.nix-profile/bin/watchman
+  Browsers:
+    Chrome: 157.0.8103.52
+    Firefox: 159.0
+    Safari: 26.6.2
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "cab34bb0ee23f00676ea895560c8b16399ce40b7"
+fix = "47fb992ca8bae91165bf74529fc1e939008170b0"
+hidden_tests = ["test/e2e/test/reporters/json.test.ts"]
+closed = 2026-11-16
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11964"
+pull = 11965
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# vitest-04: A forks worker stuck in a synchronous loop keeps running after the main vitest process is killed; it
+# should exit when its parent dies.
+# issue opened 2026-11-08, fix opened 2026-11-11, squash (or single commit); source files:
+# packages/vitest/rollup.config.js, packages/vitest/src/node/pools/pool.ts,
+# packages/vitest/src/node/pools/watchdog.ts, packages/vitest/src/node/pools/workers/forksWorker.ts,
+# packages/vitest/src/runtime/workers/watchdog.ts (96 lines); request from body (never edited).
+# reading notes: text suggests a watchdog thread; process-kill e2e with a 5s liveness poll, POSIX-leaning; test also
+# covers vmForks
+[[situation]]
+id = "vitest-04"
+request = """
+forks pool: worker survives a killed vitest process while a test runs a synchronous loop
+
+When the main vitest process dies (SIGKILL, a closed terminal, a cancelled CI step) while a test in a `forks` worker is stuck in a synchronous loop, the worker keeps running indefinitely. It only notices the dead parent on its next IPC send, which a blocked event loop never reaches, and `testTimeout` can't fire either. Found one such worker that had been running at 100% CPU for 3.5 h.
+
+Seen on vitest 5.0.5. On `main` ([`f21f224ba`](https://github.com/vitest-dev/vitest/commit/f21f224ba)), [`init-forks.ts`](https://github.com/vitest-dev/vitest/blob/main/packages/vitest/src/runtime/workers/init-forks.ts) still exits only from `onError` on `ERR_IPC_CHANNEL_CLOSED` / `EPIPE`, i.e. after a failed send. A `disconnect` listener wouldn't help either, since the main thread's event loop is blocked.
+
+### Reproduction
+
+```ts
+// loop.test.ts
+import { test } from 'vitest'
+test(`spins`, () => { while (true) {} })
+```
+
+1. `vitest run loop.test.ts` (default `pool: 'forks'`)
+2. `kill -9 <vitest main pid>`
+3. `ps -o pid,ppid,etime,%cpu,command | grep vitest`: the fork is still running, reparented to PID 1
+
+Expected: the fork exits when its parent dies.
+
+### Workaround
+
+A `node:worker_threads` thread in a setup file polls `process.ppid` and SIGKILLs the process when it changes:
+
+```ts
+import { Worker } from 'node:worker_threads'
+if (process.send) {
+  const watchdog = `const ppid = process.ppid
+setInterval(() => process.ppid !== ppid && process.kill(process.pid, 'SIGKILL'), 1000)`
+  new Worker(watchdog, { eval: true }).unref()
+}
+```
+
+Something like this could live in the forks child itself."""
+start = "f4fdbcae08ec365f35d9e1866ce3e7d04880ea60"
+fix = "47c87ebb5025010141cf8aa5dc69c5b57c10d2fa"
+hidden_tests = ["test/e2e/test/pool-worker-exit.test.ts"]
+closed = 2026-11-12
+kind = "missing-behaviour"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11915"
+pull = 11939
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-05: Asks for environment variables (VITEST_FS_MODULE_CACHE, VITEST_FS_MODULE_CACHE_PATH) to disable or
+# relocate fsModuleCache, with config and CLI keeping priority.
+# issue opened 2026-11-03, fix opened 2026-11-03, squash (or single commit); source files:
+# packages/vitest/src/node/config/resolveConfig.ts (11 lines); request from body (never edited).
+# reading notes: variable names were given as examples in the issue and match the tests
+[[situation]]
+id = "vitest-05"
+request = """
+Allow configuring fsModuleCache from an environment variable
+
+### Clear and concise description of the problem
+
+`fsModuleCache` can only be disabled or relocated from the project config or the CLI (`fsModuleCache`, `fsModuleCachePath`, `--no-fsModuleCache`, `--fsModuleCachePath`). There is no way to do it from the environment.
+
+That matters when the environment owner and the project owner are different people. We run an online course platform: each exercise is a container built from a shared base image, the exercise directory is not writable by the test user, and the exercise authors own `vitest.config.*` and `package.json`. Since #11781 (fix for #11777) the run no longer fails, but every `vitest` invocation now prints
+
+```
+fsModuleCache is enabled, but its directory "/usr/src/app/node_modules/.vitest-cache" could not be created (EACCES: permission denied, ...). Continuing without caching modules on disk. Set `fsModuleCache: false` to disable the cache and this warning.
+```
+
+so students see the warning on every test run, in hundreds of exercises we cannot edit one by one.
+
+What we do today: the base image rewrites `vitest/vitest.mjs` to inject `--no-fsModuleCache` into `process.argv`. A wrapper earlier in `PATH` does not help, because `npx vitest` resolves the package bin directly. The patch breaks as soon as the entry file changes.
+
+### Suggested solution
+
+An environment variable read when the config is resolved, for example:
+
+- `VITEST_FS_MODULE_CACHE_PATH=/var/tmp/vitest-cache` to relocate the cache, and/or
+- `VITEST_FS_MODULE_CACHE=false` to disable it.
+
+An explicit value in the config or on the CLI keeps priority over the variable. This follows what Vitest already does for the API token, which honors `XDG_DATA_HOME`.
+
+### Alternative
+
+- #11691 (default the cache to a subdirectory of Vite's `cacheDir`) would help only where `cacheDir` points somewhere writable, which again lives in the project config.
+- Falling back to a writable location (for example `os.tmpdir()`) instead of warning when the default directory cannot be created.
+- Printing the warning once per machine or only with `--reporter=verbose`.
+
+### Additional context
+
+Follow-up to #11777. Measured on a small exercise, the cache makes no difference for us (1.7–1.9 s per run either way), so disabling it is fine; the request is only about doing it without touching each project.
+
+### Validations
+
+- [x] Follow our Code of Conduct
+- [x] Read the Contributing Guidelines.
+- [x] Read the docs.
+- [x] Check that there isn't already an issue that requests the same feature to avoid creating a duplicate."""
+start = "9c044db81d7a1484a34d69e5a0e8be754b666a73"
+fix = "708c05da0c8913ebce3d77631e10279137cb46ec"
+hidden_tests = ["test/e2e/test/caching.test.ts"]
+closed = 2026-11-06
+kind = "missing-behaviour"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11847"
+pull = 11859
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-06: In watch mode, editing a source file outside root does not rerun tests when fsModuleCache restored that
+# file from a warm cache.
+# issue opened 2026-10-14, fix opened 2026-11-03, squash (or single commit); source files:
+# packages/vitest/src/node/cache/fsModuleCache.ts, packages/vitest/src/node/environments/transformService.ts (12
+# lines); request from body (never edited).
+# reading notes: text names the fix (add cached outside-root files to the watcher); watch-mode e2e
+[[situation]]
+id = "vitest-06"
+request = """
+Watch mode does not rerun tests when a source file outside `root` changes and `fsModuleCache` already holds that file
+
+## Describe the bug
+
+Hi, and thank you for the work on Vitest 5.
+
+With the default `fsModuleCache: true`, the first `vitest --watch` after a cold cache reruns a test when a linked workspace package's source (a file outside the project `root`) changes. Every later `vitest --watch` in the same checkout, once the cache holds the transformed module, prints nothing when the same file changes, and the test is not rerun. Running with `--fsModuleCache=false` restores the rerun. A file inside `root` reruns in both cases.
+
+The failure is silent, and the cache entry persists across processes, so the same checkout behaves differently on its first and second `vitest --watch`.
+
+Where (inferred from reading, not verified with a patch): [`transformService.ts#L324-L405`](https://github.com/vitest-dev/vitest/blob/28dc1edfb6ba5a181fe208576989063795aeadb3/packages/vitest/src/node/environments/transformService.ts#L324-L405) restores a cached module and rebuilds its `importers`/`importedModules` "to make the watch mode work" (L385), but nothing in that path registers the file with the dev server's file watcher. Vite does that while it transforms a file outside `root`, which a cache hit skips. Files inside `root` are already covered by the root watcher, which would explain why they still rerun.
+
+## Reproduction
+
+Repository: https://github.com/quantizor/vitest-workspace-repros/tree/main/fscache-watch (steps in the root README). The same files are inline below.
+
+Same layout as the `@repro/lib` workspace below. There is no optimizer and no `--changed` involved.
+
+`package.json` `{ "name": "repro-root", "private": true, "type": "module" }`, `pnpm-workspace.yaml` `packages: [ "packages/*" ]`, `.gitignore` `node_modules`.
+
+`packages/lib/package.json`
+
+```json
+{ "name": "@repro/lib", "version": "0.0.0", "type": "module", "exports": { ".": "./src/index.ts" } }
+```
+
+`packages/lib/src/index.ts`: `export { helper } from "./helper.ts";`
+`packages/lib/src/helper.ts`: `export const helper = () => 1;`
+
+`packages/app/package.json`
+
+```json
+{
+  "name": "@repro/app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@repro/lib": "workspace:*" },
+  "devDependencies": { "vitest": "5.0.4" }
+}
+```
+
+`packages/app/test/uses-lib.test.ts`
+
+```ts
+import { expect, test } from "vitest";
+import { helper } from "@repro/lib";
+
+test("uses lib", () => expect(helper()).toBe(1));
+```
+
+(No `vitest.config.ts`.) Steps:
+
+```sh
+pnpm install
+cd packages/app
+pnpm exec vitest --watch        # first run; wait for "Waiting for file changes"
+# in another terminal: edit packages/lib/src/helper.ts so it returns 2
+#   -> RERUN  ../lib/src/helper.ts x1   (cold cache: works)
+# stop vitest (q), then start it again:
+pnpm exec vitest --watch
+# edit packages/lib/src/helper.ts again
+#   -> nothing is printed, no rerun (warm cache)
+pnpm exec vitest --watch --fsModuleCache=false
+# edit packages/lib/src/helper.ts again
+#   -> RERUN  ../lib/src/helper.ts x1
+```
+
+I drove this with a script (spawn `vitest --watch`, wait for "Waiting for file changes", edit the file, wait 20 s, print what arrived). Results on 5.0.4:
+
+```
+run 1 (cold cache):       RERUN  ../lib/src/helper.ts x1     rerun triggered: true
+run 2 (warm cache):       (nothing)                           rerun triggered: false
+run 3 (--fsModuleCache=false):  RERUN  ../lib/src/helper.ts x1     rerun triggered: true
+```
+
+The same warm-cache run reruns for an edit to a file inside `packages/app` (`src/local.ts` imported by a test), three times out of three. A test that imports the file by a relative path (`../../lib/src/helper.ts`) behaves like the package import, so the linked symlink is not the trigger; being outside `root` is.
+
+## Expected
+
+Editing `packages/lib/src/helper.ts` reruns `test/uses-lib.test.ts` in watch mode, with the cache cold or warm.
+
+## Suggested fix
+
+On a cache hit for a file outside `root`, add the file to the environment's watcher as the uncached path does (untested).
+
+## System Info
+
+```shell
+  System:
+    OS: macOS 27.0.1
+    CPU: (12) arm64 Apple M2 Pro
+    Shell: 5.9 - /bin/zsh
+  Binaries:
+    Node: 24.11.0
+    npm: 11.6.1
+    pnpm: 12.8.1
+  npmPackages:
+    vite: 8.3.4 (transitive)
+    vitest: 5.0.4 => 5.0.4
+```
+
+## Used Package Manager
+
+pnpm"""
+start = "5f72c3d0d261a661fafa357130f2868429e005c9"
+fix = "9c044db81d7a1484a34d69e5a0e8be754b666a73"
+hidden_tests = ["test/e2e/test/watch/file-watching.test.ts"]
+closed = 2026-11-06
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11584"
+pull = 11860
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-07: With coverage.autoAttachSubprocess, a file run in both the worker and a child process loses the child's
+# line coverage.
+# issue opened 2026-11-01, fix opened 2026-11-05, squash (or single commit); source files:
+# packages/coverage-v8/src/provider.ts (18 lines); request from oldest of 2 edit records.
+# reading notes: text names the likely cause
+[[situation]]
+id = "vitest-07"
+request = """
+coverage-v8: autoAttachSubprocess misses a child process's lines when the worker runs the same file
+
+### Describe the bug
+
+With `coverage.autoAttachSubprocess` on, a file that runs in both the test worker and a spawned child process loses the child's line coverage.
+
+In the repro, the test calls `inWorker()` from `lib.js`, then spawns `child.js`, which calls `inChild()`. Functions show 100%, but line 6 (`inChild`'s body) is reported uncovered. Each half on its own is reported correctly.
+
+It depends on the source: if `inWorker` returns a one-character string, line 6 is missed on every run, and with a longer string it's covered. It looks like the child's counts (raw source) get merged with the worker's (transformed source) for the same URL.
+
+Same on 5.1.0-beta.1.
+
+### Reproduction
+
+https://github.com/allxsmith/vitest-subprocess-coverage-repro
+
+```sh
+npm install
+npm test
+```
+
+### System Info
+
+```shell
+  System:
+    OS: macOS 26.2
+    CPU: (10) arm64 Apple M4
+    Memory: 6.49 GB / 32.00 GB
+    Shell: 5.9 - /bin/zsh
+  Binaries:
+    Node: 25.2.1 - /opt/homebrew/bin/node
+    Yarn: 1.22.22 - /opt/homebrew/bin/yarn
+    npm: 11.6.2 - /opt/homebrew/bin/npm
+    pnpm: 11.9.0 - /opt/homebrew/bin/pnpm
+    bun: 1.3.14 - /opt/homebrew/bin/bun
+  Browsers:
+    Chrome: 156.0.8078.74
+    Safari: 26.2
+  npmPackages:
+    @vitest/coverage-v8: 5.0.5 => 5.0.5
+    vitest: 5.0.5 => 5.0.5
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "4f91e76af52bae43495c2b24a1985a9d5662d90d"
+fix = "71ad4dfa1d8fb0753faaa55afc55ade021d0b395"
+hidden_tests = ["test/coverage-test/fixtures/src/worker-and-process.child.js", "test/coverage-test/fixtures/src/worker-and-process.js", "test/coverage-test/fixtures/test/worker-and-child-process.test.ts", "test/coverage-test/test/extended-run-context.v8.test.ts"]
+closed = 2026-11-05
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11812"
+pull = 11890
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-08: Failures from expect.soft combined with .resolves/.rejects lose their stack location in the report.
+# issue opened 2026-10-30, fix opened 2026-10-30, squash (or single commit); source files:
+# packages/expect/src/utils.ts, packages/vitest/src/integrations/snapshot/chai.ts (8 lines); request from oldest of 13
+# edit records.
+# reading notes: filed by fixer; links point to local paths; text names the cause and a fix
+[[situation]]
+id = "vitest-08"
+request = """
+`expect.soft` + `.resolves`/`.rejects` failures lose their location
+
+
+When an assertion fails under `expect.soft(…)` combined with `.resolves` or `.rejects`, the error has no stack frames. The report prints no `❯ file:line:col` and no code frame. This happens with any matcher, not just snapshots. `expect.soft` alone and `.rejects` alone both keep the location.
+
+## Repro
+
+[repro/](repro/) is a standalone project pinned to the beta. It has [repro.test.ts](repro/repro.test.ts), a `.snap` file with outdated values, and `update: 'none'`.
+
+```bash
+cd ~/.local/share/ho-dev-notes/vitest/soft-rejects-snapshot-stack/repro && npm install && npx vitest run
+```
+
+Each test failed on purpose. This is where its reported location pointed ([full output](repro.out.txt)):
+
+| Test | Assertion | Location |
+|---|---|---|
+| rejects snapshot | `expect(p).rejects.toMatchSnapshot()` | `repro.test.ts:4:49` |
+| rejects toThrow | `expect(p).rejects.toThrow('old')` | `repro.test.ts:24:49` |
+| soft sync toBe | `expect.soft('new').toBe('old')` | `repro.test.ts:28:22` |
+| soft rejects snapshot | `expect.soft(p).rejects.toMatchSnapshot()` | **none** |
+| soft resolves snapshot | `expect.soft(p).resolves.toMatchSnapshot()` | **none** |
+| soft rejects toThrow | `expect.soft(p).rejects.toThrow('old')` | **none** |
+| soft rejects toThrowErrorMatchingSnapshot | `expect.soft(p).rejects.toThrowErrorMatchingSnapshot()` | **none** |
+| soft rejects, promise resolves | `expect.soft(Promise.resolve('new')).rejects.toThrow('old')` | `repro.test.ts:32:44` |
+
+Same assertion, with and without `.soft`:
+
+- 🟢 `rejects` only
+
+```text
+ FAIL  repro.test.ts > rejects snapshot
+Error: Snapshot `rejects snapshot 1` mismatched
+
+Expected: "[Error: old]"
+Received: "[Error: new]"
+
+ ❯ repro.test.ts:4:49
+      2|
+      3| test('rejects snapshot', async () => {
+      4|   await expect(Promise.reject(new Error('new'))).rejects.toMatchSnapsh…
+       |                                                 ^
+```
+
+- 🔴 `soft` + `rejects`
+
+```text
+ FAIL  repro.test.ts > soft rejects snapshot
+Error: Snapshot `soft rejects snapshot 1` mismatched
+
+Expected: "[Error: old]"
+Received: "[Error: new]"
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+```
+
+The earlier e2e probe ([rejects-stack-probe.test.ts](../pr-11325-snapshot-review/rejects-stack-probe.test.ts)) shows the same thing in browser mode (Chromium), on a workspace build whose snapshot matcher code matches `main`.
+
+## Cause
+
+Code links are to `main` at 54a2bdb81, in the main worktree.
+
+The matcher runs inside a promise callback, so the error it throws has only internal frames in its stack. Vitest filters those out, which leaves `stacks` empty. `.resolves` and `.rejects` have a fix for this: the getter creates an `Error` when it is accessed, at the user's line ([jest-expect.ts:972](../../../../../code/others/vitest/packages/expect/src/jest-expect.ts#L972), [:1035](../../../../../code/others/vitest/packages/expect/src/jest-expect.ts#L1035)). A `.catch` on the promise chain then rewrites the failing error's stack to that one ([:1013](../../../../../code/others/vitest/packages/expect/src/jest-expect.ts#L1013), [:1080](../../../../../code/others/vitest/packages/expect/src/jest-expect.ts#L1080)).
+
+`expect.soft` bypasses that fix. Under `.soft`, the matcher called at [:1000](../../../../../code/others/vitest/packages/expect/src/jest-expect.ts#L1000) and [:1075](../../../../../code/others/vitest/packages/expect/src/jest-expect.ts#L1075) is `wrapAssertion`'s soft wrapper ([utils.ts:95](../../../../../code/others/vitest/packages/expect/src/utils.ts#L95)). The wrapper catches the matcher's error itself and calls `handleTestError` ([utils.ts:136](../../../../../code/others/vitest/packages/expect/src/utils.ts#L136)), which runs `processError` and records the error on the test right away. So:
+
+1. The error is recorded with its original stack, which has no user frames.
+2. The wrapper returns normally, so the promise chain resolves and the `.catch` that would have rewritten the stack never runs.
+
+```text
+expect.soft(p).rejects.toThrow('old')
+  rejects getter: error = new Error('rejects')       ← user's line, kept for later
+  promise.then(err => matcher())                     ← runs in a microtask
+    soft wrapper: try { toThrow() } catch (e) {
+      handleTestError(test, e)                       ← recorded here, original stack
+    }                                                ← no rethrow
+  .catch(err => err.stack = error.stack)             ← skipped, nothing rejected
+```
+
+The "promise resolves" row confirms this. There the promise resolves, so `.rejects` throws its own "promise resolved … instead of rejecting" error before any matcher runs. That error does reach the `.catch` and gets the user's stack. The soft handler in `recordAsyncExpect` records it afterwards ([utils.ts:48](../../../../../code/others/vitest/packages/expect/src/utils.ts#L48)), and the location is kept. Only errors from the matcher itself lose it.
+
+A fix could rewrite the stack before recording: in the soft wrapper, when the `error` flag is set, copy its stack onto the caught error ahead of `handleTestError`. Another option is to skip the soft wrapper inside `.resolves`/`.rejects`, so the error flows through the existing `.catch` and then `recordAsyncExpect`'s soft handler. Either way, the fix covers every matcher, not just snapshots.
+
+## Relation to PR 11325
+
+PR 11325 copies the `.resolves`/`.rejects` stack (the chai `error` flag) onto the thrown error inside the snapshot matchers' `assertMatchResult`. Non-soft async snapshot failures already get the right stack from the `.catch` above, so that copy only changes anything under `expect.soft`. This is why its review screen shows "Source:" for `expect.soft(…).rejects.toThrowErrorMatchingSnapshot(…)`. It doesn't help other matchers, such as `soft rejects toThrow` above. The fix belongs in the soft wrapper or in the `.resolves`/`.rejects` getters, not in the snapshot matchers."""
+start = "488bfe120ba50cc2473a895441c278f7d930990f"
+fix = "42770759fcca4ff82ab4df49e4ee241f4f680e99"
+hidden_tests = ["test/e2e/test/expect-soft.test.ts"]
+closed = 2026-10-30
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11791"
+pull = 11792
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# vitest-09: In vm pools, teardown deletes process, setImmediate and similar globals, so async work finishing after
+# teardown throws 'process is not defined'.
+# issue opened 2026-09-28, fix opened 2026-10-21, squash (or single commit); source files:
+# packages/vitest/src/runtime/workers/vm.ts (18 lines); request from oldest of 3 edit records.
+# reading notes: filed by fixer; text names the cause
+[[situation]]
+id = "vitest-09"
+request = """
+ReferenceError: process is not defined - Issue on vitest@5 teardown during unfinished async operations
+
+### Describe the bug
+
+On vitest 5, running a project unit tests through vitest's vm pool (used automatically for jsdom/happydom for example) intermittently throws `ReferenceError: process is not defined` as an unhandled rejection, even though every test passes.
+
+This error comes from the repro repository linked below:
+```
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯Unhandled Rejection ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+ReferenceError: process is not defined
+ ❯ file003.test.ts:14:3
+     12|   }
+     13|
+     14|   mockedAsyncCall(110).then(() => {
+       |   ^
+     15|     process.on('exit', () => {});
+     16|   });
+
+This error originated in "file001.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+```
+
+This happens when a test (or code that passes through the test) kicks off async work it does not await and that work resolves after the file batch teardown runs.
+
+`runVmTests()`'s teardown (added in #10854) calls `stripDisposedContext()`, which deletes every global added to the vm context after an initial snapshot — including `process`, `global`, `setImmediate`, and `clearImmediate`, since all four get assigned after that snapshot is taken. The PR's body says:
+
+> Additionally, runVmTests now clears a disposed context on teardown: globals added by the test file are deleted and document.body/document.head are emptied. Pristine globals are kept so that work queued before the teardown (jsdom events, worker fixture cleanups) still runs.
+
+`process` and the timer globals aren't file-specific state, so they don't look like they were meant to land in the removable set.
+
+I believe this is an issue on vitest specifically as many async operations are outside the control of the developer authoring the tests, they can be v8 internals (garbage collection), specific libraries internals or angular/RxJS operations.
+
+For what is worth on a big monorepo I'm working on, this is a blocker from migrating to v5 as we have an average of 489 failures across 23 unrelated project all of which are outside our control.
+
+### Reproduction
+
+https://github.com/francesco-agnoletto/vitest5-vm-strip-repro I built a small repro.
+
+Simply `npm install && npm test`
+
+| Run | Errors |
+| --- | --- |
+| 1 | 1 |
+| 2 | 3 |
+| 3 | 1 |
+| 4 | 1 |
+| 5 | 2 |
+| 6 | 1 |
+| 7 | 1 |
+| 8 | 1 |
+| 9 | 2 |
+| 10 | 2 |
+
+10/10 runs reproduced it, 15 errors total, avg 1.5 per run.
+
+I confirmed this does not happen in vitest@4
+
+### System Info
+
+```shell
+System:
+    OS: macOS 26.4
+    CPU: (18) arm64 Apple M5 Pro
+    Memory: 4.50 GB / 48.00 GB
+    Shell: 5.9 - /bin/zsh
+  Binaries:
+    Node: 22.23.2 - /opt/homebrew/bin/node
+    Yarn: 1.22.22 - /opt/homebrew/bin/yarn
+    npm: 11.19.1 - /opt/homebrew/bin/npm
+    pnpm: 11.27.1 - /opt/homebrew/bin/pnpm
+    bun: 1.4.0 - /Users/francesco.agnoletto/.bun/bin/bun
+  Browsers:
+    Chrome: 154.0.8037.57
+    Safari: 26.4
+  npmPackages:
+    vitest: 5.0.2 => 5.0.2
+```
+
+### Used Package Manager
+
+pnpm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "5ea35816c6121272df3f4ca1d9555461147acce4"
+fix = "a57b4d8a320e7ef5fff8e74344553083f41d36b9"
+hidden_tests = ["test/e2e/test/vm-threads.test.ts"]
+closed = 2026-10-28
+kind = "race"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11380"
+pull = 11681
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# vitest-10: Automocking a generator function shares the original's prototype, so mockReset/mockImplementation changes
+# the real function's prototype chain.
+# issue opened 2026-10-25, fix opened 2026-10-26, squash (or single commit); source files:
+# packages/mocker/src/automocker.ts (21 lines); request from oldest of 3 edit records.
+# reading notes: text names the fix; links a branch
+[[situation]]
+id = "vitest-10"
+request = """
+automocking a generator function changes the original function's prototype chain
+
+### Describe the bug
+
+when the automocker mocks a generator or async generator function, the mock gets the original's `prototype` object instead of its own. `mockReset()` or `mockImplementation()` on the mock then calls `Object.setPrototypeOf` on that shared object, which changes the real function: its generators lose `next` and `Symbol.asyncIterator`
+
+in one test file this quietly breaks the real module. when the original is shared with other code (node builtins, external deps) that breaks too. we hit it through an external dep
+
+`spy: true` has the same problem via `mockImplementation()`. any function whose `prototype` isnt a plain object and has no methods is affected, e.g. `F.prototype = new Map()`
+
+where: `mockObject` in `packages/mocker/src/automocker.ts` copies values that arent plain objects as-is, including a function's `prototype`. `reparentMockPrototype` in `packages/spy/src/index.ts` then re-parents `mock.prototype` when it has no methods. #11195 stopped this creating a cycle under `spy: true`, but the original still gets changed
+
+fix: dont copy a `prototype` like that onto the mock, so the mock keeps its own. branch with the fix and tests, id like to send it as a PR:
+https://github.com/vitest-dev/vitest/compare/main...maschwenk:vitest:fix/automock-shared-prototype
+
+### Reproduction
+
+https://github.com/maschwenk/vitest-automock-prototype-repro
+
+```js
+import { setInterval } from 'node:timers/promises'
+import { expect, test, vi } from 'vitest'
+
+vi.mock(import('node:timers/promises'))
+
+test('mocking does not change the real setInterval', async () => {
+  vi.mocked(setInterval).mockReset()
+
+  const actual = await vi.importActual('node:timers/promises')
+  for await (const _ of actual.setInterval(1)) break
+})
+
+test('vi.mockObject does not change the original', () => {
+  async function* gen() {}
+  const parent = Object.getPrototypeOf(gen.prototype)
+
+  vi.mockObject({ gen }).gen.mockReset()
+
+  expect(Object.getPrototypeOf(gen.prototype)).toBe(parent)
+})
+```
+
+expected: both pass, the real `setInterval` and `gen` are untouched
+
+actual: the first throws `TypeError: actual.setInterval(...) is not a function or its return value is not async iterable`. the second fails because `gen.prototype` now inherits from `Object.prototype`
+
+fails on 5.0.0, 5.0.5 and main
+
+### System Info
+
+```
+System:
+  OS: macOS 26.6.2
+  CPU: (18) arm64 Apple M5 Max
+Binaries:
+  Node: 24.22.1
+  npm: 11.19.1
+  pnpm: 12.11.2
+npmPackages:
+  vitest: 5.0.0 and 5.0.5 (also reproduced on main, 5.1.0-beta.1)
+```
+
+### Used Package Manager
+
+pnpm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "fcb4e2f5f76af28567b1406333165c46c10a3163"
+fix = "cca423de9daad382ddafa83ecfbfbbe54dfa8900"
+hidden_tests = ["test/unit/test/mocking/vi-mockObject.test.ts"]
+closed = 2026-10-26
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11718"
+pull = 11737
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-11: The HTML reporter should still write its report when --bail cancels test files before they are imported,
+# instead of throwing 'Cannot find environment'.
+# issue opened 2026-10-21, fix opened 2026-10-22, squash (or single commit); source files:
+# packages/vitest/src/utils/graph.ts (32 lines); request from body (never edited).
+# reading notes: fix lands in vitest utils/graph.ts though the trace points into @vitest/ui; text names the cause
+[[situation]]
+id = "vitest-11"
+request = """
+HTML reporter crashes with "Cannot find environment" when `--bail` cancels test files
+
+### Describe the bug
+
+When `--bail` stops a run before some test files are imported, the HTML reporter throws in `onTestRunEnd` and writes no report at all:
+
+```
+⎯⎯⎯⎯⎯⎯ Unhandled Error ⎯⎯⎯⎯⎯⎯⎯
+Error: Cannot find environment for /path/to/vitest-html-bail-repro/test/pass.test.ts
+ ❯ getModuleGraphEnvironment node_modules/@vitest/ui/dist/reporter.js:82:9
+ ❯ getSharedModuleGraphByEnvironment node_modules/@vitest/ui/dist/reporter.js:68:23
+ ❯ getSharedModuleGraphByProject node_modules/@vitest/ui/dist/reporter.js:61:26
+ ❯ serializeReportMetadata node_modules/@vitest/ui/dist/reporter.js:232:16
+ ❯ HTMLReporter.onTestRunEnd node_modules/@vitest/ui/dist/reporter.js:160:24
+ ❯ node_modules/vitest/dist/chunks/cli-api.De07GUeT.js:13304:56
+ ❯ Vitest.report node_modules/vitest/dist/chunks/cli-api.De07GUeT.js:13304:36
+ ❯ TestRun.end node_modules/vitest/dist/chunks/cli-api.De07GUeT.js:11791:21
+ ❯ node_modules/vitest/dist/chunks/cli-api.De07GUeT.js:12884:26
+```
+
+The output directory (`.vitest/`) is not created. The same run without `--bail` writes the report as expected.
+
+I expect the report to be written, with the cancelled files listed without a module graph.
+
+From reading the dist, `getSharedModuleGraphByEnvironment` calls `getModuleGraphEnvironment` for every test module. A file that bail cancelled before it was imported is in no Vite environment's module graph, so `getTestFileEnvironment` returns `undefined` and the reporter throws instead of skipping that file.
+
+This makes the HTML report unavailable exactly when it's most useful: a CI run that failed and bailed.
+
+It reproduces on 4.1.12, 5.0.5 and 5.1.0-beta.1. The error message is the same as in #9190 (headless browser mode) and #9685 (`--merge-reports`), but the trigger is different: this is a plain Node environment, without merging.
+
+### Reproduction
+
+https://github.com/JesusTheHun/vitest-html-bail-repro
+
+```sh
+npm install
+npm test   # vitest run --bail 1
+```
+
+It has two test files and `maxWorkers: 1`. `test/fail.test.ts` runs first and fails, so `--bail 1` cancels `test/pass.test.ts` before it is imported, and the HTML reporter throws `Cannot find environment for …/test/pass.test.ts`. `npx vitest run` (without `--bail`) writes `.vitest/index.html`.
+
+### System Info
+
+```shell
+  System:
+    OS: macOS 27.0.1
+    CPU: (12) arm64 Apple M2 Max
+    Memory: 76.92 MB / 64.00 GB
+    Shell: 5.9 - /bin/zsh
+  Binaries:
+    Node: 22.23.3
+    Yarn: 1.22.19
+    npm: 10.9.9
+    pnpm: 9.15.9
+    bun: 1.0.14
+    Deno: 2.9.7
+  Browsers:
+    Chrome: 155.0.8059.85
+    Edge: 155.0.4283.62
+    Firefox: 152.0.4
+    Safari: 27.0.1
+  npmPackages:
+    @vitest/ui: 5.0.5 => 5.0.5
+    vitest: 5.0.5 => 5.0.5
+```
+
+The same error also happens on GitHub Actions `ubuntu-latest` runners (Node 22, pnpm, vitest 5.0.5).
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "e02db0869895fc57b7381f3a5fd5663b688e3c80"
+fix = "36a5fa1327d1b6159614e4e773c2757aab9cb671"
+hidden_tests = ["test/e2e/test/reporters/html.test.ts"]
+closed = 2026-10-23
+kind = "crash"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11689"
+pull = 11693
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-12: After --changed/related filtering, isolate:false workers should still re-run setup files before every
+# test file, including from the fs module cache.
+# issue opened 2026-10-14, fix opened 2026-10-16, squash (or single commit); source files:
+# packages/vitest/src/node/cache/fsModuleCache.ts, packages/vitest/src/node/environments/transformService.ts (11
+# lines); request from body (never edited).
+# reading notes: text names the fix
+[[situation]]
+id = "vitest-12"
+request = """
+`--changed` / `related` stop `isolate: false` workers from re-running setup files (graph walk fetches modules by file path)
+
+### Describe the bug
+
+With `isolate: false`, Vitest runs the setup files again before every test file. After a `--changed` or `related` selection, it stops doing so: the setup files run before the worker's first test file only, so mocks and globals they install are missing from every later file in that worker. The fs module cache then carries the fault into later plain `vitest run`s that read it.
+
+We hit it as order-dependent import failures: files whose setup-file `vi.mock` doubles never applied loaded the real native modules.
+
+**Cause.** `ModuleTransformService.transform` (`packages/vitest/src/node/environments/transformService.ts`), which the affected-modules graph walk calls, fetches each module with its absolute file path as the URL:
+
+```ts
+this.fetchInSpan(span, id, undefined, environment)
+```
+
+Vite's module graph keeps the URL of a module's first request, and the fs module cache stores that URL with the code (`url` is not part of the cache key). A test run imports a setup file under the root by its root-relative URL (`/setup.js`). The worker registers the evaluated module under the stored file-path URL, so `importFile(setupFile, 'setup')` with `{ invalidate: true }` looks it up by `/setup.js`, misses, and returns the already evaluated module without running it again.
+
+Fetching by `normalizeResolvedIdToUrl(environment, id)`, the URL Vite's import analysis writes and the worker requests, fixes the repro below in all three runs. Upstream `main` (28dc1edf) still passes `id`.
+
+### Reproduction
+
+Six files, no other dependencies.
+
+`package.json`
+
+```json
+{ "type": "module", "devDependencies": { "vitest": "5.0.4" } }
+```
+
+`vitest.config.js`
+
+```js
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: {
+    isolate: false,
+    fileParallelism: false,
+    setupFiles: ['./setup.js'],
+  },
+})
+```
+
+`setup.js`
+
+```js
+globalThis.setupRuns = (globalThis.setupRuns ?? 0) + 1
+```
+
+`dep.js`
+
+```js
+export const value = 1
+```
+
+`a.test.js` and `b.test.js` (identical)
+
+```js
+import { expect, test } from 'vitest'
+import './dep.js'
+
+const runsBeforeThisFile = globalThis.setupRuns
+
+test('the setup file ran before this file', () => {
+  expect(runsBeforeThisFile).toBe(globalThis.testFiles = (globalThis.testFiles ?? 0) + 1)
+})
+```
+
+Steps:
+
+```sh
+npm install
+npx vitest run --no-fsModuleCache                  # 2 passed
+npx vitest related dep.js --run --no-fsModuleCache # 1 failed: expected 1 to be 2
+npx vitest related dep.js --run                    # 1 failed, and writes the cache
+npx vitest run                                     # 1 failed: plain run reading that cache
+```
+
+Expected: the setup file runs before each of the two files in every run (2 passed).
+Actual: after a `related` (or `--changed`) selection, the second file in the worker sees the setup file's state from the first file only.
+
+### System Info
+
+```Shell
+System: macOS 26.4.1 (arm64)
+Binaries: Node 24.15.0, npm 11.13.0
+npmPackages: vitest 5.0.4, vite 8.3.4
+```
+
+Also seen on Linux CI (Node 24.21.0) with `--changed`.
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "7a825db43e2beca0b219d2eadaec334cb81af0c7"
+fix = "3a39cfc5455093591ee69838f9da156eb9b03d5a"
+hidden_tests = ["test/e2e/test/caching.test.ts"]
+closed = 2026-10-16
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11586"
+pull = 11621
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-13: With isolate:false, mock factories of finished test files should be released so worker memory does not
+# grow per file.
+# issue opened 2026-10-05, fix opened 2026-10-15, squash (or single commit); source files:
+# packages/vitest/src/runtime/moduleRunner/bareModuleMocker.ts,
+# packages/vitest/src/runtime/moduleRunner/moduleMocker.ts, packages/vitest/src/runtime/moduleRunner/moduleRunner.ts,
+# packages/vitest/src/runtime/moduleRunner/startVitestModuleRunner.ts, packages/vitest/src/runtime/runBaseTests.ts,
+# packages/vitest/src/runtime/runVmTests.ts (22 lines); request from body (never edited).
+# reading notes: test checks release with WeakRef and forced gc in a retry loop; small flake risk
+[[situation]]
+id = "vitest-13"
+request = """
+With `isolate: false`, each file's `vi.mock` factory is never released, so worker memory grows per file
+
+### Describe the bug
+
+With `isolate: false`, every test file's `vi.mock()` factory stays reachable after the file finishes, together with everything the factory closes over. A worker that runs many files therefore grows by the size of each file's mock-factory scope, and on a large jsdom suite the worker eventually dies with `Worker exited unexpectedly`.
+
+Mocking itself behaves correctly: each file sees its own mock. Only the memory is never released. `vi.resetModules()` at the start of each file does not change it. With `isolate: true` the heap stays flat.
+
+In the reproduction, each of 30 test files mocks the same module with a factory that closes over ~10 MB. The heap measured at the start of each file, after a forced GC (`--expose-gc`), on one worker:
+
+| config | heap used at file start (MB) |
+| --- | --- |
+| `isolate: false` | 19, 28, 38, 47, 57 … 296 (+~9.6 MB per file) |
+| `isolate: false` + `vi.resetModules()` per file | 19, 28, 38, 47, 57 … 296 |
+| `isolate: true` | 19 for every file |
+
+In a heap snapshot of a real suite, old copies are retained through `EvaluatedModuleNode.meta.mockedModule.factory` (`VitestModuleRunner.evaluatedModules.idToModuleMap`), and through mock configs whose `vi.fn()` keys are themselves reachable from those factories.
+
+#11092 (shipped in 5.0, closing #9492) already stopped `REGISTERED_MOCKS` from pinning every `vi.fn()`. This is the remaining path that keeps earlier files alive when isolation is off; the last comments on #9492 describe the same "nothing gets released under `isolate: false`" symptom.
+
+### Reproduction
+
+https://github.com/alexandrucojocaru-creatopy/vitest-isolate-false-mock-retention
+
+`npm install`, then `npm test`; `heap.log` gets one line per file. `RESET=1 npm test` adds `vi.resetModules()`, and `npm test -- --isolate` is the control. The files, inline for convenience:
+
+`package.json`
+
+```json
+{ "name": "vitest-isolate-false-mock-retention", "private": true, "type": "module",
+  "scripts": { "test": "node --expose-gc node_modules/vitest/vitest.mjs run" },
+  "devDependencies": { "vitest": "5.0.3" } }
+```
+
+`vitest.config.ts`
+
+```ts
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: { isolate: false, pool: 'threads', maxWorkers: 1, fileParallelism: false, setupFiles: ['./heap.setup.ts'] },
+});
+```
+
+`heap.setup.ts`
+
+```ts
+import { appendFileSync } from 'node:fs';
+import { beforeAll, vi } from 'vitest';
+
+if (process.env.RESET === '1') vi.resetModules();
+beforeAll(() => {
+  (globalThis as { gc?: () => void }).gc?.();
+  appendFileSync('heap.log', `${Math.round(process.memoryUsage().heapUsed / 1048576)}\\n`);
+});
+```
+
+`dep.ts`
+
+```ts
+export const dep = (): string => 'real';
+```
+
+`test/t01.test.ts` … `test/t30.test.ts` (identical apart from the name)
+
+```ts
+import { expect, test, vi } from 'vitest';
+import { dep } from '../dep';
+
+// ~10 MB that only this file's mock factory references.
+const { payload } = vi.hoisted(() => ({ payload: Array.from({ length: 1_250_000 }, (_, i) => i) }));
+vi.mock('../dep', () => ({ dep: () => String(payload.length) }));
+
+test('sees its own mock', () => {
+  expect(dep()).toBe('1250000');
+});
+```
+
+Expected: the heap stays roughly flat once a file's mocks are no longer registered, as with `isolate: true`.
+Actual: it grows by each file's factory scope for the life of the worker.
+
+### System Info
+
+```
+vitest 5.0.3 (also reproduces on 4.1.11)
+node 24.11.1
+macOS 15 (darwin 24.6.0), arm64
+pool: threads
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [x] Follow our Code of Conduct
+- [x] Read the Contributing Guidelines.
+- [x] Read the docs.
+- [x] Check that there isn't already an issue that reports the same bug to avoid creating a duplicate.
+- [x] Make sure this is a Vitest issue and not a framework-specific issue.
+- [x] Check that this is a concrete bug.
+- [x] The provided reproduction is a minimal reproducible example of the bug."""
+start = "8dd67c2625943d824e257b87ae57a14094e90eed"
+fix = "e9c3d72f0c8d6867de06a3df43ea28a05eeec444"
+hidden_tests = ["test/e2e/test/mocking.test.ts"]
+closed = 2026-10-15
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11495"
+pull = 11607
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-14: The /@vite/client stub's hot context should expose a per-module import.meta.hot.data object.
+# issue opened 2026-10-08, fix opened 2026-10-15, squash (or single commit); source files:
+# packages/vitest/src/runtime/moduleRunner/moduleEvaluator.ts (29 lines); request from body (never edited).
+[[situation]]
+id = "vitest-14"
+request = """
+/@vite/client stub's createHotContext returns a hot context without the documented "data" property
+
+### Describe the bug
+
+**I am doing**: running unit tests with `environment: 'happy-dom'`. Vite's `importAnalysis`
+plugin rewrites any module whose source references `import.meta.hot` by prepending
+
+```js
+import { createHotContext as __vite__createHotContext } from "/@vite/client";
+import.meta.hot = __vite__createHotContext("…")`,
+```
+
+and Vitest serves the `/@vite/client` id with a hard-coded stub (`defaultClientStub` in
+`packages/vitest/src/runtime/moduleRunner/moduleEvaluator.ts`).
+
+**What I expect is**: the stub's hot context to honor the documented `ViteHotContext` contract
+(https://vite.dev/guide/api-hmr `readonly data`, "Vite creates one `import.meta.hot.data`
+object for each module path"). The stub already replicates the rest of the surface
+(`accept`, `prune`, `dispose`, `decline`, `invalidate`, `on`, `send`).
+
+**What actually happens is**: `import.meta.hot` is the stub object (truthy, so `if (import.meta.hot)`
+guards pass) but `import.meta.hot.data` is `undefined`, so any legitimate `hot.data[key]` reader
+crashes. Real-world example: `@lexical/extension`'s HMRExtension (wired with the documented
+`configExtension(HMRExtension, { hot: import.meta.hot ?? null })` pattern) throws
+`TypeError: Cannot read properties of undefined (reading 'lexicalHMR:…')` in every unit test
+that mounts an editor.
+
+### Reproduction
+
+https://github.com/Alxs39/vitest-hot-data-repro : `npm install`, then `npm test`.
+
+Output (vitest 5.0.3, latest):
+
+```
+FAIL  hmr-data.test.js > import.meta.hot exposes the documented data object
+AssertionError: expected undefined to deeply equal {}
+
+- Expected:
+{}
+
++ Received:
+undefined
+```
+
+The first assertion (`expect(import.meta.hot).toBeDefined()`) passes the stub exists, only the documented `data` property is missing.
+
+### System Info
+
+```shell
+System:
+    OS: macOS 26.5.2
+    CPU: (10) arm64 Apple M4
+    Memory: 1.09 GB / 32.00 GB
+    Shell: 5.9 - /bin/zsh
+  Binaries:
+    Node: 26.8.1 - /Users/alexis/.local/bin/node
+    npm: 11.19.0 - /Users/alexis/.local/bin/npm
+    pnpm: 11.10.0 - /Users/alexis/.local/bin/pnpm
+  Browsers:
+    Safari: 26.5.2
+  npmPackages:
+    vitest: 5.0.3 => 5.0.3
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "ca081358494a6170b1e4e3f9472243a7f03ad31c"
+fix = "3a8289ac382ff72e7c33345b4847d839e9c3d676"
+hidden_tests = ["test/e2e/test/import-meta-hot.test.ts"]
+closed = 2026-10-15
+kind = "missing-behaviour"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11528"
+pull = 11590
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-15: --changed should find changed files whose names git quotes (non-ASCII, quotes, backslash, tab).
+# issue opened 2026-10-13, fix opened 2026-10-14, squash (or single commit); source files:
+# packages/vitest/src/node/vcs/git.ts (7 lines); request from body (never edited).
+# reading notes: text names the fix (-z); an existing test pins the error text 'git diff --name-only -z ...', so flag
+# placement matters
+[[situation]]
+id = "vitest-15"
+request = """
+`--changed` skips changed files whose names git quotes (non-ASCII, `"`, `\\`, tab)
+
+### Describe the bug
+
+`vitest run --changed` finds no affected tests when the changed file's name has a character that git quotes. Examples are `é`, a double quote, a backslash, or a tab. Vitest then exits with code 0, while a full `vitest run` fails on the same tree.
+
+`GitVCSProvider` runs `git diff --name-only` and `git ls-files --other --modified` without `-z`, splits stdout on `\\n`, and resolves each line as a path:
+
+https://github.com/vitest-dev/vitest/blob/f15bdac4f05d2838855d4bd4f47e4076036ea18b/packages/vitest/src/node/vcs/git.ts#L22-L25
+
+With git's default `core.quotePath=true`, git prints `é.test.js` as `"\\303\\251.test.js"`, quotes included. The resolved path matches no file, so the test is dropped.
+
+Git documents the quoting under `core.quotePath`: https://git-scm.com/docs/git-config#Documentation/git-config.txt-corequotePath
+
+### Reproduction
+
+```sh
+mkdir quoted-changed && cd quoted-changed
+npm init -y >/dev/null && npm pkg set type=module
+npm i -D vitest@5.0.4
+cat > é.test.js <<'EOF'
+import { expect, test } from 'vitest'
+test('accent', () => { expect(1).toBe(1) })
+EOF
+printf 'node_modules\\n' > .gitignore
+git init -q && git add -A && git commit -qm base
+sed -i.bak 's/toBe(1)/toBe(2)/' é.test.js && rm é.test.js.bak
+
+git diff --name-only            # prints "\\303\\251.test.js"
+npx vitest run --changed; echo "exit $?"   # No affected test files found, exiting with code 0
+npx vitest run; echo "exit $?"             # 1 failed, exit 1
+```
+
+Renaming the file to `e.test.js` and repeating the steps makes `--changed` run the test and fail, as expected.
+
+### Suggested fix
+
+Pass `-z` to the three git commands and split stdout on `\\0`. Setting `-c core.quotePath=false` is not enough, because git still quotes names that contain `"`, `\\`, a tab, or a newline.
+
+### System info
+
+- vitest 5.0.4 (also 4.1.11)
+- git 2.56.0, default config
+- Node 24, macOS
+
+### Used package manager
+
+npm
+
+### Validations
+
+- [x] Follow our Code of Conduct
+- [x] Read the Contributing Guidelines
+- [x] Read the docs
+- [x] Check that there isn't already an issue that reports the same bug
+- [x] The provided reproduction is a minimal reproducible example of the bug"""
+start = "28dc1edfb6ba5a181fe208576989063795aeadb3"
+fix = "14921e96253cf5ae460ad3d62c44deb1f78f5f2b"
+hidden_tests = ["test/e2e/test/git-changed.test.ts"]
+closed = 2026-10-14
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11564"
+pull = 11583
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-16: Fix the istanbul uncovered-files pass so concurrent transforms cannot replace an uncovered file's
+# coverage, and stop covered files with glob characters in their path being reprocessed.
+# issue opened 2026-10-01, fix opened 2026-10-08, squash (or single commit); source files:
+# packages/coverage-istanbul/src/provider.ts (36 lines); request from body (never edited).
+# reading notes: two defects in one issue; tests cover only the istanbul race (simulated deterministically by a
+# plugin); text names the fix; AI-assisted
+[[situation]]
+id = "vitest-16"
+request = """
+Coverage: covered files with `(` or `[` in their path are re-processed as uncovered, and istanbul can record another module's coverage for an uncovered file
+
+### Describe the bug
+
+Two defects in the uncovered-files pass make our coverage reports nondeterministic. In a SvelteKit app (Browser Mode, `@vitest/coverage-istanbul`), three runs of the same commit reported 90.08 %, 89.88 % and 89.45 % statements for `src/**/*.svelte`. Components that tests replace with `vi.mock` got extra entries: statements past the end of the file and functions renamed `<Name>_2`. With both fixes below applied as local patches, three runs report 92.25 % with no extra entries.
+
+**1. Tested files become unescaped glob patterns.** [`getUntestedFilesByRoot`](https://github.com/vitest-dev/vitest/blob/33cadea62e8763c455c7fca38d9ab1dda87c5f75/packages/vitest/src/node/coverage.ts#L216-L236) passes them to tinyglobby as ignore patterns:
+
+```ts
+ignore: [...this.options.exclude, ...testedFiles.map((file) => slash(file))],
+```
+
+For `src/routes/(app)/[id]/page.ts`, `(app)` is a group and `[id]` a character class, so the pattern doesn't match its own path and the file goes through the uncovered pass again. File-based routing puts many files in such paths: in our app 51 covered route files went through that pass on every run, while only 2 were really uncovered. #4940 was the same problem with user-written `exclude` patterns; here Vitest generates the patterns itself.
+
+**2. istanbul reads the shared `lastFileCoverage()` after an `await`.** [`getCoverageMapForUncoveredFiles`](https://github.com/vitest-dev/vitest/blob/33cadea62e8763c455c7fca38d9ab1dda87c5f75/packages/coverage-istanbul/src/provider.ts#L212-L238) does
+
+```ts
+await transform(`${filename}?cache=${cacheKey}&vitest-uncovered-coverage=true`)
+const lastCoverage = this.instrumenter.lastFileCoverage()
+```
+
+The loop is sequential because of the shared state, but other transforms on the same Vite server still run during the `await`. In Browser Mode the uncovered file is transformed in the `client` environment, where `dev.preTransformRequests` is on, so import analysis warms up the file's imports. Cached imports are no-ops, but a module replaced with `vi.mock` has its `transformResult` cleared after every test file (`ServerMockResolver.invalidate` in `@vitest/mocker`), so it is transformed and instrumented again. If that finishes first, `lastFileCoverage()` returns a zero-hit map of the mocked module in compiled-JS coordinates. It is stored under the mocked module's path, which after remap and merge gives the extra statements and `_2` functions, and the uncovered file's own entry is lost. With `coverage.changed`, that can be a changed file at 0 % slipping past `thresholds.perFile`.
+
+A probe in that loop (`lastFileCoverage().path !== filename`) caught 6 and 8 substitutions out of 53 uncovered files in two runs, and the files with extra entries were exactly the substituted ones.
+
+**Suggested fixes**, both checked against 5.0.3 with the reproduction below:
+
+1. `testedFiles.map(file => escapePath(slash(file)))` with `escapePath` from tinyglobby, or filter the glob result with a `Set` of tested files instead of turning exact paths into patterns.
+2. Keep the coverage from the uncovered file's own transform: in `onFileTransform`, for ids with `vitest-uncovered-coverage=true`, store `this.instrumenter.lastFileCoverage()` in a `Map` keyed by id right after `instrumentSync`, and read it from there in the loop.
+
+Fix 1 alone hid the symptom in our app, because neither of the 2 really uncovered files imports a mocked module; fix 2 removes the race. I can open a PR for both.
+
+I investigated this with Claude Code as an assistant.
+
+### Reproduction
+
+https://github.com/Vantrongs/vitest-coverage-uncovered-repro
+
+- `npm run repro:glob` (Node, no browser): a test covers `src/routes/(app)/[id]/page.ts`, yet `DEBUG=vitest:coverage` prints `Uncovered file 0/1 … src/routes/(app)/[id]/page.ts`. Expected: no uncovered files.
+- `npm run repro:race`: drives `IstanbulCoverageProvider.generateCoverage` against a Vite server whose plugin transforms `src/other.ts` while the uncovered `src/uncovered.ts` is pending, as import-analysis warm-up does. Expected `[…/src/uncovered.ts]`, got `[…/src/other.ts]`.
+
+In a real project the race needs Browser Mode, the istanbul provider and an uncovered file (or, through defect 1, a covered file under `(group)/[param]/`) that imports a module some browser test mocks with `vi.mock(path, factory)`. It is timing-dependent.
+
+The app uses bun; the reproduction uses npm and behaves the same after `bun install`.
+
+### System Info
+
+```shell
+System:
+    OS: Linux 7.2 NixOS 26.05 (Yarara)
+    CPU: (32) x64 AMD Ryzen 9 9950X 16-Core Processor
+    Shell: 5.3.9 - bash
+  Binaries:
+    Node: 24.21.0
+    npm: 11.19.0
+  Browsers:
+    Chrome: 154.0.8037.92
+    Firefox: 157.0
+  npmPackages:
+    @vitest/coverage-istanbul: 5.0.3 => 5.0.3
+    vite: 8.3.2 => 8.3.2
+    vitest: 5.0.3 => 5.0.3
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "0fa80f53c2afa3429ead7f357f0ad266b39b240a"
+fix = "9f61dcca2812269494d12f632eb3d59c68b208ae"
+hidden_tests = ["test/coverage-test/test/uncovered-concurrent-transform.istanbul.test.ts"]
+closed = 2026-10-09
+kind = "race"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11433"
+pull = 11529
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-17: A fixture whose setup throws should be set up again on retry or in later tests rather than cached as
+# resolved or rejected.
+# issue opened 2026-09-11, fix opened 2026-09-11, squash (or single commit); source files:
+# packages/vitest/src/runtime/runner/fixture.ts (21 lines); request from body (never edited).
+# reading notes: filed by fixer; text names the cause
+[[situation]]
+id = "vitest-17"
+request = """
+A fixture whose setup throws is never set up again
+
+### Describe the bug
+
+If a fixture's setup throws, Vitest keeps treating the fixture as resolved and never runs the setup again.
+
+```ts
+let attempts = 0
+const flaky = test.extend({
+  value: async ({}, use) => {
+    if (attempts++ === 0) throw new Error('setup failed once')
+    await use('ready')
+  },
+})
+flaky('x', { retry: 1 }, ({ value }) => {
+  expect(value).toBe('ready')   // retry gets undefined
+})
+```
+
+For test scope, `withFixtures` marks the fixture in `cachedFixtures` before awaiting setup and only unmarks it after success. The retry sees the mark, skips setup, and the test gets `undefined`.
+
+For file and worker scope, the in-flight promise is cached and only deleted in a `.then`. A rejection stays cached and is handed to every later test, across files under `isolate: false`.
+
+Both are in `packages/vitest/src/runtime/runner/fixture.ts`, since e53854fcc (#9550). I have a fix and tests, and will open a PR.
+
+### Reproduction
+
+https://github.com/hamed-bavar/vitest-fixture-failed-setup
+
+After `npm install`, `npx vitest run` fails on the retry with `expected 1 to be 2`: setup ran once and the retry skipped it.
+
+### System Info
+
+```shell
+  System:
+    OS: Windows 11 10.0.26200
+    CPU: (12) x64 AMD Ryzen 5 7535HS with Radeon Graphics
+    Memory: 12.66 GB / 31.24 GB
+  Binaries:
+    Node: 22.18.0
+    Yarn: 1.22.22
+    npm: 10.9.3
+    pnpm: 11.24.0
+  Browsers:
+    Chrome: 152.0.7977.65
+    Edge: Chromium (152.0.4191.53)
+    Firefox: 155.0
+  npmPackages:
+    vitest: 5.0.0 => 5.0.0
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [X] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [X] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [X] Read the [docs](https://vitest.dev/guide/).
+- [X] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [X] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [X] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "af903c65e4d192b7bf2b788a7910b93cfe4c59f4"
+fix = "4ee66c021e0592c886dbab727f0f8da9366f99ab"
+hidden_tests = ["test/e2e/test/fixture-failed-setup.test.ts", "test/unit/test/fixture-retry.test.ts"]
+closed = 2026-10-02
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11237"
+pull = 11238
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# vitest-18: vm pools should not run Vite's dependency optimizer over index.html, so an unbundlable dependency there
+# does not fail the run.
+# issue opened 2026-09-22, fix opened 2026-09-26, squash (or single commit); source files:
+# packages/vitest/src/node/plugins/runnerTransform.ts (15 lines); request from body (never edited).
+# reading notes: test adds a local file: dependency to test/e2e/package.json, so the harness must reinstall
+[[situation]]
+id = "vitest-18"
+request = """
+vm pools run Vite's dependency optimizer over index.html; an unbundlable dependency aborts the run (exit 1) though all tests pass
+
+### Describe the bug
+
+When the pool is `vmThreads` (or `vmForks`), Vite's dependency optimizer runs over the project's `index.html` import graph and pre-bundles what it finds. If a dependency reached from `index.html` cannot be bundled, the run ends with an unhandled rejection and exit code 1, even when every test passes and no test imports that dependency. With `pool: 'threads'` the same project exits 0.
+
+Our case: an app whose `index.html` entry reaches `react-native` (Flow source) via react-native-web. Every test passed under `threads`; under `vmThreads` the run aborted with `[PARSE_ERROR] Flow is not supported` from `react-native/Libraries/Utilities/codegenNativeComponent.js`.
+
+From reading `dist/chunks/cli-api-*.js`: a vm pool adds the `__vitest_vm__` Vite environment (`consumer: "client"`), and the `configEnvironment` hook returns early for it (`if (name === "__vitest_vm__" || name === "__vitest__") return;`). So it never gets the `resolveOptimizerConfig(...)` override the other environments get, and it keeps Vite's client default: discover dependencies from every `index.html`. Since vm tests load modules through native import, it looks like the optimizer has no work to do in that environment at all.
+
+Setting `optimizeDeps.noDiscovery` at the top level does **not** help. Setting it on the environment does:
+
+```ts
+environments: { __vitest_vm__: { optimizeDeps: { noDiscovery: true } } },
+```
+
+That is our current workaround, but it depends on an internal environment name.
+
+### Reproduction
+
+https://github.com/iKyi/vitest-vm-repros/tree/main/optimizer
+
+`index.html` loads `main.js`, which imports `flowdep` (a local package with Flow annotations, installed as a real package via `.npmrc install-links=true`). The only test is `expect(1).toBe(1)`.
+
+```sh
+npm install
+npx vitest run                  # config pool vmThreads: all tests pass, exit 1
+npx vitest run --pool=threads   # exit 0
+```
+
+```
+Unhandled Rejection
+Error: Error during dependency optimization:
+Build failed with 1 error:
+[PARSE_ERROR] Flow is not supported
+```
+
+| variant | exit |
+|---|---|
+| pool `vmThreads` | 1 |
+| pool `threads` | 0 |
+| `vmThreads` + top-level `optimizeDeps: { noDiscovery: true }` | 1 |
+| `vmThreads` + `environments.__vitest_vm__.optimizeDeps.noDiscovery` | 0 |
+| `vmThreads`, `index.html` removed | 0 |
+
+### System Info
+
+```
+System:
+  OS: Linux 7.0 Ubuntu 26.04.1 LTS
+  CPU: (32) x64 AMD RYZEN AI MAX+ 395 w/ Radeon 8060S
+Binaries:
+  Node: 22.22.3
+  npm: 10.9.8
+npmPackages:
+  happy-dom: 20.14.5
+  vitest: 5.0.1
+  vite: 8.3.0
+  rolldown: 1.2.9
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [x] Follow our Code of Conduct
+- [x] Read the Contributing Guidelines.
+- [x] Read the docs.
+- [x] Check that there isn't already an issue that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a GitHub Discussion or join our Discord Chat Server.
+- [x] The provided reproduction is a minimal reproducible example of the bug."""
+start = "a1fd67349c9ee69f03d321d891e2a5b190792aa2"
+fix = "caf2887dee8987a60118d53933f6e9cabd6b3e2a"
+hidden_tests = ["test/e2e/deps/optimizer/unparsable/index.js", "test/e2e/deps/optimizer/unparsable/package.json", "test/e2e/fixtures/vm-optimizer/basic.test.ts", "test/e2e/fixtures/vm-optimizer/index.html", "test/e2e/fixtures/vm-optimizer/main.js", "test/e2e/package.json", "test/e2e/test/vm-optimizer.test.ts"]
+closed = 2026-09-29
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11329"
+pull = 11360
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-19: Cache key generators from defineCacheKeyGenerator should be scoped per project so a shared file
+# transformed differently is cached separately.
+# issue opened 2026-09-16, fix opened 2026-09-17, squash (or single commit); source files:
+# packages/vitest/src/node/cache/fsModuleCache.ts, packages/vitest/src/node/core.ts,
+# packages/vitest/src/node/types/plugin.ts (20 lines); request from body (never edited).
+[[situation]]
+id = "vitest-19"
+request = """
+`defineCacheKeyGenerator` not distinguishing common files that a plugin process differently in two projects
+
+### Describe the bug
+
+I have two projects, each with one test file in it. Both test files import something from `common.ts` which is transformed by a plugin. That plugin is different in each project, but it uses `defineCacheKeyGenerator` with different values so vitest should be able to distinguish them. Instead, `common.ts` is only cached once, and the other project gets the wrong contents.
+
+### Reproduction
+
+https://github.com/dumbmatter/vitest-defineCacheKeyGenerator
+
+This is common.ts, which is imported by both of the test files:
+
+```
+export const common = "WHATEVER";
+```
+
+This is vitest.config.ts, including my plugin which is different between the two projects:
+
+```
+import { defineConfig, Plugin } from "vitest/config";
+
+const makePlugin = (text: string): Plugin => {
+    return {
+        configureVitest({ defineCacheKeyGenerator }) {
+            defineCacheKeyGenerator(() => {
+                return text;
+            });
+        },
+		name: "my-plugin",
+		transform: {
+			handler(code) {
+				return code.replaceAll("WHATEVER", text);
+			},
+		},
+    };
+}
+
+export default defineConfig({
+	test: {
+		fsModuleCache: true,
+		projects: [
+            {
+                plugins: [
+                    makePlugin("foo"),
+                ],
+                test: {
+                    name: "foo",
+                    include: ["foo.test.ts"],
+                },
+            },
+            {
+                plugins: [
+                    makePlugin("bar"),
+                ],
+                test: {
+                    name: "bar",
+                    include: ["bar.test.ts"],
+                },
+            },
+		],
+	},
+});
+```
+
+Then when running the tests, notice how it uses the same cached version of common.ts twice:
+
+```
+$ DEBUG=vitest:cache:fs pnpm vitest run
+
+ RUN  v5.0.1 /home/user/vitest-defineCacheKeyGenerator
+
+  vitest:cache:fs [read] /home/user/vitest-defineCacheKeyGenerator/bar.test.ts is cached in /home/user/vitest-defineCacheKeyGenerator/node_modules/.vitest-cache/5eb6d5041bef9f4ead55461f499baeef4e0744b5 +0ms
+  vitest:cache:fs [read] /home/user/vitest-defineCacheKeyGenerator/foo.test.ts is cached in /home/user/vitest-defineCacheKeyGenerator/node_modules/.vitest-cache/d0d0ca747b8f48f1e114919f47b35c6ffdd0480a +1ms
+  vitest:cache:fs [read] /home/user/vitest-defineCacheKeyGenerator/common.ts is cached in /home/user/vitest-defineCacheKeyGenerator/node_modules/.vitest-cache/3796e673d9946f9ce7642f19028ea66f291dda5d +6ms
+  vitest:cache:fs [read] /home/user/vitest-defineCacheKeyGenerator/common.ts is cached in /home/user/vitest-defineCacheKeyGenerator/node_modules/.vitest-cache/3796e673d9946f9ce7642f19028ea66f291dda5d +0ms
+ ✓  bar  bar.test.ts (2 tests) 3ms
+ ❯  foo  foo.test.ts (2 tests | 1 failed) 9ms
+   ✓ foo local 1ms
+   × foo imported 7ms
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL   foo  foo.test.ts > foo imported
+AssertionError: expected 'bar' to equal 'foo'
+
+Expected: "foo"
+Received: "bar"
+
+ ❯ foo.test.ts:9:12
+      7|
+      8| test("foo imported", () => {
+      9|     assert.equal(common, "foo");
+       |            ^
+     10| });
+     11|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 3 passed (4)
+   Start at  22:07:36
+   Duration  129ms (import 36%, tests 25%, transform 24%, worker 14%, environment 1%)
+```
+
+### System Info
+
+```shell
+System:
+    OS: Linux 6.8 Ubuntu 24.04.5 LTS 24.04.5 LTS (Noble Numbat)
+    CPU: (8) x64 Intel(R) Core(TM) i7-9700 CPU @ 3.00GHz
+    Memory: 13.80 GB / 31.13 GB
+    Container: Yes
+    Shell: 5.2.21 - /bin/bash
+  Binaries:
+    Node: 24.21.0 - /usr/bin/node
+    Yarn: 1.22.22 - /usr/bin/yarn
+    npm: 11.19.0 - /usr/bin/npm
+    pnpm: 12.4.1 - /home/user/.local/share/pnpm/bin/pnpm
+  Browsers:
+    Brave Browser: 152.1.94.121
+    Chrome: 153.0.8010.36
+    Firefox: 155.0.1
+    Firefox Developer Edition: 155.0.1
+```
+
+### Used Package Manager
+
+pnpm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "38f98855fa9cd7fd376afb84094eba0fda256a74"
+fix = "92ba7fc1df16a4fa5bbee3f198c582fbd56689d8"
+hidden_tests = ["test/e2e/test/caching.test.ts"]
+closed = 2026-09-29
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11281"
+pull = 11301
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-20: fsModuleCache should not serve a stale importer transform after one of its dependencies is renamed.
+# issue opened 2026-09-12, fix opened 2026-09-28, squash (or single commit); source files:
+# packages/vitest/src/node/cache/fsModuleCache.ts, packages/vitest/src/node/environments/fetchModule.ts,
+# packages/vitest/src/node/vite.ts (148 lines); request from body (never edited).
+# reading notes: a test also requires an unchanged graph not to rewrite cache files (mtime check), a natural
+# requirement
+[[situation]]
+id = "vitest-20"
+request = """
+fsModuleCache serves a stale transform after a dependency is renamed (Cannot find module)
+
+### Describe the bug
+
+With `fsModuleCache: true`, renaming a module that another module imports serves a stale transform of the importer, and the importer then fails with `Cannot find module`. This holds as long as the importer's own source is unchanged, which is the usual case when switching git branches.
+
+The cached transform of the importer contains the *resolved* path of its import. The cache key covers the importer's id and content, the config file content and the plugin names, but not what the importer's imports resolve to. So after `b.ts` becomes `b.tsx`, `a.ts` hits the cache and still imports `/src/b.ts`.
+
+Found by running a 643-file suite cold and then warm across a branch switch: 285 files failed to load with `Cannot find module`, and all of them passed again once `node_modules/.vitest-cache` was deleted.
+
+### Reproduction
+
+```
+src/a.ts        export { value } from './b';
+src/b.ts        export const value = 1;
+src/a.test.ts   import { value } from './a'; it('reads it', () => expect(value).toBe(1));
+vitest.config.mjs  export default defineConfig({ test: { fsModuleCache: true } });
+```
+
+1. `vitest run` passes. This run writes the cache.
+2. `mv src/b.ts src/b.tsx`. `a.ts` is untouched.
+3. `vitest run` fails:
+   `Error: Cannot find module '/src/b.ts' imported from …/src/a.ts`
+4. `rm -rf node_modules/.vitest-cache && vitest run` passes.
+
+### Expected
+
+Step 3 passes. A module's cache entry should be invalidated, or its resolved imports revalidated, when a dependency it resolved to no longer exists or now resolves elsewhere.
+
+### System info
+
+vitest 5.0.0, vite 8.2.x, Node 24.16.0, Linux. The same happens with `pool: forks` (the default) and 1 worker."""
+start = "b24585f08f2ea267746a2d6ca0e43edcbb29726f"
+fix = "38f98855fa9cd7fd376afb84094eba0fda256a74"
+hidden_tests = ["test/e2e/test/fs-module-cache-invalidation.test.ts"]
+closed = 2026-09-29
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11246"
+pull = 11381
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-21: it.fails tests should not be retried once they fail as expected.
+# issue opened 2026-08-26, fix opened 2026-09-10, squash (or single commit); source files:
+# packages/vitest/src/runtime/runner/run.ts (30 lines); request from body (never edited).
+# reading notes: tests also fix how repeats interact with it.fails; seems natural
+[[situation]]
+id = "vitest-21"
+request = """
+Vitest incorrectly retries the `it.fails` tests
+
+### Describe the bug
+
+Vitest keeps retrying the test that fails and which is marked as `it.fails`. 
+
+### Reproduction
+
+Consider the following Vitest test:
+
+```ts
+import { expect, it } from 'vitest';
+
+it.fails('vitest bug', { retry: 2 }, async (ctx) => {
+  console.log('attempt!');    
+  expect(1).toBe(2);
+});
+```
+
+I expect to see `attempt!` output only once: the test is declared as failing and it fails on the first attempt.
+Instead, I see 3 attempts.
+
+### System Info
+
+```shell
+System:
+    OS: macOS 26.5.1
+    CPU: (10) arm64 Apple M1 Max
+    Memory: 996.88 MB / 32.00 GB
+    Shell: 3.2.57 - /bin/bash
+  Binaries:
+    Node: 20.20.2 - /Users/aslushnikov/fk/vitest/node_modules/.bin/node
+    npm: 11.17.0 - /Users/aslushnikov/.local/share/mise/installs/node/latest/bin/npm
+    pnpm: 11.5.0 - /Users/aslushnikov/.local/share/mise/installs/pnpm/latest/pnpm
+  Browsers:
+    Chrome: 151.0.7922.174
+    Safari: 26.5
+  npmPackages:
+    @vitest/browser: ^4.1.10 => 4.1.10
+    @vitest/browser-playwright: ^4.1.10 => 4.1.10
+    @vitest/utils: ^4.1.10 => 4.1.10
+    playwright: ^1.61.1 => 1.61.1
+    vitest: ^4.1.10 => 4.1.10
+```
+
+### Used Package Manager
+
+pnpm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "f91db0dfd061e51a56a55dad43d249332b0ebb0a"
+fix = "b24585f08f2ea267746a2d6ca0e43edcbb29726f"
+hidden_tests = ["test/e2e/test/repeats.test.ts", "test/e2e/test/retry.test.ts", "test/unit/test/on-finished.test.ts", "test/unit/test/repeats.test.ts", "test/unit/test/retry.test.ts"]
+closed = 2026-09-29
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11068"
+pull = 11219
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-22: Vitest's root temporary directory under os.tmpdir() is never removed, so every run leaks a directory; it
+# should be removed when Vitest closes.
+# issue opened 2026-09-10, fix opened 2026-09-12, squash (or single commit); source files:
+# packages/vitest/src/node/core.ts (25 lines); request from body (never edited).
+# reading notes: text names the fix (rm root _tmpDir on close like TestProject.close); test reads existing
+# vitest._tmpDir
+[[situation]]
+id = "vitest-22"
+request = """
+Root `Vitest._tmpDir` is never removed, so every successful run leaks a directory in os.tmpdir()
+
+### Describe the bug
+
+`Vitest` creates two temporary directories under `os.tmpdir()`, both named with a bare `nanoid()` and no prefix. The per-project one is cleaned up; the root one is not.
+
+- `TestProject.tmpDir` — assigned `join(tmpdir(), nanoid())` in the constructor, and removed by `clearTmpDir()`, which `TestProject.close()` awaits.
+- `Vitest._tmpDir` — assigned `join(tmpdir(), nanoid())`, passed to `createFetchModuleFunction(...)`, and **never removed**. In the published `vitest@5.0.0` bundle there are exactly two references to it: the assignment and that one use. There is no `rm`.
+
+The directory holds the transformed modules the fork pool reads from disk instead of receiving over `process.send()`, one subdirectory per Vite environment (`ssr/`, `client/`).
+
+The consequence is that **a completely successful run leaks a directory**. This is not limited to crashes, timeouts or `SIGKILL`.
+
+### Reproduction
+
+```bash
+mkdir vitest-tmpdir-repro && cd $_
+npm init -y >/dev/null
+npm pkg set type=module >/dev/null
+npm i -D vitest@5.0.0
+
+mkdir src
+echo 'export const value = 42;' > src/lib.js
+cat > src/a.test.js <<'JS'
+import { test, expect } from "vitest";
+import { value } from "./lib.js";
+test("it passes", () => { expect(value).toBe(42); });
+JS
+
+mkdir probe
+TMPDIR=$PWD/probe ./node_modules/.bin/vitest run
+ls -R probe
+```
+
+### Observed
+
+The run passes and exits `0`:
+
+```
+Tests  1 passed (1)
+Duration  82ms
+```
+
+and the directory is still there afterwards:
+
+```
+probe/84wvDuB4E7NljBegtN4jt/ssr/     (2 files)
+```
+
+Re-running produces a second directory, a third, and so on. Nothing removes them.
+
+### Expected
+
+The root temporary directory is removed when `Vitest` closes, the way `TestProject.close()` already removes the per-project one.
+
+### Impact
+
+`os.tmpdir()` is usually a long-lived shared location. Because the directory is named with a bare `nanoid()` and carries no prefix, the leftovers are also hard to attribute — they look anonymous, which makes them easy to misdiagnose as something else.
+
+Two settings where this adds up:
+
+- **CI on persistent (non-ephemeral) machines.** Every green run leaves a directory behind, permanently. Size scales with the module graph the tests reach — a few KB for a small package, tens of MB for a large one — so a big repository accumulates quickly. On a machine where several jobs share one `os.tmpdir()`, this reaches gigabytes across tens of thousands of directories.
+- **Local development.** Any platform that does not aggressively sweep `os.tmpdir()` accumulates one directory per `vitest run`, indefinitely.
+
+Aside from disk, a very large number of entries in a single directory slows down every subsequent `mkdtemp()` in that directory, including ones made by unrelated tools.
+
+### Version
+
+- `vitest@5.0.0`
+- `node v24.18.0`
+- Darwin 25.5.0 (the code path is platform independent)"""
+start = "6c49b71978c23ef1dc04c2ef5fa73af8f9bc5ec0"
+fix = "7c7119cf7c03bfc36c1e4c79f1502868d1207962"
+hidden_tests = ["test/node-runner/fixtures/root-tmpdir/basic.test.js", "test/node-runner/fixtures/root-tmpdir/lib.js", "test/node-runner/test/root-tmpdir.test.js"]
+closed = 2026-09-28
+kind = "missing-behaviour"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11224"
+pull = 11248
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-23: Importing an /@fs/ module fails when test code sets globalThis.process to undefined, because the cached
+# resolver reads process.platform per request.
+# issue opened 2026-09-23, fix opened 2026-09-24, squash (or single commit); source files:
+# packages/vitest/src/runtime/moduleRunner/cachedResolver.ts, packages/vitest/src/runtime/rpc.ts (15 lines); request
+# from body (never edited).
+# reading notes: text names the fix (hoist the read or import node:process); the test also trips a process read in
+# rpc.ts that the issue does not mention, but the issue's own repro would reveal it
+[[situation]]
+id = "vitest-23"
+request = """
+`getCachedVitestImport` reads `process.platform` per request, so `/@fs/` imports fail when test code blanks `globalThis.process`
+
+### Describe the bug
+
+[`cachedResolver.ts:26`](https://github.com/vitest-dev/vitest/blob/main/packages/vitest/src/runtime/moduleRunner/cachedResolver.ts#L26) reads `process.platform` inside the function body:
+
+```ts
+if (id.startsWith('/@fs/') || id.startsWith('\\\\@fs\\\\')) {
+  id = id.slice(process.platform === 'win32' ? 5 : 4)
+}
+```
+
+It runs on every module request with an `/@fs/` id. If test code has set `globalThis.process` to `undefined` at that moment, the import fails with `Cannot read properties of undefined (reading 'platform')`.
+
+The two other `process.platform` reads in this runtime are at module scope, evaluated once at import, and unaffected. Vite guards the equivalent read in its own module runner with `typeof process < 'u'`.
+
+Test code blanks `process` for real reasons: [`@convex-dev/workflow`](https://github.com/get-convex/workflow) enforces deterministic replay by blanking `process`, `crypto`, `Math.random` and `Date` while a workflow step runs, which is correct on the Convex backend, where `process` does not exist. Under `convex-test` the two share a realm, and component modules resolve to `/@fs/` ids, so any step that calls into a component hits this line.
+
+**Suggested fix.** Hoist the read, matching the two neighbouring uses:
+
+```ts
+const isWindows = process.platform === 'win32'
+```
+
+or `import process from 'node:process'`, which also makes the resolver independent of the global. I verified that changing the expression to `globalThis.process?.platform === 'win32'` makes both the reproduction and a real suite pass on `vitest@5.0.1`.
+
+### Reproduction
+
+https://gist.github.com/martin-ptsoft/1a80fa9140b15670d0da13b76e1638e3
+
+```
+git clone https://gist.github.com/1a80fa9140b15670d0da13b76e1638e3 repro && cd repro
+npm install
+npm test
+```
+
+Expected: one passing test. Actual:
+
+```
+Error: Cannot read properties of undefined (reading 'platform')
+ ❯ repro.test.ts:8:17
+```
+
+The test blanks `globalThis.process`, then dynamically imports a module. `vitest.config.ts` puts the root in a temp directory, which is the shortest way to give a plain relative import an `/@fs/` id.
+
+Reproduces on `vitest@4.1.8` and `vitest@5.0.1`.
+
+### System Info
+
+```shell
+  System:
+    OS: Linux 7.0 Ubuntu 26.04.1 LTS 26.04.1 LTS (Resolute Raccoon)
+    CPU: (8) x64 AMD EPYC-Rome Processor
+    Memory: 10.02 GB / 15.61 GB
+    Container: Yes
+    Shell: 5.3.9 - /bin/bash
+  Binaries:
+    Node: 24.19.0 - /usr/bin/node
+    npm: 11.18.0 - /usr/bin/npm
+    bun: 1.4.2 - /home/devagent/.bun/bin/bun
+  npmPackages:
+    vitest: 5.0.1 => 5.0.1
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [X] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [X] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [X] Read the [docs](https://vitest.dev/guide/).
+- [X] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [X] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [X] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "089354eeed38ed93dc0f741de813682373643ff0"
+fix = "0b79231ad7897f03de17940ef16684b63aa217fe"
+hidden_tests = ["test/unit/test/stubbed-process.test.ts"]
+closed = 2026-09-25
+kind = "crash"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11339"
+pull = 11343
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-24: With detectAsyncLeaks, merely touching process.stdin is reported as a PIPEWRAP leak in 5.0;
+# process-lifetime stdio handles should not be reported.
+# issue opened 2026-09-23, fix opened 2026-09-23, squash (or single commit); source files:
+# packages/vitest/src/runtime/detect-async-leaks.ts (23 lines); request from body (never edited).
+# reading notes: test keeps a real spawned-pipe leak reported and inline-snapshots the existing leak output format
+[[situation]]
+id = "vitest-24"
+request = """
+detectAsyncLeaks reports process.stdin as a leaked PIPEWRAP in 5.0
+
+### Describe the bug
+
+With `detectAsyncLeaks: true`, accessing `process.stdin` anywhere in a test file, including indirectly at module load, is reported as an async leak on Vitest 5.0.1. Vitest 4.1.11 does not report it.
+
+`process.stdin` is created lazily by Node and lives for the whole process, so it is not something a test can or should close. In practice it is reached through dependencies. For example, `vfile` (used by `unified`, `remark` and `react-markdown`) imports `node:process` in its Node build, which is enough to trigger it. In our suite that produced one leak per test file that rendered markdown (26 files), each pointing at the `import Markdown from 'react-markdown'` line.
+
+It happens with both `environment: 'node'` and `environment: 'jsdom'`, and whether stdin is a pipe or `/dev/null`.
+
+### Reproduction
+
+```ts
+// vitest.config.ts
+import { defineConfig } from 'vitest/config'
+export default defineConfig({ test: { detectAsyncLeaks: true } })
+```
+
+```ts
+// stdin.test.ts
+import { test } from 'vitest'
+
+void process.stdin
+
+test('touches process.stdin', () => {})
+```
+
+```
+$ npx vitest run
+⎯⎯⎯⎯⎯⎯⎯ Async Leaks 1 ⎯⎯⎯⎯⎯⎯⎯⎯
+PIPEWRAP leaking in stdin.test.ts
+      Tests  1 passed (1)
+      Leaks  1 leak
+```
+
+The same two files with `vitest@4.1.11` report no leak.
+
+Expected: `process.stdin`, a process-lifetime handle, is not attributed as a leak to the test file that first touched it, as on 4.x.
+
+### System Info
+
+```shell
+System:
+  OS: macOS 26.6.2
+  CPU: (18) arm64 Apple M5 Pro
+Binaries:
+  Node: 24.18.0
+  npm: 11.16.0
+  pnpm: 10.34.5
+npmPackages:
+  vitest: 5.0.1 (no leak reported on 4.1.11)
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "4e91e56687de43427fbb664d86a63438ca73b681"
+fix = "0fd6b97902bc828d489385e0a28b82515f57b7cf"
+hidden_tests = ["test/e2e/test/detect-async-leaks.test.ts"]
+closed = 2026-09-25
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11330"
+pull = 11333
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-25: expect.arrayContaining nested inside toMatchObject ignores fields of expected array items missing from
+# the actual items, so it passes when it should fail as in Jest.
+# issue opened 2026-08-27, fix opened 2026-08-29, squash (or single commit); source files:
+# packages/expect/src/jest-utils.ts (25 lines); request from body (never edited).
+# reading notes: tests also require an actual item with extra fields not to match arrayContaining([{id:1}]) inside
+# toMatchObject (Jest-like strict equality); issue cites Jest as the reference, so judged fair
+[[situation]]
+id = "vitest-25"
+request = """
+Incorrect  behavior of expect.arrayContaining inside toMatchObject
+
+### Describe the bug
+
+When `expect.arrayContaining` is inside `toMatchObject`, it checks only fields of actual object, all the other fields of expected object are ignored.
+
+```
+expect( 
+    { records: [{ id: 1 }] }
+).toMatchObject(
+    { records: expect.arrayContaining([{ id: 1, required: 'It must not match without this field' }]) }
+);
+```
+This should fail because there is no record with required field, but it passes in vitest. In jest is fails correctly.
+
+### Reproduction
+
+https://stackblitz.com/edit/vitest-dev-vitest-m5ka5dvi
+
+### System Info
+
+```shell
+System:
+    OS: Linux 6.6 Debian GNU/Linux 13 (trixie) 13 (trixie)
+    CPU: (8) x64 Intel(R) Core(TM) i7-8650U CPU @ 1.90GHz
+    Memory: 12.28 GB / 15.56 GB
+    Container: Yes
+    Shell: 5.2.37 - /bin/bash
+  Binaries:
+    Node: 22.23.2 - /usr/bin/node
+    npm: 10.9.8 - /usr/bin/npm
+  npmPackages:
+    @vitest/expect: ^4.1.11 => 4.1.11 
+    vitest: ^4.1.11 => 4.1.11
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "5b95efb6dfe378dc6fc8380f5b1e96832f019a5d"
+fix = "42523289e9158b7a7f413ec3641ee0393c81eaac"
+hidden_tests = ["test/unit/test/jest-expect.test.ts"]
+closed = 2026-09-18
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11071"
+pull = 11100
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-26: An explicit silent setting (CLI or config) is ignored when the minimal/agent reporter is active because
+# the reporter hardcodes silent: 'passed-only'.
+# issue opened 2026-09-14, fix opened 2026-09-15, squash (or single commit); source files:
+# packages/vitest/src/node/config/resolveConfig.ts, packages/vitest/src/node/reporters/minimal.ts,
+# packages/vitest/src/node/types/config.ts (12 lines); request from oldest of 2 edit records.
+# reading notes: text names the cause and suggests the fix; test uses the existing 'agent' reporter name
+[[situation]]
+id = "vitest-26"
+request = """
+`--silent` is ignored when the `minimal` (agent) reporter is active
+
+### Describe the bug
+
+When Vitest detects an AI coding agent environment, the default reporter becomes `minimal` (`reporters: [isAgent ? 'minimal' : 'default']`). `MinimalReporter` hardcodes `silent` in its constructor:
+
+```ts
+// packages/vitest/src/node/reporters/minimal.ts
+constructor(options: DefaultReporterOptions = {}) {
+  super({ silent: 'passed-only', ...options, summary: false })
+}
+```
+
+`DefaultReporter` only falls back to the user's config in `onInit` (`this.silent ??= this.ctx.config.silent`), so with the minimal reporter `this.silent` is already set and an explicit `--silent=true` / `--silent=false` on the CLI (or `silent` in the config) is silently ignored. The behavior stays `passed-only` no matter what the user passes.
+
+This is confusing to debug: the CLI parses the flag fine (`--silent=bogus` even throws the expected `TypeError`), `BaseReporter.shouldLog` looks correct, yet the value never takes effect — until you notice the reporter never reads `config.silent`.
+
+The [Minimal Reporter docs](https://vitest.dev/guide/reporters#minimal-reporter) describe the reduced output ("Console logs from passing tests and the summary section are also suppressed"), but do not mention that an explicitly provided `silent` setting is overridden.
+
+Expected: an explicit `silent` (CLI flag or config) should win over the minimal reporter's default — e.g. only default to `'passed-only'` when the user did not set one. Alternatively, document the override.
+
+Workaround: passing it as a reporter option does work, because options are spread after the hardcoded default: `reporters: [['minimal', { silent: true }]]`.
+
+### Reproduction
+
+https://github.com/ossan-engineer/vitest-silent-repro
+
+Two files (plus the pnpm lockfile):
+
+```json
+// package.json
+{
+  "name": "vitest-silent-repro",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "5.0.0"
+  }
+}
+```
+
+```js
+// silent.test.js
+import { describe, expect, it } from 'vitest'
+
+describe('silent repro', () => {
+  it('passes', () => {
+    console.log('MARKER_PASS_LOG')
+    expect(1).toBe(1)
+  })
+  it('fails', () => {
+    console.log('MARKER_FAIL_LOG')
+    expect(1).toBe(2)
+  })
+})
+```
+
+Run `pnpm install`, then run each command piped (non-TTY) and check which `MARKER_*` logs appear:
+
+| command | MARKER_PASS_LOG | MARKER_FAIL_LOG |
+|---|---|---|
+| `pnpm vitest run` | shown | shown |
+| `pnpm vitest run --silent=true` | hidden | hidden |
+| `pnpm vitest run --silent=passed-only` | hidden | shown |
+| `AI_AGENT=1 pnpm vitest run` | hidden | shown |
+| `AI_AGENT=1 pnpm vitest run --silent=true` | hidden | **shown (bug — expected hidden)** |
+| `AI_AGENT=1 pnpm vitest run --silent=passed-only` | hidden | shown |
+
+With `AI_AGENT=1` (or any other agent marker std-env detects, e.g. `CLAUDECODE`), the output is identical for all three `silent` values — the flag has no effect.
+
+### System Info
+
+```shell
+System:
+    OS: macOS 15.7.3
+    CPU: (10) arm64 Apple M2 Pro
+    Memory: 1.06 GB / 32.00 GB
+    Shell: 5.9 - /bin/zsh
+  Binaries:
+    Node: 24.21.0 - /Users/k.tachibana/.vite-plus/js_runtime/node/24.21.0/bin/node
+    Yarn: 1.22.22 - /Users/k.tachibana/.nodenv/shims/yarn
+    npm: 11.19.0 - /Users/k.tachibana/.vite-plus/js_runtime/node/24.21.0/bin/npm
+    pnpm: 10.33.2 - /Users/k.tachibana/.vite-plus/bin/pnpm
+  Browsers:
+    Safari: 26.1
+  npmPackages:
+    vitest: 5.0.0 => 5.0.0
+```
+
+### Used Package Manager
+
+pnpm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "9614b803e905bfadb671acd1462c4b25e7c2c79f"
+fix = "5b95efb6dfe378dc6fc8380f5b1e96832f019a5d"
+hidden_tests = ["test/e2e/test/reporters/agent.test.ts"]
+closed = 2026-09-17
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11266"
+pull = 11271
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-27: Setting fakeTimers.toNotFake makes Vitest fall back to sinon's default and fake queueMicrotask (and
+# nextTick); toNotFake should subtract from Vitest's own default set.
+# issue opened 2026-09-10, fix opened 2026-09-14, squash (or single commit); source files:
+# packages/vitest/src/integrations/mock/timers.ts (8 lines); request from body (never edited).
+# reading notes: text names the fix; test constructs FakeTimers directly as existing tests do
+[[situation]]
+id = "vitest-27"
+request = """
+fakeTimers.toNotFake silently enables queueMicrotask faking, contradicting the documented default
+
+### Describe the bug
+
+Setting `fakeTimers.toNotFake` silently causes `queueMicrotask` to be faked, contradicting the documented default.
+
+[The docs](https://vitest.dev/config/faketimers) say `toFake` defaults to "everything available globally except `nextTick` and `queueMicrotask`", and `toNotFake` defaults to `[]`. So `toNotFake: ['Temporal']` should subtract one API from that set. Instead it *adds* `queueMicrotask` faking, which hangs promise-driven code.
+
+The cause is in `FakeTimers.useFakeTimers()`: Vitest's own default is only computed when **both** options are unset, so naming `toNotFake` skips it and falls through to `@sinonjs/fake-timers`' default, which fakes everything.
+
+```js
+let toFake = this._userConfig?.toFake;
+let toNotFake = this._userConfig?.toNotFake;
+if (toFake === void 0 && toNotFake === void 0)
+  // only reached when BOTH are unset
+  toFake = Object.keys(this._fakeTimers.timers).filter(
+    timer => timer !== 'nextTick' && timer !== 'queueMicrotask'
+  );
+```
+
+This is easy to hit because the [v5 migration guide recommends exactly this pattern](https://vitest.dev/guide/migration/) for keeping `Temporal` native:
+
+> `Temporal` is part of the default set of faked APIs... To keep `Temporal` native, add it to `toNotFake`:
+> ```ts
+> vi.useFakeTimers({ toNotFake: ['Temporal'] })
+> ```
+
+Following that advice turns on `queueMicrotask` faking as a side effect.
+
+`nextTick` escapes only incidentally, via the separate `isChildProcess()` guard that re-adds it.
+
+### Reproduction
+
+`probe.spec.ts`:
+
+```ts
+import { describe, it, expect, vi } from 'vitest';
+
+const NATIVE = {
+  setTimeout: globalThis.setTimeout,
+  queueMicrotask: globalThis.queueMicrotask,
+  Date: globalThis.Date,
+};
+
+describe('toFake resolution', () => {
+  it('reports what is actually faked', () => {
+    vi.useFakeTimers();
+    const faked = {
+      setTimeout: globalThis.setTimeout !== NATIVE.setTimeout,
+      Date: globalThis.Date !== NATIVE.Date,
+      queueMicrotask: globalThis.queueMicrotask !== NATIVE.queueMicrotask,
+    };
+    vi.useRealTimers();
+    expect(JSON.stringify(faked)).toBe('FORCE_FAIL_TO_PRINT');
+  });
+});
+```
+
+Run it three times, changing only `test.fakeTimers` in the config:
+
+| `fakeTimers` | `setTimeout` | `Date` | `queueMicrotask` |
+| --- | --- | --- | --- |
+| *(unset)* | faked | faked | not faked |
+| `{ toNotFake: ['Temporal'] }` | faked | faked | **faked** |
+| `{ toFake: ['setTimeout','clearTimeout','Date'] }` | faked | faked | not faked |
+
+Expected: row 2 matches row 1 apart from `Temporal`.
+
+### Suggested fix
+
+Compute Vitest's default exclusion set whenever `toFake` is unset, rather than only when both options are unset — so `toNotFake` subtracts from Vitest's default instead of replacing it with sinon's.
+
+### System Info
+
+```shell
+vitest 5.0.0
+node 22.22.3
+OS: Linux 6.18.33.2-microsoft-standard-WSL2 (Ubuntu on WSL2)
+pool: forks
+```"""
+start = "05982297d0fb046d41e7accd89064f900071dd0a"
+fix = "a47d7908f0635e9cba6cbe5e1a209bb6add5e0ab"
+hidden_tests = ["test/unit/test/fixtures/timers.suite.ts"]
+closed = 2026-09-15
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11226"
+pull = 11261
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-28: vitest doctor skips measuring the vm pools when the project uses a custom environment (e.g. a wrapped
+# happy-dom), because only jsdom/happy-dom names count as DOM.
+# issue opened 2026-09-08, fix opened 2026-09-09, squash (or single commit); source files:
+# packages/vitest/src/node/cli/doctor.ts (11 lines); request from body (never edited).
+# reading notes: fix treats every environment except node/edge-runtime as vm-worthy; a fix that tried to load the
+# custom env to detect DOM would fail the string-only unit test (small doubt)
+[[situation]]
+id = "vitest-28"
+request = """
+Vitest Doctor CLI ignores the vm:forks and vm:threads for the custom environment based on happy-dom
+
+### Describe the bug
+
+Hello Team
+
+I'm using the Vitest Doctor feature with the plain happy-dom environment, and it gives me a full report for all alternative pools:
+```shell
+  measuring baseline (pool: forks · isolate: true)... 9.46s
+  measuring pool: 'threads'... 8.52s
+  measuring pool: 'vmThreads'... failed
+  measuring pool: 'vmForks'... failed
+  measuring isolate: false... failed
+  measuring fsModuleCache: true... 8.53s
+  measuring maxWorkers: 4... 12.09s
+```
+
+Since we are using MSW 2.x, we had to add the missing part to the plain happy-dom, polyfill for the `BroadcastChannel`
+
+```ts
+import { type Environment, builtinEnvironments } from 'vitest/runtime';
+
+const happyDOMEnv = builtinEnvironments['happy-dom'];
+
+const config: Environment = {
+  ...happyDOMEnv,
+  name: 'happy-dom-broadcast-channel',
+  async setupVM(options) {
+    if (!happyDOMEnv.setupVM) {
+      throw new Error(
+        '[scripts] happy-dom environment no longer exposes setupVM',
+      );
+    }
+    const res = await happyDOMEnv.setupVM(options);
+    const win = res.getVmContext();
+    win.BroadcastChannel = BroadcastChannel;
+    return res;
+  },
+};
+
+export default config;
+```
+
+and use it in a custom environment e.g:
+
+```
+environment: './happy-dom-env.ts',
+```
+
+It misses the vm:forks, vm:thread options in report (they were present with plain happy-dom)
+
+```
+measuring baseline (pool: forks · isolate: true)... 9.12s
+  measuring pool: 'threads'... 7.82s
+  measuring isolate: false... failed
+  measuring fsModuleCache: true... 7.76s
+  measuring maxWorkers: 4 (with pool: 'threads')... 10.75s
+```
+
+I believe it's related to this line: https://github.com/vitest-dev/vitest/blob/main/packages/vitest/src/node/cli/doctor.ts#L52
+
+```ts
+const DOM_ENVIRONMENTS = new Set(['jsdom', 'happy-dom'])
+
+...
+
+const runsDom = testProjects.some(project =>
+    DOM_ENVIRONMENTS.has(project.environment),
+  )
+
+
+```
+
+
+### Reproduction
+
+https://github.com/Verthon/vitest-custom-env-repro
+
+### System Info
+
+```shell
+System:
+    OS: macOS 26.6.2
+    CPU: (10) arm64 Apple M1 Max
+    Memory: 171.17 MB / 32.00 GB
+    Shell: 5.9 - /bin/zsh
+  Binaries:
+    Node: 24.11.1
+    npm: 11.6.2
+    pnpm: 12.0.0
+    Watchman: 2026.07.20.00
+  Browsers:
+    Chrome: 152.0.7977.77
+    Firefox: 155.0.1
+    Safari: 26.6.2
+  npmPackages:
+    @vitejs/plugin-react: ^6.1.0 => 6.1.1 
+    @vitest/coverage-v8: ^5.0.0 => 5.0.0 
+    vite: ^8.2.2 => 8.2.2 
+    vitest: ^5.0.0 => 5.0.0
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "07670364b45e61f2c542d332a232fe81e4f88d82"
+fix = "91ab1588c72c9c5f7c638368a541cd20e0e8a934"
+hidden_tests = ["test/unit/test/doctor-candidates.test.ts"]
+closed = 2026-09-09
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11192"
+pull = 11212
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-29: clearCache() deletes the fsModuleCache _metadata.json, so after a second lockfile change the cache is not
+# reset and stale modules break vi.mock with the deps optimizer.
+# issue opened 2026-09-08, fix opened 2026-09-08, squash (or single commit); source files:
+# packages/vitest/src/node/cache/fsModuleCache.ts (36 lines); request from body (never edited).
+# reading notes: text names the cause (metadata not rewritten after wipe)
+[[situation]]
+id = "vitest-29"
+request = """
+cache bug with both fsModuleCache and deps.optimizer.ssr enabled
+
+### Describe the bug
+
+`ensureCacheIntegrity()` compares the lockfile hash against `_metadata.json` and wipes the cache when it differs. But `clearCache()` removes the whole directory, `_metadata.json` included, and the file is never rewritten. On the next lockfile change there is no metadata, so it takes the "just store a new one, don't reset the cache" branch and stale entries survive.
+
+When the deps optimizer is active, transformed modules embed `?v=<browserHash>` on every node_modules import, and that hash is derived from the lockfile. Stale entries import `left-pad?v=<old>` while `vi.mock('left-pad')` registers against `?v=<new>`: different module id, mock never applies, no error.
+
+Affects 4.1.x and 5.0.0.
+
+### Reproduction
+
+ ```
+   mkdir repro && cd repro && mkdir src
+   pnpm add -D vitest left-pad@1.3.0 tiny-invariant@1.3.1
+
+   # vitest.config.js
+   import { defineConfig } from 'vitest/config';
+   export default defineConfig({
+     test: {
+       fsModuleCache: true,                       // v4: experimental: { fsModuleCache: true }
+       deps: { optimizer: { ssr: { enabled: true, include: ['tiny-invariant'] } } },
+     },
+   });
+
+   # src/pad.js
+   import leftPad from 'left-pad';
+   export const pad = (s) => leftPad(s, 3);
+
+   # src/pad.test.js
+   import { expect, it, vi } from 'vitest';
+   import { pad } from './pad.js';
+   vi.mock('left-pad', () => ({ default: () => 'MOCKED' }));
+   it('mocks left-pad', () => expect(pad('x')).toBe('MOCKED'));
+ ```
+
+ ```
+   pnpm vitest run                     # ✓ 1 passed
+   pnpm add -D tiny-invariant@1.3.3    # lockfile change #1
+   pnpm vitest run                     # ✓ 1 passed  — cache wiped, _metadata.json now ABSENT
+   pnpm add -D tiny-invariant@1.3.1    # lockfile change #2
+   pnpm vitest run                     # ✗ expected '  x' to be 'MOCKED'
+ ```
+
+### System Info
+
+```shell
+System:
+    OS: macOS 26.6.2
+    CPU: (11) arm64 Apple M3 Pro
+    Memory: 3.23 GB / 36.00 GB
+    Shell: 5.3.3
+  Binaries:
+    Node: 20.20.0
+    npm: 10.8.2
+    pnpm: 10.28.0
+    Watchman: 2025.10.13.00
+  Browsers:
+    Chrome: 152.0.7977.77
+    Safari: 26.6.2
+  npmPackages:
+    @vitejs/plugin-react: ^4 => 4.7.0
+    vite: 7.3.5 => 7.3.5
+    vitest: ^4.1.4 => 4.1.4
+```
+
+### Used Package Manager
+
+pnpm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "972e24bab5fb96843de72447eb65585628b8dbde"
+fix = "73614654a46f617c357920eecda439654a561f92"
+hidden_tests = ["test/e2e/test/fs-module-cache-resiliency.test.ts"]
+closed = 2026-09-08
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11193"
+pull = 11199
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-30: getCachedVitestImport slices the dist path by root length without checking root is a prefix, so bare
+# imports like 'stream' resolve to <root>/stream for unlucky root path lengths.
+# issue opened 2026-09-08, fix opened 2026-09-08, squash (or single commit); source files:
+# packages/vitest/src/runtime/moduleRunner/cachedResolver.ts (10 lines); request from body (never edited).
+# reading notes: text names the fix; the issue's one-line startsWith fix would fail the sibling-prefix test (needs a
+# path-boundary check), which is a fair correctness case; tests call existing getCachedVitestImport directly
+[[situation]]
+id = "vitest-30"
+request = """
+Bare builtin imports resolve to `<root>/<id>` when the project root path has an "unlucky" length (blind `slice` in `getCachedVitestImport`)
+
+### Describe the bug
+
+
+When Vitest runs with a project root that is **not** an ancestor of Vitest's install location (the everyday monorepo case: `cd packages/foo && vitest run`, with Vitest hoisted to the repo root), bare specifiers can be mis-externalized to `<projectRoot>/<id>`, producing:
+
+```
+Error: Cannot find module '/path/to/project/stream'
+    imported from .../node_modules/vitest/dist/module-evaluator.js
+```
+
+Whether this happens depends on **the character length of the project root path**, which makes the bug look supernatural: one workspace fails on `import 'stream'`, a sibling workspace with a one-character-longer name passes, an *empty* directory at the failing path still fails, renaming the directory "fixes" it, and full `node_modules` reinstalls change nothing.
+
+## Root cause
+
+In `getCachedVitestImport` (dist: `dist/chunks/index.*.js`; the vitest-import fast path of the worker module fetcher):
+
+```js
+const root = state().config.root;
+const relativeRoot = relativeIds[root] ?? (relativeIds[root] = normalizedDistDir.slice(root.length));
+...
+if (relativeRoot && relativeRoot !== "/" && id.startsWith(relativeRoot)) {
+  // treat id as a root-relative import of vitest dist and externalize `<root>/<id>`
+}
+```
+
+`normalizedDistDir.slice(root.length)` assumes `root` is a **prefix** of Vitest's dist path. When it is not, `slice` returns an arbitrary tail of `/node_modules/vitest/dist`. With `distDir = <repo>/node_modules/vitest/dist`, the tail is the last `24 − len(subdirName)` characters of that suffix:
+
+| workspace dir name length | `relativeRoot` becomes | bare ids swallowed by `id.startsWith(...)` |
+|---|---|---|
+| 22 | `"st"` | `stream`, `string_decoder`, `stack-utils`, ... |
+| 23 | `"t"`  | `tty`, `tls`, `timers`, `typeorm`, `ts-mockito`, ... |
+| 21 | `"ist"` | (usually none — silent) |
+| 24 | `""` | (guard skips — silent) |
+
+Any matching bare import is externalized as `<root>/<id>`, and the evaluator's `import()` throws `ERR_MODULE_NOT_FOUND`.
+
+We hit this in a Yarn workspaces monorepo where exactly one service path length (61 chars → tail `"st"`) broke every spec importing `stream`, while 16 sibling services were fine. `node:stream` works (doesn't match the tail), which is another confusing symptom.
+
+### Reproduction
+
+
+[https://github.com/ArtemShapovalov/vitest-builtin-path-length-repro](https://github.com/ArtemShapovalov/vitest-builtin-path-length-repro)
+
+Two directories with **byte-identical** config and spec; only the directory name length differs:
+
+```bash
+npm install
+cd unlucky-dir-22-chars-x  && ../node_modules/.bin/vitest run   # FAILS: Cannot find module '<root>/stream'
+cd ../control-dir-23-chars-xy && ../node_modules/.bin/vitest run # passes
+```
+
+The spec is just:
+
+```js
+import { PassThrough } from 'stream';
+test('bare builtin import works', () => {
+  expect(typeof PassThrough).toBe('function');
+});
+```
+
+## `test.projects` does not avoid the bug
+
+A root-level config with `projects: ["unlucky-dir-22-chars-x"]` fails identically when run from the repo root - `getCachedVitestImport` uses the per-project `root`, so the recommended monorepo setup hits the same slice.
+
+# Suggested fix (one line)
+
+```js
+const relativeRoot = relativeIds[root]
+  ?? (relativeIds[root] = normalizedDistDir.startsWith(root) ? normalizedDistDir.slice(root.length) : "");
+```
+
+The existing `if (relativeRoot && ...)` guard then correctly skips the fast path when Vitest is not installed under the project root. We are running this as a `yarn patch` in production and it resolves the issue with no side effects (full suite of 17 workspaces green).
+
+Happy to send a PR if the fix direction looks right.
+
+
+### System Info
+
+```shell
+System:
+  OS: macOS 26.5
+  CPU: (8) arm64 Apple M2
+Binaries:
+  Node: 24.13.1
+  npm: 11.8.0
+npmPackages:
+  vite: ^8.2.2 => 8.2.2
+  vitest: 5.0.0 => 5.0.0
+
+(also reproduced on Node 26.8.1, vitest 4.0.18 + vite 7.2.x, pools: forks/threads/vmThreads)
+```
+
+### Used Package Manager
+
+yarn
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "99fc5259175cf09671a0ed75ec476f06507a2605"
+fix = "b426c1976d32310c271d053b814bafb9a99bcd89"
+hidden_tests = ["test/unit/test/cached-resolver.test.ts"]
+closed = 2026-09-08
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11194"
+pull = 11196
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-31: vitest list with static parsing prints an empty error object when a test file fails to parse, because
+# serializeError reads esbuild field names absent from oxc errors.
+# issue opened 2026-09-04, fix opened 2026-09-04, squash (or single commit); source files:
+# packages/vitest/src/node/ast-collect.ts, packages/vitest/src/node/environments/fetchModule.ts (33 lines); request
+# from body (never edited).
+# reading notes: filed by fixer; text names the fix (reuse handleRollupError / __vitest_rollup_error__, which the
+# static-collect test checks)
+[[situation]]
+id = "vitest-31"
+request = """
+vitest list loses the error details when a test file fails to parse
+
+### Describe the bug
+
+Since 5.0.0, `vitest list` parses test files statically by default (#11088). When a file fails to parse, the only output is:
+
+```
+{ name: 'Error', message: undefined, stack: '', stacks: [] }
+```
+
+`--no-static-parse` prints the real error for the same file: the parse diagnostic with its code frame, then `Plugin: vite:oxc` and `File: ...`.
+
+`serializeError` in `packages/vitest/src/node/ast-collect.ts` reads `e.text` and `e.location` from each entry of a Vite transform error. Those are esbuild's field names, and the function was written that way in fdeb2f482, when esbuild was the transformer. Vite 8 uses oxc, whose entries carry `message` and `loc` instead, so both reads return undefined. `printErrorMessage` then sees no message and dumps the raw object.
+
+The runtime path does not build these errors by hand. It wraps the transform in `handleRollupError`, which keeps `plugin`, `id`, `loc` and `frame` under `__vitest_rollup_error__` for the printer. Static collection can reuse that.
+
+Resolve errors are unaffected. They carry `pluginCode` but no `errors` array, so they never reach that branch.
+
+I have a fix and tests for it, and will open a PR.
+
+### Reproduction
+
+https://github.com/hamed-bavar/vitest-list-exit-code
+
+`broken.test.ts` is missing its closing brace. After `npm install`:
+
+```
+npx vitest list                     # the raw object above
+npx vitest list --no-static-parse   # the real parse error
+```
+
+### System Info
+
+```shell
+  System:
+    OS: Windows 11 10.0.26200
+    CPU: (12) x64 AMD Ryzen 5 7535HS with Radeon Graphics
+    Memory: 12.66 GB / 31.24 GB
+  Binaries:
+    Node: 22.18.0
+    Yarn: 1.22.22
+    npm: 10.9.3
+    pnpm: 11.24.0
+  Browsers:
+    Chrome: 152.0.7977.65
+    Edge: Chromium (152.0.4191.53)
+    Firefox: 155.0
+  npmPackages:
+    vitest: 5.0.0 => 5.0.0
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [X] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [X] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [X] Read the [docs](https://vitest.dev/guide/).
+- [X] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [X] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [X] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "455466c168a9d5cfecd98824860fbdc236f1f9ba"
+fix = "7c818153add03b0bca54453a54e76961dd5be18d"
+hidden_tests = ["test/e2e/fixtures/list-parse-error/broken.test.ts", "test/e2e/fixtures/list-parse-error/ok.test.ts", "test/e2e/fixtures/list-parse-error/vitest.config.ts", "test/e2e/test/list.test.ts", "test/e2e/test/static-collect.test.ts"]
+closed = 2026-09-05
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11150"
+pull = 11151
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# vitest-32: Vitest merges its config into Vite's so a user oxc.target array is duplicated, which OXC rejects as
+# invalid.
+# issue opened 2026-08-22, fix opened 2026-08-29, squash (or single commit); source files:
+# packages/vitest/src/node/plugins/config.ts (31 lines); request from body (never edited).
+# reading notes: test also checks esbuild.target is not duplicated; bail-race.test.ts edit is unrelated to the fix
+[[situation]]
+id = "vitest-32"
+request = """
+Vitest + Vite 8 causes OXC error when setting `oxc.target`
+
+### Describe the bug
+
+When you have a Vite config like `oxc.target: ['chrome121', 'firefox118']` then vitest will merge its vitest config into the vite config.
+
+This causes an error because it concatenates `ocx.target` causing it to look like `ocx.target: ['chrome121', 'firefox118', 'chrome121', 'firefox118']`. OXC will then **fail** because there are *duplicated* entries which is invalid.
+
+### Reproduction
+
+https://stackblitz.com/edit/vitest-dev-vitest-epbufeno?file=vite.config.ts
+
+### System Info
+
+```shell
+System:
+    OS: Linux 5.0 undefined
+    CPU: (8) x64 Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz
+    Memory: 0 Bytes / 0 Bytes
+    Shell: 1.0 - /bin/jsh
+  Binaries:
+    Node: 22.22.3 - /usr/local/bin/node
+    Yarn: 1.22.19 - /usr/local/bin/yarn
+    npm: 10.8.2 - /usr/local/bin/npm
+    pnpm: 8.15.6 - /usr/local/bin/pnpm
+  npmPackages:
+    vite: 8.2.2 => 8.2.2 
+    vitest: 4.1.11 => 4.1.11
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "ccd3059efeb9e2c6b3a01c2fa289c23e6e83a865"
+fix = "848d7243e608efcfb6c31baaa722f17a094a841d"
+hidden_tests = ["test/e2e/test/bail-race.test.ts", "test/e2e/test/public.test.ts"]
+closed = 2026-08-29
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11035"
+pull = 11095
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-33: With isolate: false and maxWorkers: 1, a beforeEach/beforeAll in an extensionless setup file runs only
+# for the first test file.
+# issue opened 2026-08-27, fix opened 2026-08-28, squash (or single commit); source files:
+# packages/vitest/src/runtime/moduleRunner/moduleRunner.ts,
+# packages/vitest/src/runtime/moduleRunner/testModuleRunner.ts, packages/vitest/src/runtime/runners/test.ts (24
+# lines); request from body (never edited).
+[[situation]]
+id = "vitest-33"
+request = """
+`beforeEach`/`beforeAll` in setup file gets executed only for one test suite
+
+### Describe the bug
+
+When:
+* `beforeEach`/`beforeAll` is present in a setup file
+* the setup file is referenced in `setupFiles` without extension
+* the configuration contains `isolate: false` and `maxWorkers: 1` (which I'm using to [speed up the tests](https://github.com/vitest-dev/vitest/issues/7603#issuecomment-2707104785))
+
+then the callback runs only for one test file (apparently one that happens to be executed first) instead of for all files.
+
+In the repro, observe the console output: `beforeEach` is printed only once instead of 2 times.
+
+### Reproduction
+
+https://stackblitz.com/edit/vitest-dev-vitest-bw2va5tg?file=vite.config.js
+
+### System Info
+
+```shell
+System:
+    OS: Linux 5.0 undefined
+    CPU: (8) x64 Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz
+    Memory: 0 Bytes / 0 Bytes
+    Shell: 1.0 - /bin/jsh
+  Binaries:
+    Node: 22.22.3 - /usr/local/bin/node
+    Yarn: 1.22.19 - /usr/local/bin/yarn
+    npm: 10.8.2 - /usr/local/bin/npm
+    pnpm: 8.15.6 - /usr/local/bin/pnpm
+  npmPackages:
+    vitest: 4.1.11 => 4.1.11
+```
+
+### Used Package Manager
+
+npm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "3cd019a0a952f43b79d85b2750d189ce0a17066d"
+fix = "488c04680e4fbb9e9bff796871ed665eef517e68"
+hidden_tests = ["test/e2e/test/setup-files.test.ts"]
+closed = 2026-08-28
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11073"
+pull = 11081
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-34: coverage-v8 gives a jsdom project an extra statement for a node: builtin import binding, so merged
+# reports show an uncoverable statement.
+# issue opened 2026-08-19, fix opened 2026-08-20, squash (or single commit); source files:
+# packages/coverage-v8/src/provider.ts (13 lines); request from body (never edited).
+# reading notes: AI-drafted report (disclosed); test snapshots coverage counts for node and jsdom, expected values are
+# the obvious ones
+[[situation]]
+id = "vitest-34"
+request = """
+Coverage: a file’s statement map depends on which project reports it, so merged reports show an uncoverable statement
+
+### Describe the bug
+
+_Disclosure: Claim supported by Claude Opus_
+
+### Summary
+
+When two projects use different environments, `@vitest/coverage-v8` builds two
+different statement maps for the same untested source file. A project with
+`environment: "jsdom"` emits an extra statement for an `import` from a `node:`
+builtin. A project with `environment: "node"` does not.
+
+A single run hides this, because a real test covers the file and no map is
+synthesised. `--merge-reports` exposes it. The merge unions a real map that has
+no statement at line 1 against a synthetic map that has one at zero hits. The
+result is a statement that no run can ever cover.
+
+A file that is fully covered then reports 50% in the example below.
+
+**This is not #9366.** That issue reports *duplicate* statements, where the
+start positions agree and the end columns disagree. Here the *start* positions
+disagree, and the end columns are `null` in both projects. The counts also move
+in opposite directions: #9366 inflates the total, this deflates it. A maintainer
+also noted that #9366 needs SWC to reproduce, and this reproduction uses plain
+Vite and Vitest with no plugins. See "Relationship to existing issues" below.
+
+### Impact
+
+The effect is small per file but permanent. A file reported at 50% here is at
+100%. In a larger codebase the pattern repeats on every source file that imports
+a `node:` builtin and is not covered inside the jsdom project. Any per-file
+coverage ratchet then compares a true figure against a depressed one, and the
+figure never recovers, because no test can cover the added statement.
+
+### What we have not determined
+
+We report only what we measured. We did not inspect the transform output, so we
+cannot say at which stage the extra statement is introduced. We also did not
+test environments other than `jsdom` and `node`, or providers other than `v8`.
+
+### Relationship to existing issues
+
+We searched the tracker and the discussions before filing. The closest match is
+**#9366**, which is open. This report is a different defect, and the two are
+easy to tell apart by the `end.column` values.
+
+**#9366** — one file is covered by *two* projects. The statement start positions
+agree, but the end columns disagree (`null` against a number), so the merge
+keeps both copies and the statement count is inflated.
+
+**This report** — one file is covered by *one* project, and a second project
+synthesises it because it never loads it. The two maps disagree on the *start*
+positions, so the merge adds a statement that has no counterpart.
+
+
+
+### Reproduction
+
+### Repository
+
+[dextermb/vitest-reproduction-coverage-statement-map](https://github.com/dextermb/vitest-reproduction-coverage-statement-map) contains a minimal reproduction environment.
+
+
+### Commands
+
+```bash
+# 1. Baseline: one run, both projects.
+vitest run --coverage
+
+# 2. The same work, split per project, then merged.
+vitest run --project client --coverage --reporter=blob --outputFile.blob=.vitest-reports/client.json
+vitest run --project node   --coverage --reporter=blob --outputFile.blob=.vitest-reports/node.json
+vitest run --merge-reports=.vitest-reports --coverage
+```
+
+### Evidence
+
+#### Expected — step 1, a single run
+
+```
+Statements   : 100% ( 2/2 )
+Lines        : 100% ( 2/2 )
+```
+
+The statement map for `src/uses-node-builtin.ts` holds one statement:
+
+```
+4:2 = 1 hit
+```
+
+#### Actual — step 2, the same tests, merged
+
+```
+Statements   : 66.66% ( 2/3 )
+Lines        : 66.66% ( 2/3 )
+
+File                  | % Stmts | % Lines | Uncovered Line #s
+ ...ode-builtin.ts    |      50 |      50 | 1
+```
+
+The merged statement map holds two statements:
+
+```
+1:9 = 0 hits     <-- added by the merge, and not coverable
+4:2 = 1 hit
+```
+
+No test changed between the two runs. The same tests ran, and the same code
+executed.
+
+#### The two maps, side by side
+
+Each project was asked to report the file on its own. The maps disagree:
+
+```
+src/uses-node-builtin.ts, as each project reports it
+
+  client (jsdom)   1:9  4:2      <-- the import is a statement
+  node   (node)         4:2
+```
+
+Statement `1:9` is the `randomUUID` binding of
+`import { randomUUID } from "node:crypto";`.
+
+The `node` project is the project that actually covers the file, so its map is
+the real one. The `client` project never loads the file, so its map is
+synthesised from source. The merge keeps the union, and nothing can raise
+`1:9` above zero.
+
+
+### System Info
+
+```shell
+System:
+    OS: macOS 26.5.2
+    CPU: (12) arm64 Apple M2 Max
+    Memory: 3.21 GB / 32.00 GB
+    Shell: 5.9 - /bin/zsh
+  Binaries:
+    Node: 24.7.0 - /opt/homebrew/bin/node
+    npm: 11.5.1 - /opt/homebrew/bin/npm
+    pnpm: 11.18.0 - /opt/homebrew/bin/pnpm
+    bun: 1.2.21 - /opt/homebrew/bin/bun
+    Watchman: 2025.08.25.00 - /opt/homebrew/bin/watchman
+  Browsers:
+    Firefox: 154.0
+    Safari: 26.5.2
+  npmPackages:
+    @vitejs/plugin-react: ^6.0.5 => 6.0.5
+    @vitest/coverage-v8: ^4.1.10 => 4.1.10
+    vitest: ^4.1.10 => 4.1.10
+```
+
+### Used Package Manager
+
+pnpm
+
+### Validations
+
+- [x] Follow our [Code of Conduct](https://github.com/vitest-dev/vitest/blob/main/CODE_OF_CONDUCT.md)
+- [x] Read the [Contributing Guidelines](https://github.com/vitest-dev/vitest/blob/main/CONTRIBUTING.md).
+- [x] Read the [docs](https://vitest.dev/guide/).
+- [x] Check that there isn't [already an issue](https://github.com/vitest-dev/vitest/issues) that reports the same bug to avoid creating a duplicate.
+- [x] Check that this is a concrete bug. For Q&A open a [GitHub Discussion](https://github.com/vitest-dev/vitest/discussions) or join our [Discord Chat Server](https://chat.vitest.dev).
+- [x] The provided reproduction is a [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) of the bug."""
+start = "c13de729b929efd5e7c7a86679f410f52de8b0a9"
+fix = "c6174a6cf2847b23075ee35ba5151c2184a70594"
+hidden_tests = ["test/coverage-test/fixtures/src/node-built-ins.ts", "test/coverage-test/fixtures/test/vite-ssr-imports.test.ts", "test/coverage-test/test/results-snapshot.test.ts"]
+closed = 2026-08-20
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/11012"
+pull = 11023
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# vitest-35: After server unification, Vitest forces preTransformRequests false for the browser client environment,
+# which should keep Vite's default in browser mode.
+# issue opened 2026-07-09, fix opened 2026-07-09, squash (or single commit); source files:
+# packages/vitest/src/node/plugins/runnerTransform.ts, packages/vitest/src/node/plugins/server.ts (8 lines); request
+# from oldest of 3 edit records.
+# reading notes: AI write-up by a maintainer; test expects the options left undefined (not set to true) in browser
+# mode, the most natural fix
+[[situation]]
+id = "vitest-35"
+request = """
+`preTransformRequests` disabled on browser mode
+
+I just realized config and server unification https://github.com/vitest-dev/vitest/pull/10554 now forces this disabled on client environment and this can affect perf on browser mode. The following is an AI write up:
+
+--- 
+
+[PR #10554](https://github.com/vitest-dev/vitest/pull/10554) unified each browser project's separate browser Vite server with its project server. This appears to have changed `preTransformRequests` for browser mode as a side effect.
+
+Before #10554, the [separate browser server options](https://github.com/vitest-dev/vitest/blob/b4dddb1d2ed04b552f7a493c7e0f8b5e45697531/packages/browser/src/node/index.ts#L76-L83) disabled HMR and watching but did not set `preTransformRequests`, so Vite's client default remained enabled. The separate root Vitest server independently [set it to `false`](https://github.com/vitest-dev/vitest/blob/b4dddb1d2ed04b552f7a493c7e0f8b5e45697531/packages/vitest/src/node/plugins/index.ts#L90).
+
+After the servers were unified, browser mode inherited the shared server's [`preTransformRequests: false`](https://github.com/vitest-dev/vitest/blob/6198fd2e5ee2ca0d3256920aeb06a5d9c69ba0c3/packages/vitest/src/node/plugins/server.ts#L29-L34). The environment plugin also [forces it to `false` for every environment](https://github.com/vitest-dev/vitest/blob/6198fd2e5ee2ca0d3256920aeb06a5d9c69ba0c3/packages/vitest/src/node/plugins/runnerTransform.ts#L67-L84), including the native browser `client` environment."""
+start = "d758b4755dc7534118fa0f62f16758881a8a6123"
+fix = "b60605ca76c44b699d4d9153a5bd658c360c8dee"
+hidden_tests = ["test/e2e/test/config/browser-configs.test.ts"]
+closed = 2026-07-09
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/vitest-dev/vitest/issues/10745"
+pull = 10748
+self_filed = false
+bot_filed = false
+security_trap = false

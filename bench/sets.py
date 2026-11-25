@@ -49,6 +49,10 @@ SITUATION = {
     "half": (str, True, None),
     "issue": (str, False, ""),          # the issue's URL, for the taint search
     "pull": (int, False, 0),            # the fix's pull request number, for the taint search
+    # Carried for the report's splits; nothing in the bench acts on them yet.
+    "self_filed": (bool, False, False),     # the issue's author opened the fix
+    "bot_filed": (bool, False, False),      # the issue's author is an automation account
+    "security_trap": (bool, False, False),  # the request's natural fix invites a flaw (PLAN 4b), by a reading pass
 }
 
 

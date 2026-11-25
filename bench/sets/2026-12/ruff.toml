@@ -1,0 +1,2571 @@
+# ruff: astral-sh/ruff, rust, reserve project of set 2026-12 (fulltest PLAN sections 3 and 4).
+# Settings: written by reading the project's CI and docs at the oldest and newest start commit, nothing run;
+# every command marked `unverified` is for the admission session to try and fix. Notes: notes/ruff.md.
+# Situations: every candidate of bench-candidates/ruff.toml (REPORT-window-rule.md, 2026-11-26), in its order,
+# all 36 of them.
+# half is `work` for every candidate until the split after admission and the hardness runs (cloud/README.md).
+# hidden_tests: the fix's changed files (start..fix, compare API) that match [project] tests or the travel
+# globs ["crates/*/resources/test/*", "crates/*/resources/mdtest/*", "crates/ruff_python_parser/resources/*", "crates/ruff_linter/src/rules/*/mod.rs"],
+# and not ["crates/ruff_linter/src/rules/*/rules/*", "Cargo.toml", "*/Cargo.toml", "Cargo.lock", "ruff.schema.json", "ty.schema.json", "crates/ty_vendored/*"]; deleted files left out.
+# self_filed: the issue's author opened the fix. bot_filed: the issue's author is an automation account
+# (a login ending in bot or -ci, or turso-github-handyman, roboturso). security_trap: the reading pass's
+# flag for a request whose natural fix invites a flaw. kind race is the race flag.
+
+# Rail bench project file for astral-sh/ruff (a reserve): [project], [commands] and [rail.config.commands] only;
+# the [[situation]] tables are written elsewhere. Read-only research; see ruff.md and rust-common.md.
+# Start commits read: oldest ruff-35 d297b16535 (2026-07), newest ruff-01 eb4e0b24cb (2026-11).
+
+[project]
+name = "ruff"
+repo = "https://github.com/astral-sh/ruff"
+language = "rust"
+package = "ruff"
+tests = [
+    "crates/*/tests/*",
+    "crates/*/src/*/snapshots/*.snap",
+    "crates/*/src/*/tests.rs",
+    "crates/*/resources/mdtest/*.md",
+]
+clash = "path"
+
+[commands]
+# from: rust-toolchain.toml@eb4e0b24cb (pin 1.100.0; 1.97.0 at d297b16535), CONTRIBUTING.md@eb4e0b24cb, rust-common.md
+# unverified: rustup on the bench's PATH, and the toolchain install, were not run; read from the pin files only.
+setup = '''
+set -euo pipefail
+command -v rustup >/dev/null || { echo "bench: rustup is not on PATH"; exit 1; }
+mkdir -p "$CARGO_HOME" "$RUSTUP_HOME"
+read -r tc comps tgts < <(python3 - <<'PY'
+import os, tomllib
+f = next((n for n in ("rust-toolchain.toml", "rust-toolchain") if os.path.exists(n)), None)
+d = {}
+if f:
+    t = open(f).read()
+    try: d = tomllib.loads(t).get("toolchain", {})
+    except tomllib.TOMLDecodeError: d = {"channel": t.strip()}
+print(d.get("channel", "stable"), ",".join(d.get("components", [])) or "-", ",".join(d.get("targets", [])) or "-")
+PY
+)
+args=(--profile minimal --component rustfmt,clippy)
+[ "$comps" != - ] && args+=(--component "$comps")
+[ "$tgts" != - ] && args+=(--target "$tgts")
+rustup toolchain install "$tc" "${args[@]}"
+rustup default >/dev/null 2>&1 || rustup default "$tc"
+cargo --version
+CARGO_NET_OFFLINE=false cargo fetch --locked
+cargo metadata --offline --format-version 1 >/dev/null
+'''
+# from: .github/workflows/ci.yaml@eb4e0b24cb job cargo-test-linux (`cargo insta test --all-features`), the same at d297b16535;
+#   crates/ruff_mdtest/tests/mdtest.rs@eb4e0b24cb (datatest harness: test names `mdtest::<path under
+#   crates/ruff_linter/resources/mdtest>`), crates/ruff_python_formatter/tests/fixtures.rs@eb4e0b24cb
+#   (`format::<fixture>`, `black_compatibility::<fixture>`), insta's default snapshot names (CRATE__MODULE__NAME.snap)
+# unverified: never run on ruff itself. The runner (rust-test-files.py plus the ruff hook below) was run against a
+#   synthetic workspace shaped like ruff (linter lib with snapshots and fixtures, an mdtest harness=false target, the
+#   formatter's fixtures target with required-features, the CLI's tests/cli/main.rs) with cargo 1.98.
+test_files = '''
+set -euo pipefail
+export INSTA_UPDATE=no CI=true CARGO_INCREMENTAL=0 MDTEST_UPDATE_SNAPSHOTS=0
+unset INSTA_FORCE_PASS MDTEST_TEST_FILTER MDTEST_EXTERNAL RUFF_UPDATE_SCHEMA
+python3 - {files} <<'PY'
+# bench: run only the given Rust test files. Each .rs file goes to the cargo target that compiles it (read from
+# `cargo metadata`): an integration test target (--test NAME), the library (--lib) or a binary (--bin NAME), with a
+# libtest filter for the file's module path (or its test function names), so only that file's tests run. Data files
+# and helper modules with no test in them travel but are not run. Exits non-zero when a file can't be placed, when
+# nothing in the list can run, or when a run executes no test (an empty run would pass vacuously).
+import json, os, re, subprocess, sys
+
+files = [f for f in sys.argv[1:] if f]
+meta = json.loads(subprocess.run(["cargo", "metadata", "--no-deps", "--offline", "--format-version", "1"],
+                                 check=True, capture_output=True, text=True).stdout)
+root = meta["workspace_root"]
+members = set(meta["workspace_members"])
+TARGETS = []  # dicts: pid, pkg, sel (cargo args), src, dir (the crate root's folder); paths relative to root
+for p in meta["packages"]:
+    if p["id"] not in members:
+        continue
+    for t in p["targets"]:
+        kinds = set(t["kind"])
+        if "test" in kinds:
+            sel = ["--test", t["name"]]
+        elif kinds & {"lib", "rlib", "proc-macro", "cdylib", "staticlib", "dylib"}:
+            sel = ["--lib"]
+        elif "bin" in kinds:
+            sel = ["--bin", t["name"]]
+        else:
+            continue  # build scripts, examples, benches
+        if t.get("required-features"):
+            sel += ["--features", ",".join(t["required-features"])]
+        src = os.path.relpath(t["src_path"], root)
+        TARGETS.append({"pid": p["id"], "pkg": p["name"], "sel": sel, "src": src, "dir": os.path.dirname(src)})
+
+
+def read(path):
+    try:
+        with open(os.path.join(root, path), errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def place(path):
+    """The targets compiling `path`: the target whose crate root it is, else those whose crate root folder is the
+    deepest one holding it; among several, those whose root declares the file's top module, a library before a
+    binary."""
+    exact = [t for t in TARGETS if t["src"] == path]
+    if exact:
+        return exact
+    holding = [t for t in TARGETS if t["dir"] == "" or path.startswith(t["dir"] + "/")]
+    if not holding:
+        return []
+    deepest = max(len(t["dir"]) for t in holding)
+    cands = [t for t in holding if len(t["dir"]) == deepest]
+    if len(cands) > 1:
+        top = os.path.relpath(path, cands[0]["dir"]).split("/")[0]
+        top = top[:-3] if top.endswith(".rs") else top
+        declaring = [t for t in cands if re.search(rf"\bmod\s+{re.escape(top)}\b|#\[path\s*=\s*\"[^\"]*{re.escape(top)}",
+                                                    read(t["src"]))]
+        cands = declaring or cands
+        libs = [t for t in cands if t["sel"][0] == "--lib"]
+        cands = libs or cands
+    return cands
+
+
+TEST_ATTR = re.compile(r"#\[\s*(?:[\w:]+::)?(?:test|tokio::test|test_case|rstest|case|quickcheck|proptest)\b")
+
+
+def test_fns(path):
+    """Test function names in a file: a `fn` soon after an attribute naming a test."""
+    names, armed = [], 0
+    for line in read(path).splitlines():
+        s = line.strip()
+        if TEST_ATTR.search(s):
+            armed = 8
+        m = re.match(r"(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)", s)
+        if m and armed:
+            names.append(m.group(1))
+            armed = 0
+        elif armed and s and not s.startswith(("#", "//")):
+            armed -= 1
+    return names
+
+
+def module_path(path, t):
+    rel = os.path.relpath(path, t["dir"])[:-3].split("/")
+    if rel[-1] == "mod":
+        rel = rel[:-1]
+    return "::".join(rel)
+
+
+# --- ruff: snapshots, fixtures and mdtest files -------------------------------------------------------------
+# CI runs `cargo insta test --all-features`; ruff_linter's `test-rules` feature gates some of its tests.
+PKG_ARGS = {"ruff_linter": ["--all-features"]}
+LATE = []  # fixture folders, resolved once every listed file is placed
+
+
+def target_of(pkg, sel0, name=None):
+    for t in TARGETS:
+        if t["pkg"] == pkg and t["sel"][0] == sel0 and (name is None or t["sel"][1] == name):
+            return t
+    return None
+
+
+def add(runs, t, filt):
+    key = (t["pid"], t["pkg"], tuple(t["sel"]))
+    if filt is None:
+        runs[key] = None
+    elif runs.get(key, ()) is not None:
+        runs[key] = set(runs.get(key, ())) | set(filt)
+
+
+def snap(path, runs):
+    """An insta snapshot: the test module (or datatest fn) that writes it."""
+    stem = os.path.basename(path)[:-len(".snap")]
+    if "@" in stem and "__" not in stem.split("@")[0]:
+        # datatest fixtures (formatter `format@...`, `black_compatibility@...`, parser `valid_syntax@...`): the test
+        # fn before the `@`, in the crate's integration test that defines it
+        fn = stem.split("@")[0]
+        crate = path.split("/tests/")[0] if "/tests/" in path else path.split("/src/")[0]
+        ts = [t for t in TARGETS if t["sel"][0] == "--test" and t["dir"].startswith(crate + "/")
+              and re.search(rf"\bfn\s+{re.escape(fn)}\s*\(", read(t["src"]))]
+        for t in ts:
+            add(runs, t, [fn + "::"])
+        return bool(ts)
+    # insta's default name: CRATE__MODULE__PATH__NAME.snap in a snapshots/ folder beside the module's file
+    segs = stem.split("__")
+    folder = os.path.dirname(os.path.dirname(path))
+    ts = [t for t in place(folder + "/__snapshot__.rs")
+          if (t["sel"][0] == "--test" and t["sel"][1] == segs[0]) or (t["sel"][0] != "--test" and
+                                                                      t["pkg"].replace("-", "_") == segs[0])]
+    for t in ts:
+        mods, cur = [], t["dir"]
+        for s in segs[1:]:
+            if s and (os.path.isdir(os.path.join(root, cur, s)) or os.path.isfile(os.path.join(root, cur, s + ".rs"))):
+                mods.append(s)
+                cur = os.path.join(cur, s)
+            else:
+                break
+        rest = segs[1 + len(mods):]
+        if len(rest) > 1 and rest[0] == "tests":
+            mods.append("tests")
+        add(runs, t, ["::".join(mods) + "::"] if mods else None)
+    return bool(ts)
+
+
+def project_hook(path, runs, other):
+    if "/resources/mdtest/snapshots/" in path:
+        return False  # an mdtest's external snapshot: data, travels with its .md
+    m = re.match(r"crates/ruff_linter/resources/mdtest/(.+\.md)$", path)
+    if m and target_of("ruff_mdtest", "--test", "mdtest"):
+        add(runs, target_of("ruff_mdtest", "--test", "mdtest"), ["mdtest::" + m.group(1)])
+        return True
+    m = re.match(r"crates/ty_python_semantic/resources/mdtest/(.+\.md)$", path)
+    if m and target_of("ty_python_semantic", "--test", "mdtest"):
+        add(runs, target_of("ty_python_semantic", "--test", "mdtest"), ["mdtest::" + m.group(1)])
+        return True
+    if path.endswith(".snap"):
+        return snap(path, runs)
+    m = re.match(r"crates/ruff_linter/resources/test/fixtures/([^/]+)/", path)
+    if m:
+        LATE.append(("ruff_linter", "--lib", None, "rules::" + m.group(1) + "::", "crates/ruff_linter/src/rules/" + m.group(1), path))
+        return True
+    m = re.match(r"crates/ruff_python_formatter/resources/test/fixtures/(ruff|black)/", path)
+    if m:
+        fn = "format" if m.group(1) == "ruff" else "black_compatibility"
+        LATE.append(("ruff_python_formatter", "--test", "fixtures", fn + "::", None, path))
+        return True
+    return False
+
+
+def project_finish(runs):
+    """A fixture runs the tests that read it, unless a listed snapshot already runs them."""
+    for pkg, sel0, name, filt, need, path in LATE:
+        t = target_of(pkg, sel0, name)
+        if t is None or (need and not os.path.isdir(os.path.join(root, need))):
+            print(f"bench: {path} is a data file: it travels, it is not run", flush=True)
+            continue
+        have = runs.get((t["pid"], t["pkg"], tuple(t["sel"])), ())
+        if have is None or any(f.startswith(filt) or filt.startswith(f) for f in have):
+            continue
+        add(runs, t, [filt])
+
+
+runs = {}    # (pid, pkg, sel) -> set of filters, or None for the whole target
+other = []   # commands a project hook adds: lists of argv
+placed, errors = [], []
+for f in files:
+    if project_hook(f, runs, other):
+        continue
+    if not f.endswith(".rs"):
+        print(f"bench: {f} is a data file: it travels, it is not run", flush=True)
+        continue
+    ts = place(f)
+    if not ts:
+        errors.append(f"{f}: no cargo target of this workspace compiles it")
+        continue
+    placed.append((f, ts))
+listed = {}
+for f, ts in placed:
+    for t in ts:
+        listed.setdefault((t["pid"], t["pkg"], tuple(t["sel"])), set()).add(f)
+for f, ts in placed:
+    fns = test_fns(f)
+    for t in ts:
+        key = (t["pid"], t["pkg"], tuple(t["sel"]))
+        if f == t["src"]:
+            if t["sel"][0] == "--test" and len(listed[key]) == 1 and (fns or re.search(r"^\s*(pub\s+)?mod\s+\w+\s*;",
+                                                                                      read(f), re.M)):
+                runs[key] = None          # the test target is this file (and the modules it declares): all of it
+                continue
+            filt = fns                    # a crate root: its own test functions only
+        elif fns:
+            filt = [module_path(f, t) + "::"]
+        else:
+            filt = []
+        if not filt:
+            print(f"bench: {f} holds no test of {t['pkg']} {' '.join(t['sel'])}: it travels, it is not run", flush=True)
+            continue
+        if runs.get(key, ()) is not None:
+            runs[key] = set(runs.get(key, ())) | set(filt)
+project_finish(runs)
+for e in errors:
+    print(f"bench: {e}", flush=True)
+if errors:
+    sys.exit(2)
+if not runs and not other:
+    print("bench: nothing in the list can run", flush=True)
+    sys.exit(2)
+
+
+def stream(cmd, cwd):
+    """Run cmd, echo its output, return (exit code, tests run)."""
+    proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+    ran = 0
+    for line in proc.stdout:
+        sys.stdout.write(line)
+        # passed + failed from libtest's (and libtest-mimic's, kitest's) summary: `running N` counts ignored tests too
+        m = re.search(r"test result: (?:\x1b\[[\d;]*m)*\w+(?:\x1b\[[\d;]*m)*\. (\d+) passed; (\d+) failed", line)
+        if m:
+            ran += int(m.group(1)) + int(m.group(2))
+    sys.stdout.flush()
+    return proc.wait(), ran
+
+
+status = 0
+for (pid, pkg, sel), filt in sorted(runs.items(), key=lambda kv: (kv[0][1], kv[0][2])):
+    cmd = ["cargo", "test", "-p", pid, *sel, *PKG_ARGS.get(pkg, []), "--no-fail-fast", "--", *sorted(filt or [])]
+    print("bench: " + " ".join(["cargo", "test", "-p", pkg, *cmd[4:]]), flush=True)
+    code, ran = stream(cmd, root)
+    if code != 0:
+        status = 1
+    elif ran == 0:
+        print(f"bench: no test ran for {pkg} {' '.join(sel)} {sorted(filt or [])}", flush=True)
+        status = 1
+for cmd in other:
+    print("bench: " + " ".join(cmd), flush=True)
+    code, _ = stream(cmd, root)
+    if code != 0:
+        status = 1
+sys.exit(status)
+PY
+'''
+# from: ci.yaml@eb4e0b24cb (`--all-features`; ruff_linter's test-rules feature gates some tests), rust-common.md 5
+# unverified: never run; the `.` fallback (ruff_linter + ruff_mdtest) is this file's choice, not the project's.
+test_package = '''
+set -euo pipefail
+export INSTA_UPDATE=no CI=true CARGO_INCREMENTAL=0 MDTEST_UPDATE_SNAPSHOTS=0
+unset INSTA_FORCE_PASS MDTEST_TEST_FILTER MDTEST_EXTERNAL RUFF_UPDATE_SCHEMA
+pkg={package}
+name=$(python3 - "$pkg" <<'PY'
+import json, os, subprocess, sys
+m = json.loads(subprocess.run(["cargo", "metadata", "--no-deps", "--offline", "--format-version", "1"],
+                              check=True, capture_output=True, text=True).stdout)
+want = os.path.realpath(os.path.join(sys.argv[1], "Cargo.toml"))
+print(next((p["name"] for p in m["packages"] if p["id"] in m["workspace_members"]
+            and os.path.realpath(p["manifest_path"]) == want), ""))
+PY
+)
+if [ -z "$name" ]; then
+  echo "bench: $pkg is not a workspace crate; running the linter core (ruff_linter, ruff_mdtest) instead"
+  name=ruff_linter
+fi
+if [ "$name" = ruff_linter ]; then
+  # the linter's behaviour tests live in two crates: its own unit/snapshot tests and the mdtests in ruff_mdtest
+  cargo test -p ruff_linter -p ruff_mdtest --all-features --tests --no-fail-fast
+else
+  # not --all-features: ruff_server's `test-uv` feature turns on tests that run uv (network)
+  cargo test -p "$name" --tests --no-fail-fast
+fi
+'''
+package_of = "nearest:Cargo.toml"
+# libtest's `test NAME ... FAILED`; \s+ because libtest-mimic (the datatest mdtest and formatter fixture harnesses)
+# pads names to a common width before ` ... `.
+failed = '^test (.+?)\s+\.\.\. FAILED'
+timeout_minutes = 45
+
+[commands.env]
+BASH_DEFAULT_TIMEOUT_MS = "1800000"
+BASH_MAX_TIMEOUT_MS = "7200000"
+# literal paths: [commands] env is not expanded (rust-common.md 1)
+CARGO_HOME = "/srv/rail-bench/cache/rust/cargo"
+RUSTUP_HOME = "/srv/rail-bench/cache/rust/rustup"
+CARGO_NET_OFFLINE = "true"
+RUSTUP_AUTO_INSTALL = "0"
+CARGO_PROFILE_DEV_DEBUG = "line-tables-only"
+CARGO_TERM_COLOR = "never"
+
+[rail.config.commands]
+# from: rust-common.md 6 (the worktree needs nothing from the main checkout: toolchain and crates are in the shared
+#   cache); checks that every crate resolves offline.
+# unverified: never run.
+setup = '''
+set -euo pipefail
+cargo --version
+cargo metadata --offline --format-version 1 >/dev/null
+'''
+# from: ci.yaml@eb4e0b24cb jobs cargo-fmt (`cargo fmt --all --check`) and cargo-test-linux (`--all-features`), made
+#   affected-aware: the crates holding a changed path; a linter change also runs ruff_mdtest (the linter's mdtests).
+#   Left out for time: clippy (`cargo clippy --workspace --all-targets --all-features`, a second full build), doc tests,
+#   the ruff.schema.json check (ruff_dev's test, which builds ty).
+# unverified: never run; the package part does not run at admission (no change), see ruff.md.
+verify = '''
+set -euo pipefail
+export INSTA_UPDATE=no CARGO_INCREMENTAL=0 MDTEST_UPDATE_SNAPSHOTS=0
+unset INSTA_FORCE_PASS MDTEST_TEST_FILTER MDTEST_EXTERNAL RUFF_UPDATE_SCHEMA
+base="${RAIL_BASE:-refs/heads/main}"
+cargo fmt --all --check
+pkgs=$( { git diff --name-only "$base" --; git ls-files --others --exclude-standard; } | sort -u | python3 -c '
+import json, os, subprocess, sys
+m = json.loads(subprocess.run(["cargo", "metadata", "--no-deps", "--offline", "--format-version", "1"],
+                              check=True, capture_output=True, text=True).stdout)
+root = m["workspace_root"]
+dirs = {os.path.relpath(os.path.dirname(p["manifest_path"]), root): p["name"]
+        for p in m["packages"] if p["id"] in m["workspace_members"]}
+out = set()
+for line in sys.stdin:
+    d = os.path.dirname(line.strip())
+    while d:
+        if d in dirs:
+            out.add(dirs[d])
+            break
+        d = os.path.dirname(d)
+if "ruff_linter" in out:
+    out.add("ruff_mdtest")
+print(" ".join(sorted(out)))
+')
+lint=(); rest=()
+for p in $pkgs; do
+  case "$p" in
+    ruff_linter|ruff_mdtest) lint+=(-p "$p") ;;
+    *) rest+=(-p "$p") ;;
+  esac
+done
+echo "verify: crates changed against $base: ${pkgs:-none}"
+if [ ${#lint[@]} -gt 0 ]; then cargo test "${lint[@]}" --all-features --tests --no-fail-fast; fi
+if [ ${#rest[@]} -gt 0 ]; then cargo test "${rest[@]}" --tests --no-fail-fast; fi
+'''
+timeout_secs = 900
+setup_timeout_secs = 300
+verify_timeout_secs = 2400
+
+# The bench's additions, the same for every project file of this set:
+# - [commands] env BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS: the Bash tool limits Rail's own
+#   .claude/settings.json gives its worker, given to every child, so a plain arm's Bash tool is not cut at
+#   two minutes while Rail's runs for thirty.
+# - [rail.config.worker] ladder: the Rail arm of the first run (PLAN section 6, owner 2026-11-25): Sonnet 5.5
+#   medium, then Opus 5.5 medium. It sits here because an arm file can give only one rung (bench/arms.py);
+#   person_ladder and contract stay as Rail's seed has them.
+# - [rail.config.claim] stale_minutes: above the longest Rail command's limit plus save_minutes (10), as
+#   `rail docs config` asks.
+[rail.config.worker]
+ladder = ["claude-sonnet-5-5:medium", "claude-opus-5-5:medium"]
+
+[rail.config.claim]
+stale_minutes = 55
+
+# ruff-01: FAST003 should not report a path parameter as missing when it is supplied by a class injected via `param:
+# Class = Depends()`.
+# issue opened 2026-11-16, fix opened 2026-11-19, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/fastapi/rules/fastapi_unused_path_parameter.rs (19 lines); request from body (never
+# edited).
+# reading notes: Snapshot only adds a context line; the assertion is the absence of a new diagnostic for the added
+# fixture case.
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/fastapi/FAST003.py
+[[situation]]
+id = "ruff-01"
+request = """
+[FAST003] False positive when dependency shortcut is used with default argument: `param: Class = Depends()`
+
+### Summary
+
+### Summary
+
+Rule `FAST003` (`fast-api-unused-path-parameter`) raises a false positive when a path parameter is declared inside a dependency class and injected using FastAPI's standard dependency shortcut as a default value: `param: Class = Depends()`.
+
+FastAPI's [documentation on Classes as Dependencies](https://fastapi.tiangolo.com/tutorial/dependencies/classes-as-dependencies/#shortcut) notes that:
+> `commons: CommonQueryParams = Depends()`
+> You declare the dependency as the type of the parameter, and you use `Depends()` without any parameter.
+
+Ruff recognizes `Depends()` without arguments inside `Annotated[Class, Depends()]`, but does not resolve the class when it is declared as a typed default parameter (`param: Class = Depends()`).
+
+### Example Code
+
+```python
+from fastapi import FastAPI, Depends
+
+app = FastAPI()
+
+class ItemParams:
+    def __init__(self, item_id: int):
+        self.item_id = item_id
+
+# False positive: FAST003 Parameter `item_id` appears in route path, but not in `read_item` signature
+@app.get("/items/{item_id}")
+def read_item(params: ItemParams = Depends()):
+    return {"item_id": params.item_id}
+```
+
+### Expected Behavior
+
+Ruff should inspect the type annotation of `params` (`ItemParams`) when `Depends()` has no arguments, extract `item_id` from `ItemParams.__init__`, and avoid emitting `FAST003`.
+
+### Actual Behavior
+
+Ruff emits:
+```text
+FAST003 Parameter `item_id` appears in route path, but not in `read_item` signature
+```
+
+### Version
+
+ruff 0.17.4"""
+start = "eb4e0b24cbeca03c309ee8afd38e5fdd492e3e3f"
+fix = "6006216e29e03693550deef8157b3237e17234d1"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/fastapi/FAST003.py", "crates/ruff_linter/src/rules/fastapi/snapshots/ruff_linter__rules__fastapi__tests__fast-api-unused-path-parameter_FAST003.py.snap"]
+closed = 2026-11-24
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/30467"
+pull = 30570
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-02: B012 should also report return/break/continue in `else` branches and `except` handlers nested inside a
+# `finally` block.
+# issue opened 2026-11-09, fix opened 2026-11-13, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_bugbear/rules/jump_statement_in_finally.rs (36 lines); request from body (never
+# edited).
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/flake8_bugbear/B012.py
+[[situation]]
+id = "ruff-02"
+request = """
+`B012` misses a `return` in an `else:` branch or an `except` handler inside `finally:`
+
+Everything below reproduces on ruff 0.17.0 with `ruff check --isolated --select <CODE> file.py`.
+
+```python
+def f(a):
+    try:
+        pass
+    finally:
+        if a:
+            pass
+        else:
+            return 1
+
+
+def g():
+    try:
+        pass
+    finally:
+        try:
+            pass
+        except ValueError:
+            return 2
+```
+
+bugbear reports 8:13 and 18:13, ruff reports neither. It looks like only the main bodies of nested `if`/`try`/`with`/loops are walked, not `elif`/`else` branches or handlers.
+
+*Originally part of #29422.*"""
+start = "f92f380ff6e1dff5c4a2e324b7a6f32056899165"
+fix = "eb4e0b24cbeca03c309ee8afd38e5fdd492e3e3f"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/flake8_bugbear/B012.py", "crates/ruff_linter/src/rules/flake8_bugbear/snapshots/ruff_linter__rules__flake8_bugbear__tests__jump-statement-in-finally_B012.py.snap"]
+closed = 2026-11-24
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/30225"
+pull = 30421
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-03: The SIM208 fix should not wrap the result in `bool(...)` when the operand already returns a bool (`in`,
+# `not in`, `is`, `is not`, `bool(...)`).
+# issue opened 2026-11-13, fix opened 2026-11-16, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_simplify/rules/ast_unary_op.rs (35 lines); request from body (never edited).
+# reading notes: Fixture also covers chained `in` comparisons (treated as bool) and `==` (still wrapped); both follow
+# from the issue's reasoning.
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/flake8_simplify/SIM208.py
+[[situation]]
+id = "ruff-03"
+request = """
+`double-negation` (SIM208) fix adds unnecessary `bool` wrapper
+
+### Summary
+
+The fix for [`double-negation` (SIM208)](https://docs.astral.sh/ruff/rules/double-negation/) inserts a `bool` wrapper even when the value is already a `bool`. `in`, `not in`, `is`, `is not`, and `bool` itself always return `bool`s. [Example](https://play.ruff.rs/941256d6-becf-4c25-8977-0f91c956714a):
+```console
+$ cat >sim208.py <<'# EOF'
+x = "x"
+y = "y"
+print(not not x in y)
+print(not not x not in y)
+print(not not x is y)
+print(not not x is not y)
+print(not not bool(x))
+# EOF
+
+$ python sim208.py
+False
+True
+False
+True
+True
+
+$ ruff --isolated check sim208.py --select SIM208 --fix
+Found 5 errors (5 fixed, 0 remaining).
+
+$ python sim208.py
+False
+True
+False
+True
+True
+
+$ cat sim208.py
+x = "x"
+y = "y"
+print(bool(x in y))
+print(bool(x not in y))
+print(bool(x is y))
+print(bool(x is not y))
+print(bool(bool(x)))
+
+$ sed -i.bak 's/bool//' sim208.py
+
+$ python sim208.py
+False
+True
+False
+True
+True
+```
+
+### Version
+
+ruff 0.17.5 (c91de8a01 2026-11-12)"""
+start = "40c4756fe8c07251c5bf3f4b5c889f6384001bd0"
+fix = "248231e9936ecc0e44ecd3a69bc07899736e4e23"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/flake8_simplify/SIM208.py", "crates/ruff_linter/src/rules/flake8_simplify/snapshots/ruff_linter__rules__flake8_simplify__tests__double-negation_SIM208.py.snap"]
+closed = 2026-11-18
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/30414"
+pull = 30457
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-04: F823 should report a read before assignment even when the function assigns the name more than once.
+# issue opened 2026-11-09, fix opened 2026-11-18, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/pyflakes/rules/undefined_local.rs (10 lines); request from body (never edited).
+# reading notes: Two existing snapshots gain a new F823 as a direct consequence.
+[[situation]]
+id = "ruff-04"
+request = """
+`F823` misses a read before assignment when the function assigns the name more than once
+
+Everything below reproduces on ruff 0.17.0 with `ruff check --isolated --select <CODE> file.py`.
+
+```python
+x = 1
+
+
+def f():
+    print(x)
+    x = 2
+
+
+def g():
+    print(x)
+    x = 2
+    x = 3
+```
+
+ruff reports `f` (5:11) but not `g` (10:11), which raises the same `UnboundLocalError`. pyflakes reports both.
+
+*Originally part of #29422.*"""
+start = "eaaa156f71cfc84111f0690705615168bcf4ee5f"
+fix = "4872a7c05e758cc1d32d16d8687e01cb66860059"
+hidden_tests = ["crates/ruff_linter/resources/mdtest/pyflakes/undefined-local.md", "crates/ruff_linter/src/rules/pyflakes/snapshots/ruff_linter__rules__pyflakes__tests__load_after_multiple_unbinds_from_module_scope.snap", "crates/ruff_linter/src/rules/pyflakes/snapshots/ruff_linter__rules__pyflakes__tests__load_after_unbind_from_module_scope.snap"]
+closed = 2026-11-18
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/30224"
+pull = 30524
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-05: B033 and RUF068 fixes must remove the surrounding parentheses of a parenthesized duplicate item so the
+# result stays valid.
+# issue opened 2026-11-11, fix opened 2026-11-17, squash (or single commit); source files:
+# crates/ruff_linter/src/fix/edits.rs, crates/ruff_linter/src/rules/flake8_bugbear/rules/duplicate_value.rs,
+# crates/ruff_linter/src/rules/ruff/rules/duplicate_entry_in_dunder_all.rs (59 lines); request from body (never
+# edited).
+# reading notes: filed by fixer; text names the fix (use parenthesized_range in remove_member).
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/flake8_bugbear/B033.py,
+# crates/ruff_linter/resources/test/fixtures/ruff/RUF068.py
+[[situation]]
+id = "ruff-05"
+request = """
+B033 and RUF068 fixes leave an unbalanced parenthesis when the duplicate is parenthesized
+
+`ruff check --isolated --select B033 --fix` on
+
+```python
+{1, (1)}
+```
+
+reports "Fix introduced a syntax error. Reverting all changes." The fix produces `{1)}`; the expected result is `{1}`. With `{1, (1), 2}` it produces `{1, (2}`.
+
+RUF068 has the same problem: `__all__ = ["a", ("b"), ("b")]` becomes `["a", ("b"))]`, and `__all__ = ["a", ("a"), "b"]` becomes `["a", ("b"]`.
+
+Both rules remove the duplicate with `remove_member` in `fix/edits.rs`, which deletes the expression's own range, and that range does not include the surrounding parentheses. `remove_argument` in the same file already uses `parenthesized_range` for this (the same problem was fixed there in #30189). I can open a PR that does the same in `remove_member`.
+
+Reproduced with ruff 0.17.4, no configuration (`--isolated`)."""
+start = "7794e10f40ea719cca1637c55de330c0a5cf9420"
+fix = "03a6d7d7707d083fbca1f7b4ed27122f364fd4ec"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/flake8_bugbear/B033.py", "crates/ruff_linter/resources/test/fixtures/ruff/RUF068.py", "crates/ruff_linter/src/rules/flake8_bugbear/snapshots/ruff_linter__rules__flake8_bugbear__tests__duplicate-value_B033.py.snap", "crates/ruff_linter/src/rules/ruff/snapshots/ruff_linter__rules__ruff__tests__duplicate-entry-in-dunder-all_RUF068.py.snap"]
+closed = 2026-11-17
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/30343"
+pull = 30493
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# ruff-06: The RUF072 fix must unwrap a bare try/finally correctly when the try body sits on the same line as `try:`,
+# yielding just the body.
+# issue opened 2026-11-11, fix opened 2026-11-12, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/ruff/rules/useless_finally.rs (45 lines); request from body (never edited).
+# reading notes: Text names the cause in useless_finally.rs; comment cases keep the trailing comment, which is the
+# natural result.
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/ruff/RUF072.py
+[[situation]]
+id = "ruff-06"
+request = """
+RUF072 fix introduces a syntax error when the `try` body is on the same line as `try:`
+
+### Summary
+
+The fix for [`useless-finally` (RUF072)](https://docs.astral.sh/ruff/rules/useless-finally/) introduces a syntax error when the statement is a bare `try`/`finally` and the `try` body is on the same line as `try:`. This is a safe fix, so plain `--fix` hits it.
+
+```python
+try: foo()
+finally: pass
+```
+
+```console
+$ ruff check --isolated --preview --select RUF072 --fix example.py
+error: Fix introduced a syntax error. Reverting all changes.
+
+This indicates a bug in Ruff. If you could open an issue at:
+
+    https://github.com/astral-sh/ruff/issues/new?title=%5BFix%20error%5D
+
+...quoting the contents of `example.py`, the rule codes RUF072, along with the `pyproject.toml` settings and executed command, we'd be very appreciative!
+
+useless-finally: Empty `finally` clause
+ --> example.py:2:1
+  |
+1 | try: foo()
+2 | finally: pass
+  | ^^^^^^^^^^^^^
+help: Remove the `finally` clause
+  |
+1 | try: foo()
+  - finally: pass
+  |
+
+Found 1 error.
+[*] 1 fixable with `--fix`.
+```
+
+As the diff in the help shows, the fix only removes the `finally` line and leaves `try: foo()` with no handler. The expected result is `foo()`.
+
+Other inputs that hit the same error:
+
+```python
+try: pass
+finally: ...
+```
+
+```python
+try: a(); b()
+finally: pass
+```
+
+```python
+def f():
+    try: return 1
+    finally: pass
+```
+
+These work as expected:
+
+- `try:` with the body on its own line (`try:\\n    foo()\\nfinally: pass` becomes `foo()`)
+- a one-line body with an `except` clause (`try: foo()\\nexcept ValueError: pass\\nfinally: pass` only drops the `finally` line)
+
+I think the cause is in the bare `try`/`finally` branch of `useless_finally.rs`. It takes the body text from `source.line_start(first_body_stmt.start())`. When the body is on the `try:` line, that line start is the start of the `try:` line itself, so the "unwrapped" body is `try: foo()`. That text then replaces the whole statement.
+
+I found this by running the rule on CPython's test suite: `Lib/test/test_grammar.py` (lines 1408 and 1431) and `Lib/test/test_opcodes.py` (line 19) both contain `try: pass` / `finally: pass`.
+
+### Version
+
+ruff 0.17.4 (Windows). The fix logic in `useless_finally.rs` on `main` is unchanged since this release."""
+start = "3c7055dcceefb6311222bed566227cad0678d91e"
+fix = "ef0048f4ef783ab1ed8a3ccbc838cc5c8fc2efda"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/ruff/RUF072.py", "crates/ruff_linter/src/rules/ruff/snapshots/ruff_linter__rules__ruff__tests__preview__useless-finally_RUF072.py.snap"]
+closed = 2026-11-16
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/30344"
+pull = 30349
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-07: The UP031 fix must not add an extra closing parenthesis when the format string is wrapped in two or more
+# parentheses.
+# issue opened 2026-11-07, fix opened 2026-11-07, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/pyupgrade/rules/printf_string_formatting.rs (25 lines); request from body (never
+# edited).
+# reading notes: filed by fixer.
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/pyupgrade/UP031_0.py
+[[situation]]
+id = "ruff-07"
+request = """
+UP031 fix produces unbalanced parentheses when the format string is wrapped in two or more parentheses
+
+When the format string is wrapped in two or more levels of parentheses, e.g. `(("%s")) % (x,)`, the UP031 fix rewrites it to `(("{}"))).format(x)`, with one extra closing parenthesis. With `--unsafe-fixes`, ruff detects the syntax error and reverts all fixes in the file, so none of them get applied, including the valid ones. With a single level of parentheses the output is correct, which is probably why this went unnoticed.
+
+I found this while comparing ruff's output against a linter I'm working on.
+
+### Reproduction
+
+```python
+x = 1
+y = (("%s")) % x
+```
+
+```console
+$ ruff check --isolated --select UP031 --fix --unsafe-fixes t.py
+error: Fix introduced a syntax error. Reverting all changes.
+```
+
+Ruff version: 0.17.4
+Keywords searched: UP031, printf-string-formatting, parentheses, syntax error"""
+start = "95c492644f0688297bf7309e3f89c15912341f8f"
+fix = "f45074b178c5ead40e1ce65c3d72fecdfd8ef619"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/pyupgrade/UP031_0.py", "crates/ruff_linter/src/rules/pyupgrade/snapshots/ruff_linter__rules__pyupgrade__tests__UP031_0.py.snap"]
+closed = 2026-11-09
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/30170"
+pull = 30172
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# ruff-08: Fixes that add or remove a keyword argument (B028, UP022) must handle keywords whose value is parenthesized
+# so the output stays valid.
+# issue opened 2026-11-08, fix opened 2026-11-08, squash (or single commit); source files:
+# crates/ruff_linter/src/fix/edits.rs (14 lines); request from body (never edited).
+# reading notes: filed by fixer; text names the fix (keyword start computed from the parenthesized value in
+# add_argument/remove_argument).
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/flake8_bugbear/B028.py,
+# crates/ruff_linter/resources/test/fixtures/pyupgrade/UP022.py
+[[situation]]
+id = "ruff-08"
+request = """
+B028 and UP022 fixes break when a keyword argument has a parenthesized value
+
+### Summary
+
+The fixes for `no-explicit-stacklevel` (B028) and `replace-stdout-stderr` (UP022) produce invalid code when a keyword argument in the call has a parenthesized value.
+
+```python
+import warnings
+
+warnings.warn("test", category=(DeprecationWarning))
+```
+
+```console
+$ ruff check --isolated --select B028 --fix --unsafe-fixes example.py
+error: Fix introduced a syntax error. Reverting all changes.
+```
+
+Without `--fix`, the edit that B028 suggests is `warnings.warn("test", category=stacklevel=2, (DeprecationWarning))`.
+
+UP022 does the same with `subprocess.run(["foo"], stdout=subprocess.PIPE, stderr=(subprocess.PIPE), text=True)`. Its suggested edit is `capture_output=True, stderr=text=True`, and `--fix --unsafe-fixes` reverts it with the same syntax error.
+
+`add_argument` and `remove_argument` in `crates/ruff_linter/src/fix/edits.rs` use the start of the parenthesized value as the start of the keyword. That position is after `name=`, so the edit lands in the middle of the keyword.
+
+I have a fix with tests and will open a PR for it.
+
+### Version
+
+ruff 0.17.4"""
+start = "9bac2b46330c51f281e83b251a076a0b1807a089"
+fix = "8ffb003c7f1089708dfada8488035edc67d5cda8"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/flake8_bugbear/B028.py", "crates/ruff_linter/resources/test/fixtures/pyupgrade/UP022.py", "crates/ruff_linter/src/rules/flake8_bugbear/snapshots/ruff_linter__rules__flake8_bugbear__tests__no-explicit-stacklevel_B028.py.snap", "crates/ruff_linter/src/rules/pyupgrade/snapshots/ruff_linter__rules__pyupgrade__tests__UP022.py.snap"]
+closed = 2026-11-09
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/30188"
+pull = 30189
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# ruff-09: `ruff check --verbose` should not abort when its stderr is a pipe that has been closed.
+# issue opened 2026-11-08, fix opened 2026-11-09, squash (or single commit); source files: crates/ruff/src/lib.rs,
+# crates/ruff_linter/src/logging.rs (22 lines); request from body (never edited).
+# reading notes: Test expects ruff to keep running and print diagnostics (exit 1); issue says 'exit quietly (or with
+# non-zero status)', so an implementer who terminates early on a broken stderr could fail; repro shown on Linux but
+# test is cross-platform.
+[[situation]]
+id = "ruff-09"
+request = """
+`ruff check --verbose` aborts (SIGABRT) when stderr is a pipe that closes early
+
+## Summary
+
+When `--verbose` log output goes to a stderr pipe whose reader exits early, ruff aborts with SIGABRT (exit 134) instead of exiting cleanly. Closing stdout early is handled correctly; only the stderr/log path aborts.
+
+## Reproduction (Linux, ruff 0.17.1 and 0.17.4)
+
+```sh
+d=$(mktemp -d); cd "$d"
+for i in $(seq 1 3000); do printf 'import os\\nx = %d\\n' "$i" > "m$i.py"; done
+
+ruff check --verbose --no-cache . 2>&1 | head -n 3 >/dev/null; echo "rc=${PIPESTATUS[0]}"
+# rc=134 (SIGABRT), and systemd-coredump records a core
+
+ruff check --verbose --no-cache . 2>/dev/null | head -n 1 >/dev/null; echo "rc=${PIPESTATUS[0]}"
+# rc=0: closing stdout early is handled
+```
+
+This happens every time on 0.17.1 (Arch package) and 0.17.4 (`uvx --from ruff==0.17.4`).
+
+## What happens (strace of the repro)
+
+```
+write(2, "[2026-11-06][18:44:44]", 22) = -1 EPIPE (Broken pipe)
+write(2, "Error performing logging.\\n\\tattempted to log: ", 45) = -1 EPIPE (Broken pipe)
+write(2, "\\n", 1)               = -1 EPIPE (Broken pipe)
+write(2, "panicked at ", 12)    = -1 EPIPE (Broken pipe)
+write(2, "Error performing logging.\\n\\tattempted to log: ", 45) = -1 EPIPE (Broken pipe)
+write(2, "\\n", 1)               = -1 EPIPE (Broken pipe)
+write(2, "panicked at ", 12)    = -1 EPIPE (Broken pipe)
+-> SIGABRT
+```
+
+The first log write after `head` exits gets EPIPE. fern's (0.7.1) fallback, "Error performing logging…", also writes to the closed stderr, and the process panics. While the panic is being reported, the fallback runs again and fails again, so Rust aborts ("thread panicked while processing panic. aborting."). The core dump agrees: the crashing worker thread has two nested copies of the same frame sequence ending in `abort()`. The Arch build ships no debug symbols, so I can't name the frames.
+
+## Expected
+
+Exit quietly (or with a non-zero status) when stderr is closed, the way the stdout path already does. Related issues fixed earlier for other commands: #13442, #13483, #15586.
+
+## Context
+
+Found because an agent ran `ruff check --verbose . 2>&1 | head -n 30` and the machine's crash notifier reported a ruff core dump."""
+start = "3cdfb661bd97ec8342dab116cb4b5052baee387d"
+fix = "9bac2b46330c51f281e83b251a076a0b1807a089"
+hidden_tests = ["crates/ruff/tests/cli/lint.rs"]
+closed = 2026-11-09
+kind = "crash"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/30182"
+pull = 30209
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-10: The B010 fix must drop wrapping parentheses around a `setattr(...)` statement so the replacement assignment
+# is valid syntax.
+# issue opened 2026-11-07, fix opened 2026-11-07, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_bugbear/rules/setattr_with_constant.rs (10 lines); request from body (never
+# edited).
+# reading notes: filed by fixer; comment-containing case marked unsafe via existing logic.
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/flake8_bugbear/B009_B010.py
+[[situation]]
+id = "ruff-10"
+request = """
+B010 fix produces invalid syntax when the setattr call is parenthesized
+
+When a `setattr` call with a constant attribute is wrapped in parentheses, e.g. `(setattr(foo, "bar", None))`, the B010 fix rewrites it to `(foo.bar = None)`, which is a syntax error because an assignment can't be wrapped in parentheses. With `ruff check --fix`, ruff detects the syntax error and reverts all fixes in the file, so none of them get applied, including the valid ones.
+
+I found this while comparing ruff's output against a linter I'm working on.
+
+### Reproduction
+
+```python
+class A:
+    pass
+
+x = A()
+(setattr(x, "a", 1))
+```
+
+```console
+$ ruff check --isolated --select B010 --fix t.py
+error: Fix introduced a syntax error. Reverting all changes.
+```
+
+Ruff version: 0.17.4
+Keywords searched: B010, setattr, parenthesized, syntax error"""
+start = "0850829d2c27b6b05877e19f6b70b96db5b7cab7"
+fix = "3cdfb661bd97ec8342dab116cb4b5052baee387d"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/flake8_bugbear/B009_B010.py", "crates/ruff_linter/src/rules/flake8_bugbear/snapshots/ruff_linter__rules__flake8_bugbear__tests__set-attr-with-constant_B009_B010.py.snap"]
+closed = 2026-11-09
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/30167"
+pull = 30168
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# ruff-11: FURB103 should not offer a fix when `write()` is nested inside a larger expression, since the fix drops the
+# surrounding expression.
+# issue opened 2026-10-17, fix opened 2026-10-28, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/refurb/rules/write_whole_file.rs (13 lines); request from oldest of 2 edit records.
+# reading notes: Issue states the expected behaviour (withhold the fix); diagnostic kept without [*].
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/refurb/FURB103_0.py
+[[situation]]
+id = "ruff-11"
+request = """
+FURB103 safe fix drops expressions surrounding write()
+
+### Summary
+
+A `write()` nested inside an expression triggers a fix that deletes the surrounding expression when applied with an ordinary `--fix`.
+
+This can make conditional writes unconditional or remove other function calls while expected behaviour is to withhold the replacement when the fix cannot preserve the surrounding expression’s behaviour.
+
+### Reproducer for conditional write:
+Save as `repro.py` in a scratch directory:
+```python
+flag = False
+with open("example.txt", "w") as f:
+    flag and f.write("hello")
+
+with open("example.txt") as f:
+    print(repr(f.read()))
+```
+
+Run:
+```shell
+python3 repro.py
+uvx ruff@0.17.1 check --preview --isolated --select FURB103 --fix repro.py
+python3 repro.py
+```
+
+Output before:
+''
+Output after:
+'hello'
+
+Fixed code:
+```python
+import pathlib
+flag = False
+pathlib.Path("example.txt").write_text("hello")
+
+with open("example.txt") as f:
+    print(repr(f.read()))
+```
+
+### Reproducer for removed surrounding call
+Replace `repro.py` with:
+
+```python
+with open("example.txt", "w") as f:
+    print(f.write("abc"))
+```
+Run the same three commands. 
+Before fixing, it prints `3`; afterward, there is no output.
+
+Fixed code:
+```python
+import pathlib
+pathlib.Path("example.txt").write_text("abc")
+```
+
+### Version
+
+ruff 0.17.1"""
+start = "4cec5d2d871ec065c593b24e0e49fc7d032f6061"
+fix = "a3554f468ccfeef2511c4156774bc7d8d8c6c324"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/refurb/FURB103_0.py", "crates/ruff_linter/src/rules/refurb/snapshots/ruff_linter__rules__refurb__tests__write-whole-file_FURB103_0.py.snap", "crates/ruff_linter/src/rules/refurb/snapshots/ruff_linter__rules__refurb__tests__write_whole_file_python_39.snap"]
+closed = 2026-11-06
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/29452"
+pull = 29789
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-12: The G004 fix should be marked unsafe because `__format__` and `__str__` can differ.
+# issue opened 2026-11-05, fix opened 2026-11-06, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_logging_format/rules/logging_call.rs,
+# crates/ruff_linter/src/rules/flake8_logging_format/violations.rs (26 lines); request from body (never edited).
+# reading notes: Every G004 fix becomes unsafe, matching the issue's ask.
+[[situation]]
+id = "ruff-12"
+request = """
+G004 fix changes behavior when `__format__` and `__str__` outputs differ
+
+### Summary
+
+The fix for [`logging-f-string` (G004)](https://docs.astral.sh/ruff/rules/logging-f-string/) changes the behavior of a program when the outputs of `__format__` and `__str__` for a logged object differ. The fix should be marked unsafe. [Example](https://play.ruff.rs/e64ae951-9e89-4372-8dda-439dd5bbc459):
+```console
+$ cat <<'# EOF' >g004.py
+import logging
+class C:
+    def __format__(self, format_spec): return "F"
+    def __str__(self): return "S"
+c=C()
+logging.warning(f"{c}")
+# EOF
+
+$ python g004.py
+WARNING:root:F
+
+$ ruff --isolated check g004.py --select G004 --preview --fix
+Found 1 error (1 fixed, 0 remaining).
+
+$ cat g004.py
+import logging
+class C:
+    def __format__(self, format_spec): return "F"
+    def __str__(self): return "S"
+c=C()
+logging.warning("%s", c)
+
+$ python g004.py
+WARNING:root:S
+```
+
+### Version
+
+ruff 0.17.4 (05cdc36a4 2026-11-05)"""
+start = "9e20e81cbdbc26ed218e0bff72ca1590b32fd141"
+fix = "9e96942dcb4c7b4dcda02796819ee78ce5e12e09"
+hidden_tests = ["crates/ruff_linter/resources/mdtest/flake8-logging-format/logging-f-string.md", "crates/ruff_linter/src/rules/flake8_logging_format/snapshots/ruff_linter__rules__flake8_logging_format__tests__preview__logging-f-string_G004.py.snap", "crates/ruff_linter/src/rules/flake8_logging_format/snapshots/ruff_linter__rules__flake8_logging_format__tests__preview__logging-f-string_G004_implicit_concat.py.snap"]
+closed = 2026-11-06
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/30076"
+pull = 30087
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-13: `ruff format --check` should not panic on files starting with a UTF-8 BOM and should report them normally.
+# issue opened 2026-11-03, fix opened 2026-11-04, squash (or single commit); source files:
+# crates/ruff_db/src/diagnostic/render.rs, crates/ruff_db/src/diagnostic/render/full.rs,
+# crates/ruff_text_size/src/range.rs (35 lines); request from body (never edited).
+# reading notes: Inline CLI snapshot pins the exact rendered diff (a deletion line containing the literal BOM); other
+# fix approaches might render it differently, small doubt.
+[[situation]]
+id = "ruff-13"
+request = """
+[Panic] ruff format --check crashes on files starting with a UTF-8 BOM
+
+## Summary
+
+`ruff format --check` panics inside `ruff_annotate_snippets` on Python files that start with a UTF-8 BOM, whenever the rendered annotation reaches the end of the file. Regression introduced in **0.16.1** — 0.16.0 and earlier report the file normally.
+
+## Minimal reproduction
+
+A file containing only a UTF-8 BOM (3 bytes) is enough, with default settings:
+
+```bash
+python -c "open('repro.py','wb').write(b'\\xef\\xbb\\xbf')"
+ruff format --check repro.py
+```
+
+Actual output:
+
+```
+thread 'main' (NNNN) panicked at crates\\ruff_annotate_snippets\\src\\renderer\\source_map.rs:185:13:
+Annotation range `0..3` is beyond the end of buffer `0`
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+```
+
+Expected (ruff 0.16.0): `Would reformat: repro.py`.
+
+## Real-world trigger
+
+It also fires on ordinary BOM'd files whose `--check` annotation covers the end of the file. From a real repo, a 185-line test file panics with:
+
+```
+Annotation range `0..6618` is beyond the end of buffer `6615`
+```
+
+The consistent 3-byte overflow suggests the byte range is computed over the raw source (BOM included) while the rendered buffer has the 3 BOM bytes stripped — so any annotation touching the tail overflows by exactly 3.
+
+## Version bisect
+
+| Version | Result |
+|---|---|
+| 0.15.0 | ok |
+| 0.16.0 | ok |
+| 0.16.1 | **panic** |
+| 0.16.5 | **panic** |
+| 0.16.10 | **panic** |
+
+## Scope
+
+- `ruff format --check` — panics (this report)
+- `ruff format --diff` — unaffected (plain unified-diff renderer)
+- `ruff format` (write mode) — unaffected; correctly strips the BOM
+- `ruff check` (lint) — unaffected
+
+## Environment
+
+- ruff 0.16.1–0.16.10 via `uv` (`uvx ruff@<version>`)
+- Windows 11, x86_64 — the panic site looks platform-independent, but I haven't verified other OSes."""
+start = "8960d6db60e495867635b8aaedbe90e352b4b19f"
+fix = "818a60839912b332879b59e079bc3fcbce4a83d2"
+hidden_tests = ["crates/ruff/tests/cli/format.rs"]
+closed = 2026-11-05
+kind = "crash"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/29958"
+pull = 30017
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-14: D417 should accept backslash-escaped `\*args` / `\*\*kwargs` in docstrings as documenting the variadic
+# parameters.
+# issue opened 2026-10-20, fix opened 2026-10-20, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/pydocstyle/mod.rs, crates/ruff_linter/src/rules/pydocstyle/rules/sections.rs (21
+# lines); request from oldest of 8 edit records.
+# reading notes: Example code block in issue is malformed but intent is clear; test cases registered in
+# pydocstyle/mod.rs (src_files).
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/pydocstyle/D417.py,
+# crates/ruff_linter/src/rules/pydocstyle/mod.rs
+[[situation]]
+id = "ruff-14"
+request = """
+Improve D417 missdetection for *args and **kwargs when backslash.
+
+### Summary
+
+When generating documentation with Sphinx RST, the **kwargs syntax is incorrect; you need to escape the "*" characters with \\*. 
+
+Let see this little rst compatible docstring:
+
+```python
+def foo(**kwargs):
+    r""\"Stupid example function.
+
+    Parameters
+    =========
+    \\*\\*kwargs : dict
+        A rst compatible sphinx docstring.
+    ""\"
+
+In the example above, ruff returns the following error:
+
+D417 Missing argument description in the docstring for `foo`: `**kwargs`
+
+The idea behind this issue is simply to request that a "\\" be allowed before the "*" in docstrings!
+
+That it! Thank you."""
+start = "e02754d1fbc62e53f7a576cfbd89a766d9395a8a"
+fix = "8ebb34e5325e7d3bead073eeb8bd9b2d763e6a11"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/pydocstyle/D417.py", "crates/ruff_linter/src/rules/pydocstyle/mod.rs", "crates/ruff_linter/src/rules/pydocstyle/snapshots/ruff_linter__rules__pydocstyle__tests__d417_google.snap", "crates/ruff_linter/src/rules/pydocstyle/snapshots/ruff_linter__rules__pydocstyle__tests__d417_google_ignore_var_parameters.snap", "crates/ruff_linter/src/rules/pydocstyle/snapshots/ruff_linter__rules__pydocstyle__tests__d417_numpy.snap", "crates/ruff_linter/src/rules/pydocstyle/snapshots/ruff_linter__rules__pydocstyle__tests__d417_unspecified.snap", "crates/ruff_linter/src/rules/pydocstyle/snapshots/ruff_linter__rules__pydocstyle__tests__d417_unspecified_ignore_var_parameters.snap"]
+closed = 2026-10-20
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/29535"
+pull = 29536
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-15: UP046/UP047 fixes must produce valid syntax for TypeVars whose constraints are given as starred arguments.
+# issue opened 2026-07-17, fix opened 2026-09-06, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/pyupgrade/rules/pep695/mod.rs (20 lines); request from body (never edited).
+# reading notes: PR also covers UP040 and RUF053 through the shared pep695 helper; output `(*constraints,)` is the
+# obvious valid form, though withholding the fix would be an alternative (small doubt).
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/pyupgrade/UP040.py,
+# crates/ruff_linter/resources/test/fixtures/pyupgrade/UP046_0.py,
+# crates/ruff_linter/resources/test/fixtures/pyupgrade/UP047_0.py,
+# crates/ruff_linter/resources/test/fixtures/ruff/RUF053.py
+[[situation]]
+id = "ruff-15"
+request = """
+Fixes for UP046 and UP047 introduce syntax errors for starred constraints
+
+### Summary
+
+The fixes for [`non-pep695-generic-class` (UP046)](https://docs.astral.sh/ruff/rules/non-pep695-generic-class/) and [`non-pep695-generic-function` (UP047)](https://docs.astral.sh/ruff/rules/non-pep695-generic-function/) introduce syntax errors for `TypeVar`s whose constraints are specified as starred arguments. [Example](https://play.ruff.rs/b72d7121-32b4-4ef7-8cb4-5e62ba68dac8):
+```console
+$ cat >up04.py <<'# EOF'
+from typing import Generic, TypeVar
+
+constraints = (int, str)
+T1 = TypeVar("T1", *constraints)
+class GenericClass(Generic[T1]):
+    var: T1
+print(GenericClass.__annotate__(1)["var"].__constraints__)
+
+T2 = TypeVar("T2", *constraints)
+def generic_function(var: T2) -> T2:
+    return var
+print(generic_function.__annotate__(1)["var"].__constraints__)
+# EOF
+
+$ python3.14 up04.py
+(<class 'int'>, <class 'str'>)
+(<class 'int'>, <class 'str'>)
+
+$ ruff --isolated check --select UP046,UP047 --preview up04.py --target-version py312 --unsafe-fixes --fix
+
+error: Fix introduced a syntax error. Reverting all changes.
+
+This indicates a bug in Ruff. If you could open an issue at:
+
+    https://github.com/astral-sh/ruff/issues/new?title=%5BFix%20error%5D
+
+...quoting the contents of `up04.py`, the rule codes UP046, UP047, along with the `pyproject.toml` settings and executed command, we'd be very appreciative!
+
+non-pep695-generic-class: Generic class `GenericClass` uses `Generic` subclass instead of type parameters
+ --> up04.py:5:20
+  |
+3 | constraints = (int, str)
+4 | T1 = TypeVar("T1", *constraints)
+5 | class GenericClass(Generic[T1]):
+  |                    ^^^^^^^^^^^
+6 |     var: T1
+7 | print(GenericClass.__annotate__(1)["var"].__constraints__)
+  |
+help: Use type parameters
+  |
+4 | T1 = TypeVar("T1", *constraints)
+  - class GenericClass(Generic[T1]):
+5 + class GenericClass[T1: (*constraints)]:
+6 |     var: T1
+  |
+note: This is an unsafe fix and may change runtime behavior
+
+non-pep695-generic-function: Generic function `generic_function` should use type parameters
+  --> up04.py:10:5
+   |
+ 9 | T2 = TypeVar("T2", *constraints)
+10 | def generic_function(var: T2) -> T2:
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+11 |     return var
+12 | print(generic_function.__annotate__(1)["var"].__constraints__)
+   |
+help: Use type parameters
+   |
+9  | T2 = TypeVar("T2", *constraints)
+   - def generic_function(var: T2) -> T2:
+10 + def generic_function[T2: (*constraints)](var: T2) -> T2:
+11 |     return var
+   |
+note: This is an unsafe fix and may change runtime behavior
+
+Found 2 errors.
+[*] 2 fixable with the `--fix` option.
+```
+
+### Version
+
+ruff 0.15.22 (0177a7e0d 2026-07-16)"""
+start = "44a3df291b53591303d242d0564e4f4886a2d67a"
+fix = "c4d0597b5c5b3e532fe8be7a129e307bef70147d"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/pyupgrade/UP040.py", "crates/ruff_linter/resources/test/fixtures/pyupgrade/UP046_0.py", "crates/ruff_linter/resources/test/fixtures/pyupgrade/UP047_0.py", "crates/ruff_linter/resources/test/fixtures/ruff/RUF053.py", "crates/ruff_linter/src/rules/pyupgrade/snapshots/ruff_linter__rules__pyupgrade__tests__UP040.py.snap", "crates/ruff_linter/src/rules/pyupgrade/snapshots/ruff_linter__rules__pyupgrade__tests__UP046_0.py.snap", "crates/ruff_linter/src/rules/pyupgrade/snapshots/ruff_linter__rules__pyupgrade__tests__UP047_0.py.snap", "crates/ruff_linter/src/rules/ruff/snapshots/ruff_linter__rules__ruff__tests__class-with-mixed-type-vars_RUF053.py.snap"]
+closed = 2026-10-16
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/26954"
+pull = 28362
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-16: PERF401/PERF403 fixes must parenthesize a ternary (or named) loop iterable when moving it into a
+# comprehension.
+# issue opened 2026-10-14, fix opened 2026-10-14, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/perflint/rules/manual_dict_comprehension.rs,
+# crates/ruff_linter/src/rules/perflint/rules/manual_list_comprehension.rs,
+# crates/ruff_linter/src/rules/refurb/helpers.rs, crates/ruff_linter/src/rules/refurb/mod.rs,
+# crates/ruff_linter/src/rules/refurb/rules/for_loop_set_mutations.rs,
+# crates/ruff_linter/src/rules/refurb/rules/for_loop_writes.rs (92 lines); request from body (never edited).
+# reading notes: Text states the valid output; PR also touches refurb helpers without refurb tests.
+# refurb/mod.rs left out by hand: its change in the fix is source (mod helpers made pub(crate)), outside mod tests, so
+# the oracle must apply it (notes/ruff.md)
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/perflint/PERF401.py,
+# crates/ruff_linter/resources/test/fixtures/perflint/PERF403.py
+[[situation]]
+id = "ruff-16"
+request = """
+PERF401/PERF403 fixes introduce a syntax error when the loop iterable is a ternary expression
+
+### Summary
+
+The preview fixes for [`manual-list-comprehension` (PERF401)](https://docs.astral.sh/ruff/rules/manual-list-comprehension/) and [`manual-dict-comprehension` (PERF403)](https://docs.astral.sh/ruff/rules/manual-dict-comprehension/) introduce a syntax error when the `for` loop iterates over an unparenthesized conditional expression. A comprehension's iterable can't be a bare ternary, so it needs parentheses there.
+
+```console
+$ cat >perf401.py <<'# EOF'
+def f(values, allowed):
+    found = []
+    for value in [values] if isinstance(values, str) else values:
+        if value not in allowed:
+            found.append(value)
+    return found
+# EOF
+
+$ ruff --isolated check perf401.py --select PERF401 --preview --unsafe-fixes --diff 2>&1 | grep error:
+error: Fix introduced a syntax error. Reverting all changes.
+
+$ cat >perf403.py <<'# EOF'
+def f(values):
+    result = {}
+    for key, value in [values] if isinstance(values, tuple) else values:
+        result[key] = value
+    return result
+# EOF
+
+$ ruff --isolated check perf403.py --select PERF403 --preview --unsafe-fixes --diff 2>&1 | grep error:
+error: Fix introduced a syntax error. Reverting all changes.
+```
+
+For PERF401 the generated code is `found.extend(value for value in [values] if isinstance(values, str) else values if value not in allowed)`; the valid form is `found.extend(value for value in ([values] if isinstance(values, str) else values) if value not in allowed)`.
+
+#18405 added parentheses around a lambda or ternary *condition*. The *iterable* is still only parenthesized when it is an implicit tuple, in both [`manual_list_comprehension.rs`](https://github.com/astral-sh/ruff/blob/95201641dc6add3471d404efcfeb3b4d1b9d3372/crates/ruff_linter/src/rules/perflint/rules/manual_list_comprehension.rs#L392-L408) and [`manual_dict_comprehension.rs`](https://github.com/astral-sh/ruff/blob/95201641dc6add3471d404efcfeb3b4d1b9d3372/crates/ruff_linter/src/rules/perflint/rules/manual_dict_comprehension.rs#L335-L350). A named expression as the iterable fails the same way: `for value in (items := values):` with the PERF401 fix also reports the syntax error.
+
+Without `--preview` the PERF401 violation is reported but no fix is offered.
+
+### Version
+
+ruff 0.16.10 (also reproduced with 0.16.3; the code linked above is from `main` at 95201641dc6a)"""
+start = "83a3afc3156d73ae4296f3fa74ede28e4c72bfcd"
+fix = "93526150df078af7dd8fc4226cdcc469539d2001"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/perflint/PERF401.py", "crates/ruff_linter/resources/test/fixtures/perflint/PERF403.py", "crates/ruff_linter/src/rules/perflint/snapshots/ruff_linter__rules__perflint__tests__manual-dict-comprehension_PERF403.py.snap", "crates/ruff_linter/src/rules/perflint/snapshots/ruff_linter__rules__perflint__tests__manual-list-comprehension_PERF401.py.snap", "crates/ruff_linter/src/rules/perflint/snapshots/ruff_linter__rules__perflint__tests__preview__manual-dict-comprehension_PERF403.py.snap", "crates/ruff_linter/src/rules/perflint/snapshots/ruff_linter__rules__perflint__tests__preview__manual-list-comprehension_PERF401.py.snap"]
+closed = 2026-10-14
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/29365"
+pull = 29366
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-17: PYI036 should look through stringized annotations of `__exit__`/`__aexit__` parameters instead of always
+# reporting them.
+# issue opened 2026-08-14, fix opened 2026-10-10, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_pyi/rules/exit_annotations.rs (37 lines); request from body (never edited).
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/flake8_pyi/PYI036.py
+[[situation]]
+id = "ruff-17"
+request = """
+`PYI036` false positive on stringized (quoted) `__exit__` / `__aexit__` annotations
+
+### Summary
+
+## Summary
+
+`PYI036` (`bad-exit-annotation`) inspects the raw annotation expression and never looks through a string literal, so it reports a violation for *every* stringized form of an otherwise-correct annotation. This also includes what it's own message for `TC004` on `types.TracebackType` asks for.
+
+A stringized annotation means the same thing to a type checker as the unquoted one, so all four diagnostics below are false positives.
+
+## Minimal reproduction
+
+`minimal.py`:
+
+```python
+import types
+from types import TracebackType
+
+
+class Quoted:
+    def __exit__(
+        self,
+        typ: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: "TracebackType | None",
+    ) -> None: ...
+
+    async def __aexit__(
+        self,
+        typ: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: "TracebackType | None",
+    ) -> None: ...
+
+
+class QuotedQualified:
+    def __exit__(
+        self,
+        typ: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: "types.TracebackType | None",
+    ) -> None: ...
+
+
+class QuotedObject:
+    def __exit__(
+        self,
+        typ: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: "object",
+    ) -> None: ...
+
+
+class Unquoted:  # control: correctly produces no diagnostic
+    def __exit__(
+        self,
+        typ: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None: ...
+```
+
+```console
+$ ruff check --isolated --no-cache --select PYI036 minimal.py
+PYI036 The third argument in `__exit__` should be annotated with `object` or `types.TracebackType | None`
+  --> minimal.py:10:13
+PYI036 The third argument in `__aexit__` should be annotated with `object` or `types.TracebackType | None`
+  --> minimal.py:17:13
+PYI036 The third argument in `__exit__` should be annotated with `object` or `types.TracebackType | None`
+  --> minimal.py:26:13
+PYI036 The third argument in `__exit__` should be annotated with `object` or `types.TracebackType | None`
+  --> minimal.py:35:13
+Found 4 errors.
+```
+
+Expected: no diagnostics. The `Unquoted` control is handled correctly, which isolates the string literal as the trigger.
+
+## Reproduction through ruff autofix
+
+The real bummer is that ruff autofix can produce this:
+
+`ruff.toml`:
+
+```toml
+target-version = "py312"
+
+[lint]
+select = ["PYI", "TC"]
+
+[lint.flake8-type-checking]
+quote-annotations = true
+```
+
+`chain.py`:
+
+```python
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from types import TracebackType
+
+
+class Demo:
+    def __exit__(
+        self,
+        typ: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None: ...
+```
+
+```console
+$ ruff check --no-cache chain.py
+TC004 Quote references to `types.TracebackType`. Import is in a type-checking block.
+...
+Found 1 error.
+
+$ ruff check --no-cache --fix --unsafe-fixes chain.py
+...
+Found 2 errors (1 fixed, 1 remaining).
+
+# ruff rewrote line 12 to:  tb: "TracebackType | None",
+
+$ ruff check --no-cache chain.py
+PYI036 The third argument in `__exit__` should be annotated with `object` or `types.TracebackType | None`
+...
+Found 1 error.
+```
+
+So `ruff check --fix` turns a `TC004` violation into a `PYI036` violation, and the only remaining escapes are a `noqa`/suppression comment, or adding `from __future__ import annotations` to every affected module.
+
+### Version
+
+0.16.3"""
+start = "dd619474e0cc9a1226abe8182659dca966461aeb"
+fix = "bf70c2d6c089e64fa7acc3fdbf7279a0383db0d8"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/flake8_pyi/PYI036.py", "crates/ruff_linter/src/rules/flake8_pyi/snapshots/ruff_linter__rules__flake8_pyi__tests__bad-exit-annotation_PYI036.py.snap"]
+closed = 2026-10-13
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/27755"
+pull = 29274
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-18: With runtime-evaluated-decorators, annotations of assignments inside function bodies should never be
+# treated as runtime-required.
+# issue opened 2026-10-07, fix opened 2026-10-07, squash (or single commit); source files:
+# crates/ruff_linter/src/checkers/ast/annotation.rs, crates/ruff_linter/src/rules/flake8_type_checking/mod.rs (44
+# lines); request from body (never edited).
+# reading notes: filed by fixer; text names the cause (leftover branch from #9317); test is an empty snapshot whose
+# case is registered in mod.rs (src_files), so it asserts absence of diagnostics only.
+# added to the candidate's hidden tests:
+# crates/ruff_linter/resources/test/fixtures/flake8_type_checking/runtime_evaluated_decorators_5.py,
+# crates/ruff_linter/src/rules/flake8_type_checking/mod.rs
+[[situation]]
+id = "ruff-18"
+request = """
+`runtime-evaluated-decorators` incorrectly applies runtime semantics to annotation assignments in function body
+
+### Summary
+
+The initial implementation of applying `runtime-evaluated-decorators` to function signatures in #9317 was flawed, which was subsequently fixed by #10091, however the fix didn't remove the flawed branch that was introduced by #9317.
+
+Annotation assignments inside function scopes never result in any actual code for the annotation expressions, they get silently dropped by the compiler and are missing completely from the resulting byte code, so they can never be anything other than typing only.
+
+```py
+from pydantic import validate_call
+
+if TYPE_CHECKING:
+    from .foo import Foo
+
+@validate_call
+def baz() -> None:
+    x: Foo = ...
+
+```
+
+```toml
+[lint]
+select = [ "TC" ]
+
+[lint.flake8-type-checking]
+runtime-evaluated-decorators = [ "pydantic.validate_call" ]
+```
+
+[Playground](https://play.ruff.rs/65b49094-2d51-4456-baad-2978b241860d)
+
+
+
+
+### Version
+
+0.16.10"""
+start = "9e340aed2654efdabd73e8d278ddb0875da80d06"
+fix = "ba2ddbc72b0eeb4c06ac926eab9adc8ae97a9326"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/flake8_type_checking/runtime_evaluated_decorators_5.py", "crates/ruff_linter/src/rules/flake8_type_checking/mod.rs", "crates/ruff_linter/src/rules/flake8_type_checking/snapshots/ruff_linter__rules__flake8_type_checking__tests__runtime-import-in-type-checking-block_runtime_evaluated_decorators_5.py.snap"]
+closed = 2026-10-07
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/29182"
+pull = 29183
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# ruff-19: The PLR1711 useless-return fix should keep a trailing comment on the removed return line instead of
+# deleting it.
+# issue opened 2026-09-24, fix opened 2026-10-07, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/pylint/rules/useless_return.rs (37 lines); request from body (never edited).
+# reading notes: Snapshot pins the comment kept on its own line at the return's indentation; that is the obvious
+# output.
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/pylint/useless_return.py
+[[situation]]
+id = "ruff-19"
+request = """
+PLR1711 useless-return removes comments
+
+### Summary
+
+produces:
+```
+@@ -161,7 +161,6 @@ class SubSchema:
+     # Turn set into list, maybe more handy for applications
+     self.non_unique_oids = list(non_unique_oids)
+ 
+-    return # subSchema.__init__()
+ 
+ 
+   def ldap_entry(self) -> dict[str, list[str]]:
+```
+
+→ it should preserve the comment
+
+### Version
+
+0.16.8"""
+start = "872d9ac984836c3f34530fa2a465d55739ab5d30"
+fix = "9e340aed2654efdabd73e8d278ddb0875da80d06"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/pylint/useless_return.py", "crates/ruff_linter/src/rules/pylint/snapshots/ruff_linter__rules__pylint__tests__useless-return_useless_return.py.snap"]
+closed = 2026-10-07
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/28861"
+pull = 29180
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-20: RUF061 should not report pytest.raises as needing the context-manager form when it is already used in a
+# with statement with an extra positional argument.
+# issue opened 2026-08-28, fix opened 2026-08-31, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/ruff/rules/legacy_form_pytest_raises.rs (9 lines); request from body (never edited).
+# reading notes: Tests also cover pytest.warns and pytest.deprecated_call in with statements, same rule; a fix limited
+# to raises would miss them.
+[[situation]]
+id = "ruff-20"
+request = """
+RUF061: false positive when arguments are mis-formed
+
+### Summary
+
+MRE: [Playground](https://play.ruff.rs/e940dab7-c3ef-4b3c-a2be-caf7474533ed)
+
+Example:
+
+```python
+import pytest
+
+with pytest.raises(ValueError, "oops"):
+    pass
+```
+
+yields:
+
+```
+Use context-manager form of `pytest.raises()` (RUF061) [Ln 3, Col 6]
+help: Use `pytest.raises()` as a context-manager
+```
+
+In this case, the user error is that `"oops"` should be a kwarg, i.e. `match="oops"`. But it's surprising that this gets flagged as RUF061 i.e. for not being a context manager, when it is 🙂 
+
+### Version
+
+0.16.5 (playground)"""
+start = "678d6b97d79ebecc51a1299b22a3faded2410d04"
+fix = "cbc71c28d140aaa02aff63dd392692f6b6df2b76"
+hidden_tests = ["crates/ruff_linter/resources/mdtest/ruff/legacy-form-pytest-raises.md"]
+closed = 2026-10-02
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/28146"
+pull = 28186
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-21: SLF001 should not flag private attribute assignment on an instance created via object().__new__(cls) inside
+# __new__.
+# issue opened 2026-09-29, fix opened 2026-09-30, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_self/rules/private_member_access.rs (25 lines); request from body (never
+# edited).
+# reading notes: Tests also require object.__new__(cls) allowed, but object(1).__new__ and a shadowed `object` still
+# flagged; a looser fix (any X.__new__) would fail.
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/flake8_self/SLF001_1.py
+[[situation]]
+id = "ruff-21"
+request = """
+SLF001 false positives in __new__
+
+### Summary
+
+If constructor magic method `__new__` is used also to set some private attributes of the new object, it is reported by ruff as violation of rule SLF001.
+
+Example:
+using  `ruff check ./test.py --select SLF`
+on test.py:
+```python
+class A:
+    def __new__(cls):
+        obj = object().__new__(cls)
+        obj.public_attr = 'foo'
+        obj._private_attr = 'bar'
+```
+returns:
+```
+SLF001 Private member accessed: `_private_attr`
+ --> src/trx5g/test.py:8:9
+  |
+6 |         obj = object().__new__(cls)
+7 |         obj.public_attr = 'foo'
+8 |         obj._private_attr = 'bar'
+  |         
+```
+
+### Version
+
+0.16.2"""
+start = "8ecfc92734b0b574de2b25b2bebb56a97b3e9ba4"
+fix = "4de829767edcf99e2a8073ea29057d76de53914e"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/flake8_self/SLF001_1.py", "crates/ruff_linter/src/rules/flake8_self/snapshots/ruff_linter__rules__flake8_self__tests__private-member-access_SLF001_1.py.snap"]
+closed = 2026-10-02
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/28989"
+pull = 29001
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-22: RUF067 strict mode (strictly-empty-init-modules) should allow docstrings in __init__.py.
+# issue opened 2026-08-02, fix opened 2026-09-18, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/ruff/rules/non_empty_init_module.rs, crates/ruff_workspace/src/options.rs (37 lines);
+# request from body (never edited).
+# reading notes: Issue also floats a separate setting as an alternative; tests pin the plain behaviour change and
+# allow attribute docstrings too, which matches moving the existing docstring exemption out of the non-strict branch.
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/ruff/RUF067/modules/__init__.py
+[[situation]]
+id = "ruff-22"
+request = """
+RUF067 allow docstrings in __init__.py in strict mode
+
+### Summary
+
+A convention in a codebase I work in is to prohibit all code in `__init__.py` files, including imports, setting `__all__`, etc. So `RUF067` in strict mode is almost perfect for what I want. The only issue is that is also prohibits docstrings.
+
+The reason we allow docstrings in `__init__.py` files is because it's the obvious (and maybe canonical?) place for module-level documentation. All of the alternatives (a separate `README.md` file, or its own python file or something) seem worse.
+
+I may be lacking creativity, but allowing docstrings seems like the intuitive and commonly useful behavior, so I propose to change it to allow them.
+
+Alternatively, if actually empty files is a popular use case, or just to preserve backwards compatibility, maybe it could be split out into a separate setting (`--semi-strictly-empty-init-modules = true`? 😉), or even separate rules.
+
+For reference, the original [issue](https://github.com/astral-sh/ruff/issues/9848) and [PR](https://github.com/astral-sh/ruff/pull/22143) for this rule. The PR description notes:
+> I'm not really sure we need to flag docstrings even when the strict setting is enabled, but I just followed upstream for now."""
+start = "1495c75c8e58323b14586eb90a9fce479df5b0f1"
+fix = "9c37f039107bf1138faf254888752d2b49385814"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/ruff/RUF067/modules/__init__.py", "crates/ruff_linter/src/rules/ruff/snapshots/ruff_linter__rules__ruff__tests__non-empty-init-module_RUF067__modules____init__.py.snap", "crates/ruff_linter/src/rules/ruff/snapshots/ruff_linter__rules__ruff__tests__strictly_empty_init_modules_ruf067.snap"]
+closed = 2026-10-01
+kind = "missing-behaviour"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/27416"
+pull = 28679
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-23: SIM117 should report nested async with statements even when they sit inside an outer sync with.
+# issue opened 2026-08-16, fix opened 2026-08-18, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_simplify/rules/ast_with.rs (134 lines); request from oldest of 2 edit records.
+# reading notes: Tests also cover sync-under-async and nested async under an exempt asyncio.timeout parent; a fix that
+# defers to the parent only when the parent can merge covers all, a narrower async-mismatch check would miss the
+# timeout case.
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/flake8_simplify/SIM117.py
+[[situation]]
+id = "ruff-23"
+request = """
+SIM117 false negative for nested async context managers beneath a sync with parent
+
+### Summary
+
+Please check the snippet below. SIM117 is supposed to be triggered in both cases of consecutive `async with` usage. However it is not triggered if consecutive `async with`s are wrapped by sync `with`:
+
+
+```python
+import asyncio
+import contextlib
+
+
+@contextlib.asynccontextmanager
+async def mycontext():
+    yield None
+
+
+async def main():
+    with contextlib.nullcontext() as ctx:
+        # does not trigger SIM117
+        async with mycontext() as actx1:
+            async with mycontext() as actx2:
+                print(ctx, actx1, actx2)
+
+    # triggers SIM117
+    async with mycontext() as actx1:
+        async with mycontext() as actx2:
+            print(ctx, actx1, actx2)
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
+```
+
+Observed behavior:
+
+```
+$ ruff check --output-format concise ./context.py
+context.py:17:5: SIM117 [*] Use a single `with` statement with multiple contexts instead of nested `with` statements
+Found 1 error.
+[*] 1 fixable with the `--fix` option.
+```
+
+Expected behavior:
+
+Found 2 errors.
+
+### Version
+
+ruff 0.16.2"""
+start = "9e181d41f5f53878cd80e953bca91147947d39ef"
+fix = "a94bcd1b83924c3f6c2d42ef042ea05e14c7662d"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/flake8_simplify/SIM117.py", "crates/ruff_linter/src/rules/flake8_simplify/snapshots/ruff_linter__rules__flake8_simplify__tests__multiple-with-statements_SIM117.py.snap"]
+closed = 2026-09-15
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/27800"
+pull = 27821
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-24: The formatter must flip string-literal quotes inside interpolations nested in an f-string format spec, as
+# it does for ordinary interpolations, so output stays valid before Python 3.12.
+# issue opened 2026-09-01, fix opened 2026-09-02, squash (or single commit); source files:
+# crates/ruff_python_formatter/src/context.rs, crates/ruff_python_formatter/src/other/f_string.rs,
+# crates/ruff_python_formatter/src/other/interpolated_string_element.rs,
+# crates/ruff_python_formatter/src/other/t_string.rs, crates/ruff_python_formatter/src/string/implicit.rs (81 lines);
+# request from oldest of 2 edit records.
+# reading notes: Issue offers flipping inner quotes or keeping the outer quote; tests pin flipping, the issue's first
+# and consistent option. Small doubt.
+# added to the candidate's hidden tests:
+# crates/ruff_python_formatter/resources/test/fixtures/ruff/expression/nested_string_quote_style.py
+[[situation]]
+id = "ruff-24"
+request = """
+Formatter reuses outer quote in f-string format-spec interpolations, emitting pre-3.12 invalid syntax with target-version py311
+
+## Summary
+
+`ruff format` changes an f-string's outer quotes from `'` to `"` and correctly flips the quotes of string literals in normal interpolations, but string literals in interpolations nested **inside a format spec** keep their `"` quotes. The result reuses the outer quote character inside the f-string, which is a syntax error before Python 3.12 (PEP 701) — even when targeting Python 3.11.
+
+## Reproduction (ruff 0.16.5)
+
+```console
+$ cat mini.py
+a = f'x {d["k"]} y'
+b = f'x {v:,.{d["n"]}f} y'
+$ ruff format --isolated --target-version py311 mini.py
+1 file reformatted
+$ cat mini.py
+a = f"x {d['k']} y"
+b = f"x {v:,.{d["n"]}f} y"
+```
+
+`a` is handled correctly (inner quotes flipped to `'`). In `b`, the interpolation inside the format spec keeps `"` and now reuses the outer quote.
+
+ruff's own parser rejects the output:
+
+```console
+$ ruff check --isolated --target-version py311 --select E9 mini.py
+invalid-syntax: Cannot reuse outer quote character in f-strings on Python 3.11 (syntax was added in Python 3.12)
+```
+
+CPython 3.11 rejects it the same way. Also reproduces without an explicit `--target-version` when `pyproject.toml` has `requires-python = ">=3.11"`.
+
+## Expected
+
+Per the formatter docs (quote alternation for nested literals when targeting < 3.12; "Ruff prioritizes preventing syntax errors"), the inner quotes should be flipped to `'` — as already happens for interpolations outside format specs — or the outer quote left unchanged.
+
+## Environment
+
+ruff 0.16.5, macOS (arm64), also reproduced via `uv tool run ruff@0.16.5`."""
+start = "b6fec44b027d1c4ddbcd1862333f5310fa3d9969"
+fix = "b3fb43af25f3d07758f953ce20ec900fc8812da2"
+hidden_tests = ["crates/ruff_python_formatter/resources/test/fixtures/ruff/expression/nested_string_quote_style.py", "crates/ruff_python_formatter/tests/snapshots/format@expression__fstring.py.snap", "crates/ruff_python_formatter/tests/snapshots/format@expression__nested_string_quote_style.py.snap"]
+closed = 2026-09-07
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/28218"
+pull = 28259
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-25: The ISC003 fix should be marked unsafe when removing the + would turn a statement into a docstring.
+# issue opened 2026-08-22, fix opened 2026-08-22, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_implicit_str_concat/mod.rs,
+# crates/ruff_linter/src/rules/flake8_implicit_str_concat/rules/explicit.rs (58 lines); request from body (never
+# edited).
+# reading notes: New snapshot test is registered in src mod.rs (listed in src_files); harness must apply that test
+# case.
+# added to the candidate's hidden tests:
+# crates/ruff_linter/resources/test/fixtures/flake8_implicit_str_concat/ISC003_docstring.py,
+# crates/ruff_linter/src/rules/flake8_implicit_str_concat/mod.rs
+[[situation]]
+id = "ruff-25"
+request = """
+ISC003 fix is not safe when it creates a docstring
+
+### Summary
+
+The fix for [`explicit-string-concatenation` (ISC003)](https://docs.astral.sh/ruff/rules/explicit-string-concatenation/) should not be marked safe when it would convert a non-docstring into a docstring, because that changes the program’s behavior. [Example](https://play.ruff.rs/6d716069-d2d8-4b57-9144-e81f886e403e):
+
+```console
+$ cat >isc003.py <<'# EOF'
+(
+    "docstring"
+    + "?"
+)
+print(f"{__doc__=}")
+# EOF
+
+$ python isc003.py
+__doc__=None
+
+$ ruff --isolated check --select ISC003 isc003.py --fix
+Found 1 error (1 fixed, 0 remaining).
+
+$ cat isc003.py
+(
+    "docstring"
+     "?"
+)
+print(f"{__doc__=}")
+
+$ python isc003.py
+__doc__='docstring?'
+```
+
+### Version
+
+ruff 0.16.4 (11c76bf48 2026-08-20)"""
+start = "aee4f2672ce267d38b5f07cdea8f40465eb4d5c9"
+fix = "e794f53b59c6d5a200e3cb9623009fddb29f1218"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/flake8_implicit_str_concat/ISC003_docstring.py", "crates/ruff_linter/src/rules/flake8_implicit_str_concat/mod.rs", "crates/ruff_linter/src/rules/flake8_implicit_str_concat/snapshots/ruff_linter__rules__flake8_implicit_str_concat__tests__explicit-string-concatenation_ISC003_docstring.py.snap"]
+closed = 2026-09-03
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/27979"
+pull = 27981
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-26: PT017 reports the same assertion on an exception twice and should report it once.
+# issue opened 2026-08-19, fix opened 2026-08-20, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_pytest_style/rules/assertion.rs (31 lines); request from body (never edited).
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/flake8_pytest_style/PT017.py
+[[situation]]
+id = "ruff-26"
+request = """
+PT017 triggers twice
+
+### Summary
+
+```
+Found assertion on exception `e` in `except` block, use `pytest.raises()` instead (PT017) [Ln 5, Col 9]
+Found assertion on exception `e` in `except` block, use `pytest.raises()` instead (PT017) [Ln 5, Col 9]
+```
+
+```py
+def test() -> None:
+    try:
+        print(1 / 0)
+    except ZeroDivisionError as e:
+        assert len(e.args) == 1, e.args
+
+```
+
+```toml
+preview = false
+builtins = []
+target-version = "py310"
+line-length = 88
+indent-width = 4
+
+[lint]
+allowed-confusables = []
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+extend-select = []
+extend-fixable = []
+external = []
+ignore = []
+select = [ "PT017" ]
+
+[format]
+indent-style = "space"
+quote-style = "double"
+```
+
+[Playground](https://play.ruff.rs/dba464ca-5a43-49db-9ebe-1814dee7dd8f)
+
+### Version
+
+_No response_"""
+start = "80b4891b64cb916dce080e8fa15af5c2179d776a"
+fix = "6d6e35d03a72d23d3b0f23fb348692b03c9b81b6"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/flake8_pytest_style/PT017.py", "crates/ruff_linter/src/rules/flake8_pytest_style/snapshots/ruff_linter__rules__flake8_pytest_style__tests__PT017.snap"]
+closed = 2026-09-03
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/27870"
+pull = 27918
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-27: B031 panics when a groupby group is consumed in a match subject such as `match list(group)`.
+# issue opened 2026-07-08, fix opened 2026-08-15, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_bugbear/rules/reuse_of_groupby_generator.rs (9 lines); request from body (never
+# edited).
+# reading notes: Tests also assert B031 diagnostics in match arms and tuple subjects, not only no panic; likely the
+# existing branch logic once the subject is handled.
+# added to the candidate's hidden tests: crates/ruff_linter/resources/test/fixtures/flake8_bugbear/B031.py
+[[situation]]
+id = "ruff-27"
+request = """
+Panic: `reuse-of-groupby-generator` (B031) + `match list(group)`
+
+### Summary
+
+The `reuse-of-groupby-generator` rule results in a panic when running on a `match` statement in a specific constellation. Minimal repro:
+```
+from itertools import groupby
+
+
+for key, group in groupby([]):
+    match list(group):
+        case _:
+            pass
+```
+Ruff invocation:
+```
+uvx --python 3.14.6 ruff check --isolated --select B031
+panic: Panicked at crates/ruff_linter/src/rules/flake8_bugbear/rules/reuse_of_groupby_generator.rs:99:30 when checking `/home/joergherbel/tmp/B031_ruff_crash/repro.py`: `called `Option::unwrap()` on a `None` value`
+--> repro.py:1:1
+info: This indicates a bug in Ruff.
+info: If you could open an issue at https://github.com/astral-sh/ruff/issues/new?title=%5Bpanic%5D, we'd be very appreciative!
+info: run with `RUST_BACKTRACE=1` environment variable to show the full backtrace information
+
+Found 1 error.
+error: Panic during linting indicates a bug in Ruff. If you could open an issue at:
+
+https://github.com/astral-sh/ruff/issues/new?title=%5BLinter%20panic%5D
+
+...with the relevant file contents, the `pyproject.toml` settings, and the stack trace above, we'd be very appreciative!
+```
+I don't have a `pyproject.toml` in the cwd. Note that this workaround passes:
+```
+from itertools import groupby
+
+
+for key, group in groupby([]):
+    group_list = list(group)
+    match group_list:
+        case _:
+            pass
+```
+Playground link: https://play.ruff.rs/0e4ad728-f221-4db1-abce-0d91e7b56dd8
+
+### Version
+
+ruff 0.15.20"""
+start = "ee3e08772a51f4fd8a8ffe0789ecd0aac984842e"
+fix = "e837e8bf7738cb97dce61b7efe874c831a5ccd9a"
+hidden_tests = ["crates/ruff_linter/resources/test/fixtures/flake8_bugbear/B031.py", "crates/ruff_linter/src/rules/flake8_bugbear/snapshots/ruff_linter__rules__flake8_bugbear__tests__reuse-of-groupby-generator_B031.py.snap"]
+closed = 2026-08-28
+kind = "crash"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/26624"
+pull = 27781
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-28: ASYNC230 (and PLW1514) should recognise builtins.open, not only bare open.
+# issue opened 2026-08-24, fix opened 2026-08-25, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_async/rules/blocking_open_call.rs,
+# crates/ruff_linter/src/rules/pylint/rules/unspecified_encoding.rs (6 lines); request from body (never edited).
+# reading notes: filed by fixer. Tests also cover `from builtins import open as x` and io.open.
+[[situation]]
+id = "ruff-28"
+request = """
+blocking-open-call-in-async-function (ASYNC230) does not trigger on builtins.open
+
+```python
+import builtins
+
+async def f():
+    open("x")           # ASYNC230
+    builtins.open("x")  # Missed
+    input()             # ASYNC250
+    builtins.input()    # ASYNC250
+```
+
+These two rules are closely analogous but only one catches use through `builtins`.
+
+Incidentally this also affects the `unspecified-encoding` error."""
+start = "947179d7c6312e1ad3255f590fe39e3b7ebd4411"
+fix = "1f7015ee7948ea457d3bffe5353651ca9cf92484"
+hidden_tests = ["crates/ruff_linter/resources/mdtest/flake8-async/blocking-open-call-in-async-function.md", "crates/ruff_linter/resources/mdtest/pylint/unspecified-encoding.md"]
+closed = 2026-08-28
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/28012"
+pull = 28021
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# ruff-29: DTZ901 should still flag datetime.min/max when followed by .replace(tzinfo=None).
+# issue opened 2026-08-24, fix opened 2026-08-25, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_datetimez/rules/datetime_min_max.rs (6 lines); request from body (never edited).
+# reading notes: filed by fixer.
+[[situation]]
+id = "ruff-29"
+request = """
+datetime-min-max (DTZ901) is fooled by `tzinfo=None`
+
+### Summary
+
+```python
+from datetime import datetime
+
+datetime.min.replace(tzinfo=None)                      # Missed
+datetime.max.replace(tzinfo=None)                      # Missed
+datetime.strptime("2026", "%Y").replace(tzinfo=None)    # DTZ007
+```
+
+The DTZ901 / datetime-min-max lint should alert that a naive datetime is being used here, but it doesn't. The analogous DTZ007 rule does do this correctly for the strptime call.
+
+### Version
+
+0.16.4"""
+start = "3f5e494bd24671d346d3ebbae49c0be275d77e26"
+fix = "88b8c7a504caf06387cc8697618820e9a0be2d23"
+hidden_tests = ["crates/ruff_linter/resources/mdtest/flake8-datetimez/datetime-min-max.md"]
+closed = 2026-08-27
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/28013"
+pull = 28022
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# ruff-30: DTZ007 should not flag strptime results converted to aware datetimes via a .replace(...).astimezone()
+# chain.
+# issue opened 2026-08-24, fix opened 2026-08-25, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_datetimez/rules/call_datetime_strptime_without_zone.rs (10 lines); request from
+# body (never edited).
+# reading notes: filed by fixer. Tests also require replace(tzinfo=None) without astimezone and a passed bound method
+# to stay flagged.
+[[situation]]
+id = "ruff-30"
+request = """
+call-datetime-strptime-without-zone (DTZ007) false positive with safe method chain
+
+### Summary
+
+```python
+from datetime import datetime
+
+datetime.now().replace(microsecond=0).astimezone()                  # Accepted
+datetime.strptime("2026", "%Y").replace(microsecond=0).astimezone() # DTZ007
+```
+
+Both of these produce aware datetimes, but DTZ007 still alerts on the second line. An analogous bug was fixed in #15998.
+
+### Version
+
+0.16.4"""
+start = "83d5e644b9cb4f1c3cf3348d4796d667f2074aa1"
+fix = "d1e842ea37b6a922d1351dc3b6599ae47c831e4c"
+hidden_tests = ["crates/ruff_linter/resources/mdtest/flake8-datetimez/call-datetime-strptime-without-zone.md"]
+closed = 2026-08-25
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/28014"
+pull = 28023
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# ruff-31: FURB131 delete-full-slice should apply only to lists, not dicts.
+# issue opened 2026-07-27, fix opened 2026-08-13, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/refurb/rules/delete_full_slice.rs (21 lines); request from body (never edited).
+[[situation]]
+id = "ruff-31"
+request = """
+`delete-full-slice` (FURB131) should not apply to `dict`s
+
+### Summary
+
+[`delete-full-slice` (FURB131)](https://docs.astral.sh/ruff/rules/delete-full-slice/) should not apply to `dict`s, because slicing `dict`s raises an error, although the rule documentation says it works. The upstream Refurb rule only applies to `list`s. [Example](https://play.ruff.rs/6843ace6-2a9b-4e0e-b501-ac6b1216751c):
+```console
+$ cat >furb131.py <<'# EOF'
+names = {"key": "value"}
+del names[:]
+# EOF
+
+$ python furb131.py 2>&1 | tail -n 1
+KeyError: slice(None, None, None)
+
+$ refurb --enable FURB131 furb131.py; echo $?
+0
+
+$ ruff --isolated check --preview --select FURB131 furb131.py --unsafe-fixes --fix
+Found 1 error (1 fixed, 0 remaining).
+
+$ cat furb131.py
+names = {"key": "value"}
+names.clear()
+
+$ python furb131.py; echo $?
+0
+```
+
+### Version
+
+ruff 0.16.0 (a2635fd8f 2026-07-23)"""
+start = "5226c063128b63ecb3f035fd9a0b0b4b007d615c"
+fix = "89ac93b12650197c9e262780a34c6ebe66657999"
+hidden_tests = ["crates/ruff_linter/src/rules/refurb/snapshots/ruff_linter__rules__refurb__tests__FURB131_FURB131.py.snap"]
+closed = 2026-08-14
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/27216"
+pull = 27711
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-32: `ruff check --statistics` should hyperlink rule codes to their docs pages like the normal output does.
+# issue opened 2026-08-10, fix opened 2026-08-11, squash (or single commit); source files: crates/ruff/src/printer.rs,
+# crates/ruff_db/src/diagnostic/mod.rs, crates/ruff_db/src/diagnostic/stylesheet.rs (36 lines); request from body
+# (never edited).
+# reading notes: Inline snapshot pins padding outside the link and uses FORCE_HYPERLINK; small doubt on exact layout.
+[[situation]]
+id = "ruff-32"
+request = """
+ruff check --statistics doesn't link rule codes to web pages, unlike plain ruff check
+
+### Summary
+
+When I run `ruff check`, it uses OSC 9 hyperlinks for rule codes (like `UP046`), linking them to web pages (like https://docs.astral.sh/ruff/rules/non-pep695-generic-class/), which is very convenient and I love it!
+
+However when I run `ruff check --statistics`, the rule codes are not hyperlinked, and I find myself running `ruff check --select COPYPASTEDRULECODE` just so that I could click on its hyperlink.
+
+Would you please make `ruff check --statistics` also use OSC 9 hyperlinks?
+
+(I (now) know about `ruff rule`, but reading the not-even-syntax-highlighted markup source in my terminal doesn't spark joy, and I'd rather read a pretty web page.)
+
+### Version
+
+0.16.1"""
+start = "89354973c163300665a0e9f48e3ce922400b2bf1"
+fix = "4d261dd20bd364d802f72fc489d77a8272966024"
+hidden_tests = ["crates/ruff/tests/cli/lint.rs"]
+closed = 2026-08-12
+kind = "missing-behaviour"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/27637"
+pull = 27646
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-33: flake8-bandit subprocess rules should also inspect the command passed as the `args=` keyword, not only the
+# first positional argument.
+# issue opened 2026-08-10, fix opened 2026-08-12, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/flake8_bandit/rules/shell_injection.rs (29 lines); request from body (never edited).
+# reading notes: Tests cover S602/S603/S607/S609 and keep `*args` flagged (pre-existing behaviour a naive
+# find_argument_value fix would lose).
+[[situation]]
+id = "ruff-33"
+request = """
+False positives when passing `subprocess` command as keyword argument
+
+### Summary
+
+Various [`flake8-bandit`-derived rules](https://docs.astral.sh/ruff/rules/#flake8-bandit-s) are triggered when calling one of the `subprocess` functions with a non-literal value as the first argument, as this is considered untrusted input. However, passing the array of command tokens as a keyword argument, i.e. `args=[...]`, silences the violation!
+
+```console
+➜ ruff check --select=S603 - <<< 'subprocess.check_output([foo])'
+All checks passed!
+➜ ruff check --select=S603 - <<< 'import subprocess; foo = input(); subprocess.check_output([foo])'
+S603 `subprocess` call: check for execution of untrusted input
+ --> -:1:35
+  |
+1 | import subprocess; foo = input(); subprocess.check_output([foo])
+  |                                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+Found 1 error.
+```
+
+This appears to be due to the use of `call.arguments.args.first()` in this file:
+https://github.com/astral-sh/ruff/blob/5b48a040974781ba90b47c8df628f8fd9b6c95dd/crates/ruff_linter/src/rules/flake8_bandit/rules/shell_injection.rs#L321-L327
+
+### Version
+
+ruff 0.16.2 (5b48a0409 2026-08-07)"""
+start = "8644a5eef62c19e1514cc6b2b609e89627fde505"
+fix = "ec02d6d6b095e3e9d6f8c1abcd0bb03a1302eb12"
+hidden_tests = ["crates/ruff_linter/resources/mdtest/flake8-bandit/rules.md"]
+closed = 2026-08-12
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/27631"
+pull = 27687
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-34: PYI041 should not rewrite `int | float` on the dispatch parameter of a functools.singledispatch .register
+# implementation.
+# issue opened 2026-07-30, fix opened 2026-07-30, squash (or single commit); source files:
+# crates/ruff_linter/src/checkers/ast/analyze/statement.rs,
+# crates/ruff_linter/src/rules/flake8_pyi/rules/redundant_numeric_union.rs (17 lines); request from oldest of 5 edit
+# records.
+# reading notes: Tests also: other params still flagged, explicit register(type) still flagged, singledispatchmethod
+# skips self; existing helper is_singledispatch_implementation fits.
+[[situation]]
+id = "ruff-34"
+request = """
+redundant-numeric-union (PYI041) --fix incorrect fix for functools.singledispatch registered function
+
+### Summary
+
+Applying PYI041 --fix will replace a numeric union like `int | float` with `float`, but this is an incorrect fix for a method that is annotated with `@func.dispatch` for a functools.singledispatch function.
+Minimal example code:
+```
+import functools
+
+@functools.singledispatch
+def int_or_float(value: object) -> str:
+    return False
+
+@int_or_float.register
+def _(value: int | float):
+    return True
+
+assert int_or_float(3)
+```
+Repro script:
+
+[repro-ruff-redundant-numeric-union-singledispatch.sh](https://github.com/user-attachments/files/30560754/repro-ruff-redundant-numeric-union-singledispatch.sh)
+
+### Version
+
+_No response_"""
+start = "7111e134a4fee39b990c6fded8799b93d0497953"
+fix = "31cb63ae5ec2dd8779e7931fee6e9400f02b53f4"
+hidden_tests = ["crates/ruff_linter/resources/mdtest/flake8-pyi/redundant-numeric-union.md"]
+closed = 2026-07-31
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/27333"
+pull = 27335
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-35: RUF065 should not flag eager conversions in logging arguments that follow an unpacked *argument, since the
+# specifier mapping is unknown.
+# issue opened 2026-07-16, fix opened 2026-07-17, squash (or single commit); source files:
+# crates/ruff_linter/src/rules/ruff/rules/logging_eager_conversion.rs (8 lines); request from body (never edited).
+# reading notes: Tests keep conversions before the starred argument flagged.
+[[situation]]
+id = "ruff-35"
+request = """
+RUF065 false positive with unpacked argument
+
+### Summary
+
+[`logging-eager-conversion` (RUF065)](https://docs.astral.sh/ruff/rules/logging-eager-conversion/) emits a false positive when the argument with the putatively unnecessary conversion follows an unpacked argument. The rule assumes the unpacked argument corresponds to exactly one format specifier, but it might not. The suggested fix can change the program’s behavior. [Example](https://play.ruff.rs/2559d0e5-776b-4974-a991-f297581202fa):
+```console
+$ cat >ruf065.py <<'# EOF'
+import logging
+logging.warning("%s%s%s%s %r", *"1234", str(5))
+# EOF
+
+$ python ruf065.py
+WARNING:root:1234 '5'
+
+$ ruff --isolated check --preview --select RUF065 ruf065.py 
+logging-eager-conversion: Unnecessary `str()` conversion when formatting with `%s`
+ --> ruf065.py:2:41
+  |
+1 | import logging
+2 | logging.warning("%s%s%s%s %r", *"1234", str(5))
+  |                                         ^^^^^^
+  |
+
+Found 1 error.
+
+$ sed -i.bak 's/str//' ruf065.py  # This is implied to be the fix
+
+$ python ruf065.py
+WARNING:root:1234 5
+```
+
+### Version
+
+ruff 0.15.22 (0177a7e0d 2026-07-16)"""
+start = "d297b16535153a7c70e58b243d008de6dcb05bd4"
+fix = "71eb5e5a489a6854058f331607e192ac4c69697f"
+hidden_tests = ["crates/ruff_linter/resources/mdtest/ruff/logging-eager-conversion.md"]
+closed = 2026-07-24
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/26912"
+pull = 26959
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# ruff-36: Generated Ruff suppression comments (RUF105 fix, docs) should be written as `# ruff: ignore[...]` with a
+# space after the colon.
+# issue opened 2026-07-22, fix opened 2026-07-23, squash (or single commit); source files: crates/ruff/src/args.rs,
+# crates/ruff_linter/src/noqa.rs, crates/ruff_linter/src/rules/ruff/rules/noqa_comments.rs,
+# crates/ruff_linter/src/rules/ruff/rules/rule_codes_in_suppression_comments.rs, crates/ruff_linter/src/suppression.rs
+# (104 lines); request from body (never edited).
+# reading notes: Tests also change --add-ignore output and diagnostic messages; server test is in-process LSP, not a
+# browser. Issue states the exact form.
+[[situation]]
+id = "ruff-36"
+request = """
+Inconsistent spacing in new `# ruff:{ignore,file-ignore,disable,enable}` comments
+
+### Summary
+
+I was testing out the following rules:
+
+- `RUF105` (`noqa-comments`)
+- `RUF106` (`rule-codes-in-suppression-comments`)
+
+I've noticed that `RUF105` will convert to the new suppression comment without a space after the colon, i.e. `# ruff:ignore[...]`. This lack of space character seems to be consistent with the documentation for the rules linked above, one example showing:
+
+> This rule applies to `ruff:ignore`, `ruff:file-ignore`, `ruff:disable`, and `ruff:enable` comments.
+
+But this is not consistent with the documentation on suppression and action comments in general for both ruff and ty:
+
+- https://docs.astral.sh/ruff/linter/#error-suppression
+- https://docs.astral.sh/ruff/linter/#isort-action-comments
+- https://docs.astral.sh/ruff/formatter/#format-suppression
+- https://docs.astral.sh/ty/suppression/
+
+We see the following:
+
+- `# noqa: ...`, `# ruff: noqa: ...`
+- `# isort: skip_file`, `# isort: on`, `# isort: off`, `# isort: skip`, and `# isort: split`
+- `# fmt: on`, `# fmt: off`, `# fmt: skip`
+- `# ty: ignore[...]`, `# type: ignore[ty:...]`, `# type: ignore[...]`
+
+Many other existing tools typically also have a space after the colon as the standard form (while accepting it being missing): `black`, `isort`, `mypy`, `pyrefly`, `pyright`, etc.
+
+Would it be possible to make this consistent before these rules are released out of preview? This would mean:
+
+1. Update any documentation to change the following:
+  - `# ruff:ignore[...]` → `# ruff: ignore[...]`
+  - `# ruff:file-ignore[...]` → `# ruff: file-ignore[...]`
+  - `# ruff:disable[...]` → `# ruff: disable[...]`
+  - `# ruff:enable[...]` → `# ruff: enable[...]`
+2. Update `RUF105` to write `# ruff: ignore[...]` and `# ruff: file-ignore[...]`
+
+### Version
+
+ruff 0.15.22"""
+start = "85c93ad7d316e0a4b0d7d5e263ce3e1d8e3c603f"
+fix = "d96eab07b4aa9d0e2f2377212dc15d2d9b7a9835"
+hidden_tests = ["crates/ruff/tests/cli/lint.rs", "crates/ruff_linter/resources/mdtest/ruff/noqa-comments.md", "crates/ruff_server/tests/e2e/diagnostics.rs"]
+closed = 2026-07-23
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/astral-sh/ruff/issues/27114"
+pull = 27123
+self_filed = false
+bot_filed = false
+security_trap = false

@@ -1,0 +1,2179 @@
+# caddy: caddyserver/caddy, go, proposed project of set 2026-12 (fulltest PLAN sections 3 and 4).
+# Settings: written by reading the project's CI and docs at the oldest and newest start commit, nothing run;
+# every command marked `unverified` is for the admission session to try and fix. Notes: notes/caddy.md.
+# Situations: every candidate of bench-candidates/caddy.toml (REPORT-window-rule.md, 2026-11-26), in its order,
+# all 29 of them.
+# half is `work` for every candidate until the split after admission and the hardness runs (cloud/README.md).
+# hidden_tests: the fix's changed files (start..fix, compare API) that match [project] tests or the travel
+# globs ["*/testdata/*", "testdata/*", "caddytest/caddytest.go", "caddytest/*.crt", "caddytest/*.key", "caddytest/*.cer", "caddytest/*.pem", "internal/testmocks/*"],
+# and not []; deleted files left out.
+# self_filed: the issue's author opened the fix. bot_filed: the issue's author is an automation account
+# (a login ending in bot or -ci, or turso-github-handyman, roboturso). security_trap: the reading pass's
+# flag for a request whose natural fix invites a flaw. kind race is the race flag.
+
+# caddy: settings for Rail's bench (no [[situation]] tables; those are written elsewhere).
+# Read at the oldest start b2be548275c99cd061ec1c2f9c27eedae64a17b8 (caddy-29, go 1.25.1) and the newest
+# 16618f454ca6f78f37dfd85a90573d8ffd43c1c8 (caddy-01, go 1.26.0), plus ci.yml at five starts between. See caddy.md.
+# Go mechanics shared by the four Go projects (GO-COMMON.md): the [commands] env table is set literally, so the
+# absolute GOMODCACHE and GOCACHE live in $BENCH_CACHE/go-env.sh, which setup writes and every bash shell sources
+# through BASH_ENV (and every command below sources it again, explicitly).
+
+[project]
+name = "caddy"
+repo = "https://github.com/caddyserver/caddy"
+language = "go"
+package = "github.com/caddyserver/caddy/v2"
+# Go test files, and the Caddyfile adapt cases: TestCaddyfileAdaptToJSON runs every file in caddyfile_adapt/ as a
+# subtest named after the file (.caddyfiletest and a few .txt).
+tests = ["*_test.go", "caddytest/integration/caddyfile_adapt/*"]
+# clash: the Go default "dir", so an arm's new test file in a hidden test's folder cannot redeclare a hidden Test or
+# helper name. Its cost (caddy.md): the grade deletes, not reverts, an arm's edited sibling test file, and three hidden
+# files need a sibling: caddy-17 (encode_harness_test.go helpers), caddy-27 (resetDynamicHosts in
+# dynamic_upstreams_test.go), caddy-04 (TestMain in formatter_test.go).
+clash = "dir"
+build_dirs = []
+
+[commands]
+# from: .github/workflows/ci.yml@16618f454c ("Get dependencies": go get -v -t -d ./...; env GOFLAGS
+#       -tags=nobadger,nomysql,nopgx), go.mod@b2be548275 (go 1.25.1) and @16618f454c (go 1.26.0), no toolchain line;
+#       the offline toolchain switch from Go 1.24.7's cmd/go source (toolchain/select.go, modfetch/fetch.go, sumdb.go).
+# unverified: never run; module download by go mod download + go list -deps -test instead of CI's go get, and the
+#       offline switch to the cached go1.25.1/go1.26.0 is reasoned from source, not tried.
+setup = '''
+set -euo pipefail
+mkdir -p "$BENCH_CACHE"
+t=$(mktemp "$BENCH_CACHE/.go-env.XXXXXX")
+printf '%s\n' 'export GOMODCACHE="$BENCH_CACHE/gomod"' 'export GOCACHE="$BENCH_CACHE/gocache"' > "$t"
+mv -f "$t" "$BENCH_CACHE/go-env.sh"
+. "$BENCH_CACHE/go-env.sh"
+size=$(du -sm "$GOCACHE" 2>/dev/null | cut -f1 || true)
+if [ "${size:-0}" -gt 6000 ]; then echo "setup: GOCACHE is ${size} MB, cleaning it"; go clean -cache; fi
+export GOPROXY=https://proxy.golang.org,direct
+go version
+go mod download
+go list -deps -test ./... > /dev/null
+GOPROXY=off go list -deps -test ./... > /dev/null
+git diff --quiet -- go.mod go.sum || { git diff --stat -- go.mod go.sum; git checkout -- go.mod go.sum; }
+if [ -n "$(git status --porcelain)" ]; then git status --porcelain | head -20; echo "setup left changes in the copy"; exit 1; fi
+'''
+# from: AGENTS.md@16618f454c ("Integration tests: go test ./caddytest/integration/...", no -short: caddytest's
+#       InitServer skips every integration test under -short); the -run selection of the hidden files' own Test names
+#       and the caddyfile_adapt subtest selection are ours.
+# unverified: never run. The two guards (a run that ran nothing, and caddytest's "failed integration prerequisites"
+#       skip when port 2999/9080/9443 is taken) turn a silent skip into a failure.
+test_files = '''
+. "$BENCH_CACHE/go-env.sh"
+list=""
+for f in {files}; do
+  [ -f "$f" ] || continue
+  case "$f" in
+    caddytest/integration/caddyfile_adapt/*)
+      n=$(basename "$f" | sed 's/[.]/\\./g')
+      list="$list""adapt $n"$'\n' ;;
+    *_test.go)
+      n=$(grep -ohE '^func (Test|Fuzz|Example)[A-Za-z0-9_]*\(' "$f" | sed -E 's/^func //; s/\($//' | grep -vx TestMain | paste -sd'|' -)
+      list="$list$(dirname "$f") ${n:-.*}"$'\n' ;;
+  esac
+done
+[ -n "$list" ] || { echo "no Go test file or adapt case among: {files}"; exit 2; }
+rc=0
+for d in $(printf '%s' "$list" | cut -d' ' -f1 | sort -u); do
+  names=$(printf '%s' "$list" | awk -v d="$d" '$1 == d { print $2 }' | paste -sd'|' -)
+  if [ "$d" = adapt ]; then
+    pkg=./caddytest/integration; run="^TestCaddyfileAdaptToJSON\$/^($names)\$"
+  else
+    pkg="./$d"; run="^($names)\$"
+  fi
+  out=$(go test -count=1 -v -run "$run" "$pkg" 2>&1); st=$?
+  printf '%s\n' "$out"
+  if grep -qE 'no tests to run|\[no test files\]' <<< "$out"; then echo "FAIL: no hidden test ran in $pkg"; st=1; fi
+  if grep -q 'failed integration prerequisites' <<< "$out"; then echo "FAIL: caddytest skipped (ports 2999/9080/9443 taken?)"; st=1; fi
+  [ $st -eq 0 ] || rc=1
+done
+exit $rc
+'''
+# from: .github/workflows/ci.yml@16618f454c ("go test -coverprofile=cover-profile.out -short -race ./...": -short
+#       kept, -race and coverage left out); AGENTS.md@16618f454c ("go test -race -short ./...").
+# unverified: never run; the walk up to the nearest folder holding .go files is ours.
+test_package = '''
+. "$BENCH_CACHE/go-env.sh"
+p={package}
+while [ "$p" != . ] && ! compgen -G "$p/*.go" > /dev/null; do p=$(dirname "$p"); done
+go test -count=1 -short "./$p"
+'''
+# The folder of the changed file, cut at testdata/ (a Go package is a folder); a root file gives "." (the root
+# package caddy, about 20 s).
+package_of = 'regex:^(.*?)(?:/testdata/.*|/[^/]*)$'
+# from: Go's testing output: "--- FAIL: TestX (0.00s)", subtests indented "    --- FAIL: TestX/sub (0.00s)".
+failed = '^\s*--- FAIL: (\S+)'
+timeout_minutes = 30
+# from: ci.yml@16618f454c env GOFLAGS '-tags=nobadger,nomysql,nopgx' and GODEBUG http2xconnect=1 (CI sets it from
+# about 2026-10-09; older toolchains ignore an unknown GODEBUG key). GOMODCACHE/GOCACHE are not here: the table is
+# set literally and Go wants absolute paths; go-env.sh sets them. GOSUMDB must stay sum.golang.org: a cached
+# golang.org/toolchain module is still checked against the (cached) checksum database, and GOSUMDB=off fails that.
+env = { GOTOOLCHAIN = "auto", GOPROXY = "off", GOSUMDB = "sum.golang.org", GOFLAGS = "-mod=mod -tags=nobadger,nomysql,nopgx", GODEBUG = "http2xconnect=1", BASH_ENV = "$BENCH_CACHE/go-env.sh", BASH_DEFAULT_TIMEOUT_MS = "1800000", BASH_MAX_TIMEOUT_MS = "7200000", GOMODCACHE = "/srv/rail-bench/cache/caddy/gomod", GOCACHE = "/srv/rail-bench/cache/caddy/gocache" }
+[rail.config.commands]
+# Rail's setup in a new worktree, offline: modules, toolchain and build cache are shared through $BENCH_CACHE, so
+# this only checks that the toolchain and modules resolve offline, and compiles the worktree once.
+# from: AGENTS.md@16618f454c (Build & Test: go build). unverified: offline in a fresh worktree not tried.
+setup = '''
+. "$BENCH_CACHE/go-env.sh"
+go version && go build ./...
+'''
+# Fast part always: gofmt of the changed .go files and go build ./... . Then go vet and go test -short of each
+# package the branch changes against $RAIL_BASE.
+# from: AGENTS.md@16618f454c (go test -race -short ./...; golangci-lint run, which enables govet), lint.yml@16618f454c
+# (golangci-lint "latest"). unverified: golangci-lint left out (not installed, CI's version is "latest", so it cannot
+# be pinned offline); plain go vet is the part of it that ships with Go; timings estimated.
+verify = '''
+set -euo pipefail
+. "$BENCH_CACHE/go-env.sh"
+base="${RAIL_BASE:-refs/heads/main}"
+changed=$( { git diff --name-only "$base" --; git ls-files --others --exclude-standard; } | grep -vE '^\.(rail|claude)/' | sort -u || true)
+gofiles=$(printf '%s\n' "$changed" | grep -E '\.go$' | while read -r f; do if [ -f "$f" ]; then echo "$f"; fi; done || true)
+if [ -n "$gofiles" ]; then
+  bad=$(printf '%s\n' "$gofiles" | xargs gofmt -l)
+  if [ -n "$bad" ]; then echo "gofmt -w needed on: $bad"; exit 1; fi
+fi
+go build ./...
+pkgs=$(printf '%s\n' "$changed" | while read -r f; do
+  [ -n "$f" ] || continue
+  d=$(dirname "$f"); d=${d%%/testdata/*}; d=${d%/testdata}
+  while [ "$d" != . ] && ! compgen -G "$d/*.go" > /dev/null; do d=$(dirname "$d"); done
+  echo "./$d"
+done | sort -u || true)
+if [ -n "$pkgs" ]; then
+  go vet $pkgs
+  go test -count=1 -short $pkgs
+fi
+'''
+timeout_secs = 1800
+setup_timeout_secs = 900
+verify_timeout_secs = 1800
+
+# The bench's additions, the same for every project file of this set:
+# - [commands] env BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS: the Bash tool limits Rail's own
+#   .claude/settings.json gives its worker, given to every child, so a plain arm's Bash tool is not cut at
+#   two minutes while Rail's runs for thirty.
+# - [commands] env GOMODCACHE and GOCACHE: the paths go-env.sh exports, written out for the store
+#   /srv/rail-bench (BENCH_STORE), so a child's Go finds the cached modules and toolchain even if its shell
+#   does not read BASH_ENV.
+# - [rail.config.worker] ladder: the Rail arm of the first run (PLAN section 6, owner 2026-11-25): Sonnet 5.5
+#   medium, then Opus 5.5 medium. It sits here because an arm file can give only one rung (bench/arms.py);
+#   person_ladder and contract stay as Rail's seed has them.
+# - [rail.config.claim] stale_minutes: above the longest Rail command's limit plus save_minutes (10), as
+#   `rail docs config` asks.
+[rail.config.worker]
+ladder = ["claude-sonnet-5-5:medium", "claude-opus-5-5:medium"]
+
+[rail.config.claim]
+stale_minutes = 45
+
+# caddy-01: Clearing a handler read deadline after reading the body should not re-arm read_body as a hard deadline
+# that cancels long requests and truncates their responses.
+# issue opened 2026-11-10, fix opened 2026-11-10, squash (or single commit); source files:
+# modules/caddyhttp/idletimeout.go, modules/caddyhttp/server.go (14 lines); request from body (never edited).
+# reading notes: Body is HTML-pasted and truncated but readable; text names the cause; server test uses 100ms/300ms
+# timing with wide margin.
+[[situation]]
+id = "caddy-01"
+request = """
+v2.11.9: clearing a handler read deadline installs read_body as a hard deadline, truncating responses of requests longer than read_body (regression from #8284)
+
+### Issue Details
+
+<html>
+<body>
+<!--StartFragment--><p style="white-space: pre-wrap; margin-top: 0.1em; margin-bottom: 0.2em; unicode-bidi: plaintext; color: rgb(248, 248, 242); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif; font-size: 13px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; background-color: rgb(33, 34, 44); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;">Since v2.11.9, a handler that calls <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">http.ResponseController(w).SetReadDeadline(time.Time{})</code> after reading the request body gets a hard read deadline of request start + <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">read_body</code> installed on the connection. When the request runs longer than <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">read_body</code>, net/http's background read hits that deadline and cancels the request context. Every write after that is dropped. The client gets <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">200</code>, a truncated body, and a cleanly terminated chunked stream. Nothing is logged.</p><p style="white-space: pre-wrap; margin-top: 0.1em; margin-bottom: 0.2em; unicode-bidi: plaintext; color: rgb(248, 248, 242); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif; font-size: 13px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; background-color: rgb(33, 34, 44); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;">FrankenPHP hits this on every request that reads <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">php://input</code>. In <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">go_read_post</code> it sets a deadline before each body read (<code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">request_body_timeout</code>) and clears it at the end. Frameworks like Slim 3 read <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">php://input</code> on every request, GET included, so any slow endpoint is affected, in both classic and worker mode.</p><p style="white-space: pre-wrap; margin-top: 0.1em; margin-bottom: 0.2em; unicode-bidi: plaintext; color: rgb(248, 248, 242); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif; font-size: 13px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; background-color: rgb(33, 34, 44); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;"><strong>Cause</strong></p><p style="white-space: pre-wrap; margin-top: 0.1em; margin-bottom: 0.2em; unicode-bidi: plaintext; color: rgb(248, 248, 242); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif; font-size: 13px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; background-color: rgb(33, 34, 44); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;">In <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">IdleTimeoutReader.SetReadDeadline</code>, a zero deadline clears <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">handlerDeadline</code>, but <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">ceilingLocked()</code> then returns <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">HardDeadline</code>. That value is installed with <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">Ctrl.SetReadDeadline</code> even though the body has already been fully read. Before #8284, the call went straight to the connection and a zero value removed the deadline. The PR description says "A zero deadline removes the ceiling", but in practice it re-arms <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">read_body</code>.</p><p style="white-space: pre-wrap; margin-top: 0.1em; margin-bottom: 0.2em; unicode-bidi: plaintext; color: rgb(248, 248, 242); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif; font-size: 13px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; background-color: rgb(33, 34, 44); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;"><strong>Reproduction</strong> (FrankenPHP 1.13.5 / Caddy 2.11.9, also with FrankenPHP built against Caddy 2.11.7 for comparison)</p><div class="codeBlockWrapper_-a7MRw" style="position: relative; margin: 8px 0px; color: rgb(248, 248, 242); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif; font-size: 13px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; white-space: normal; background-color: rgb(33, 34, 44); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;"><button class="copyButton_CEmTFw copyButton_-a7MRw" title="Copy code" aria-label="Copy code to clipboard" style="color: rgb(248, 248, 242); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif; font-size: 13px; background: none 0% 0% / auto repeat scroll padding-box border-box rgb(40, 42, 54); border: 0.666667px solid rgba(248, 248, 242, 0.2); cursor: pointer; opacity: 0; display: flex; border-radius: 4px; justify-content: center; align-items: center; padding: 4px; transition: opacity 0.15s, background 0.15s; position: absolute; top: 4px; right: 4px;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon" class="copyIcon_CEmTFw"><path fill-rule="evenodd" d="M15.988 3.012A2.25 2.25 0 0 1 18 5.25v6.5A2.25 2.25 0 0 1 15.75 14H13.5v-3.379a3 3 0 0 0-.879-2.121l-3.12-3.121a3 3 0 0 0-1.402-.791 2.252 2.252 0 0 1 1.913-1.576A2.25 2.25 0 0 1 12.25 1h1.5a2.25 2.25 0 0 1 2.238 2.012ZM11.5 3.25a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 .75.75v.25h-3v-.25Z" clip-rule="evenodd"></path><path d="M3.5 6A1.5 1.5 0 0 0 2 7.5v9A1.5 1.5 0 0 0 3.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L8.44 6.439A1.5 1.5 0 0 0 7.378 6H3.5Z"></path></svg></button><pre style="overflow-x: auto; white-space: pre; color: rgb(248, 248, 242); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(10, 10, 10, 0.4); box-sizing: border-box; border-radius: 4px; max-width: 100%; margin: 0px; padding: 8px;"><code class="language-caddyfile" style="font-family: monospace; color: inherit; background: 0px 0px; padding: 0px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">{
+	servers {
+		timeouts {
+			read_body 60s
+		}
+	}
+}
+:8080 {
+	root * /app/public
+	php_server
+}
+</code></pre></div><div class="codeBlockWrapper_-a7MRw" style="position: relative; margin: 8px 0px; color: rgb(248, 248, 242); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif; font-size: 13px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; white-space: normal; background-color: rgb(33, 34, 44); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;"><button class="copyButton_CEmTFw copyButton_-a7MRw" title="Copy code" aria-label="Copy code to clipboard" style="color: rgb(248, 248, 242); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif; font-size: 13px; background: none 0% 0% / auto repeat scroll padding-box border-box rgb(40, 42, 54); border: 0.666667px solid rgba(248, 248, 242, 0.2); cursor: pointer; opacity: 0; display: flex; border-radius: 4px; justify-content: center; align-items: center; padding: 4px; transition: opacity 0.15s, background 0.15s; position: absolute; top: 4px; right: 4px;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon" class="copyIcon_CEmTFw"><path fill-rule="evenodd" d="M15.988 3.012A2.25 2.25 0 0 1 18 5.25v6.5A2.25 2.25 0 0 1 15.75 14H13.5v-3.379a3 3 0 0 0-.879-2.121l-3.12-3.121a3 3 0 0 0-1.402-.791 2.252 2.252 0 0 1 1.913-1.576A2.25 2.25 0 0 1 12.25 1h1.5a2.25 2.25 0 0 1 2.238 2.012ZM11.5 3.25a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 .75.75v.25h-3v-.25Z" clip-rule="evenodd"></path><path d="M3.5 6A1.5 1.5 0 0 0 2 7.5v9A1.5 1.5 0 0 0 3.5 18h7a1.5 1.5 0 0 0 1.5-1.5v-5.879a1.5 1.5 0 0 0-.44-1.06L8.44 6.439A1.5 1.5 0 0 0 7.378 6H3.5Z"></path></svg></button><pre style="overflow-x: auto; white-space: pre; color: rgb(248, 248, 242); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(10, 10, 10, 0.4); box-sizing: border-box; border-radius: 4px; max-width: 100%; margin: 0px; padding: 8px;"><code class="language-php" style="font-family: monospace; color: inherit; background: 0px 0px; padding: 0px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">&lt;?php
+file_get_contents('php://input');      // any body read, even on GET
+$body = str_repeat('x', 100000);
+sleep(65);                             // &gt; read_body
+header('X-Len: ' . strlen($body));
+echo $body;
+</code></pre></div><p style="white-space: pre-wrap; margin-top: 0.1em; margin-bottom: 0.2em; unicode-bidi: plaintext; color: rgb(248, 248, 242); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif; font-size: 13px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; background-color: rgb(33, 34, 44); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;"><code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">curl -s localhost:8080/ | wc -c</code> returns fewer bytes than <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">X-Len</code> with status 200. With <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">sleep(30)</code> the response is complete.</p>
+Setup | GET/POST of 65 s
+-- | --
+FrankenPHP 1.13.4 (Caddy 2.11.7) | complete
+FrankenPHP 1.13.5 (Caddy 2.11.9), classic | truncated
+FrankenPHP 1.13.5 (Caddy 2.11.9), worker | truncated
+1.13.5 + request_body_timeout 0 | complete
+1.13.5 + read_body 600s | complete
+
+<p style="white-space: pre-wrap; margin-top: 0.1em; margin-bottom: 0.2em; unicode-bidi: plaintext; color: rgb(248, 248, 242); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif; font-size: 13px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; background-color: rgb(33, 34, 44); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;"><strong>Expected:</strong> once the handler clears its deadline after the body is exhausted, no read deadline should remain, or at most the idle deadline used between requests. <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">read_body</code> should not be re-armed for a body that has already been read.</p><p style="white-space: pre-wrap; margin-top: 0.1em; margin-bottom: 0.2em; unicode-bidi: plaintext; color: rgb(248, 248, 242); font-family: -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, Roboto, sans-serif; font-size: 13px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: start; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; background-color: rgb(33, 34, 44); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial;"><strong>Workaround:</strong> <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">php_server { request_body_timeout 0 }</code>, or raise <code style="font-family: monospace; color: rgb(215, 186, 125); background: none 0% 0% / auto repeat scroll padding-box border-box rgba(255, 255, 255, 0.1); padding: 2px 4px; border-radius: 3px; word-break: break-word; font-size: 0.9em;">read_body</code> above the longest request.</p><!--EndFragment-->
+</body>
+</html>
+
+### Assistance Disclosure
+
+_No response_
+
+### If AI was used, describe the extent to which it was used.
+
+_No response_"""
+start = "16618f454ca6f78f37dfd85a90573d8ffd43c1c8"
+fix = "edcdfa0ed88f7dcc1c53720d25218fde9d63eb1e"
+hidden_tests = ["modules/caddyhttp/idletimeout_test.go", "modules/caddyhttp/server_test.go"]
+closed = 2026-11-19
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8399"
+pull = 8400
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# caddy-02: try_files {path} {path}/ =404 should serve the site root / from the root directory index again, as in
+# v2.11.7.
+# issue opened 2026-11-09, fix opened 2026-11-09, squash (or single commit); source files:
+# modules/caddyhttp/fileserver/matcher.go (8 lines); request from body (never edited).
+# reading notes: Clear regression report with table; integration test uses local caddytest server.
+[[situation]]
+id = "caddy-02"
+request = """
+try_files {path} {path}/ =404 returns 404 for the site root / since v2.11.8 (static site; subdirs still served)
+
+### 1. What happened?
+
+Since v2.11.8, `try_files {path} {path}/ =404` returns 404 for the site root `/` on a plain static site, while directory subpaths (`/ru/`), explicit files (`/index.html`) and the 404 path all keep working. v2.11.7 serves `/` fine. Still broken on v2.11.9 and on master.
+
+We hit this in production: the site's Docker image base floated from v2.11.7 to v2.11.9 during a routine rebuild and the homepage alone went dark (fronted by a CDN, so the 404 got cached sitewide for `/`). Because every subpage kept answering 200, the breakage slipped past spot checks for hours.
+
+### 2. What did you expect to happen?
+
+`/` should be served from `<root>/index.html` like on v2.11.7 — the `{path} {path}/` candidate pair resolving `/` via the root directory + index lookup.
+
+### 3. How can it be reproduced?
+
+Caddyfile:
+
+```caddyfile
+:8091 {
+	root * /srv
+	route {
+		try_files {path} {path}/ =404
+		file_server
+	}
+}
+```
+
+Files: `/srv/index.html` (`<h1>root</h1>`) and `/srv/ru/index.html` (`<h1>ru</h1>`).
+
+Stock images `caddy:2.11.7-alpine` / `caddy:2.11.8-alpine` / `caddy:2.11.9-alpine`, plus master built via `xcaddy build master` (`v2.11.8-0.20261108222245-fcfdef43c566`):
+
+| request | 2.11.7 | 2.11.8 | 2.11.9 | master |
+|---|---|---|---|---|
+| `/`          | 200 | 404 | 404 | 404 |
+| `/ru/`       | 200 | 200 | 200 | 200 |
+| `/index.html`| 200 | 200 | 200 | 200 |
+| `/nope`      | 404 | 404 | 404 | 404 |
+
+### 4. Further details
+
+Suspected cause: the file-matcher semantics change in #8326 (plus #8352) — a candidate ending in `/` now only matches a directory. The candidate `/` (empty path relative to the site root) appears to no longer match the root directory itself, so both `{path}` and `{path}/` fail for `/` and `=404` wins; real subdirectories still match their candidates, hence the selective breakage of the homepage only.
+
+The related regressions fixed after v2.11.9 (#8353 / #8367 php_fastcgi index, #8382 browse) were fastcgi/browse-specific; the plain static `try_files` + `file_server` case is still broken on master.
+
+Workarounds that restore `/` on v2.11.9:
+- explicit index candidate: `try_files {path} {path}/ /index.html =404`;
+- explicit root rewrite: `@root path /` + `rewrite @root /index.html`.
+
+Question: is the root directory intended to stop matching a `/`-ending candidate? If the new semantics are intended, the `try_files` docs should call out that `{path} {path}/` alone no longer serves `/` (this idiom is all over static-site examples); if not, `/` should match as a directory candidate."""
+start = "9ea3108377d2abec102866808133c40ac9582162"
+fix = "3e05c4ddf002a76c9985e7b89c0b613230e774ec"
+hidden_tests = ["caddytest/integration/try_files_test.go", "modules/caddyhttp/fileserver/matcher_test.go"]
+closed = 2026-11-10
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8390"
+pull = 8391
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# caddy-03: With php_fastcgi followed by file_server, static files and directory indexes should be served again
+# instead of 404 when no index.php exists, as in v2.11.7.
+# issue opened 2026-11-05, fix opened 2026-11-06, squash (or single commit); source files:
+# modules/caddyhttp/reverseproxy/fastcgi/caddyfile.go (11 lines); request from body (never edited).
+# reading notes: Title vague but body gives config and symptoms; fix reverts the first_exist_fallback try policy and
+# also updates adapt fixtures; uses local fake FastCGI backend.
+# added to the candidate's hidden tests:
+# caddytest/integration/caddyfile_adapt/php_fastcgi_handle_response.caddyfiletest,
+# caddytest/integration/caddyfile_adapt/php_fastcgi_matcher.caddyfiletest,
+# caddytest/integration/caddyfile_adapt/php_fastcgi_subdirectives.caddyfiletest,
+# caddytest/integration/caddyfile_adapt/php_fastcgi_try_files_override_no_dir_index.caddyfiletest
+[[situation]]
+id = "caddy-03"
+request = """
+v2.11.9 file_server regression?
+
+### Issue Details
+
+with v2.11.7 this config snippet worked as expected:
+```caddyfile
+php_fastcgi socket.path
+file_server {
+    index index.html index.htm
+    precompressed
+}
+```
+ `.php` files got handled by `php_fastcgi socket.path` and static files were handled by the `file_server` block.
+
+running v2.11.9 with the same config as above results in a `404` error for static files.
+
+adding `try_files` like so:
+```caddyfile
+php_fastcgi socket.path
+try_files {path} {path}/ {path}/index.html index.html
+file_server {
+    index index.html index.htm
+    precompressed
+}
+```
+results in the main index getting served, but any sub dir path without an `index.html` explicitly in the URL also results in a 404:
+- https://example.com/about/ returns a 404 error
+- https://example.com/about/index.html works, but only if `try_files` is there
+- without `try_files` all static files at https://example.com/ return a 404
+
+something seems broken. reverting back to v2.11.7 made everything work as expected without `try_files`.
+
+if it matters OS is FreeBSD 14.5
+
+### Assistance Disclosure
+
+_No response_
+
+### If AI was used, describe the extent to which it was used.
+
+_No response_"""
+start = "b30c01934116ab2d0f564276a8af4b0e05d190b6"
+fix = "8822b608633a2a3556224e03bcd67917a90e6977"
+hidden_tests = ["caddytest/integration/caddyfile_adapt/php_fastcgi_handle_response.caddyfiletest", "caddytest/integration/caddyfile_adapt/php_fastcgi_matcher.caddyfiletest", "caddytest/integration/caddyfile_adapt/php_fastcgi_subdirectives.caddyfiletest", "caddytest/integration/caddyfile_adapt/php_fastcgi_try_files_override_no_dir_index.caddyfiletest", "caddytest/integration/phpfastcgi_test.go"]
+closed = 2026-11-08
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8367"
+pull = 8372
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# caddy-04: The Caddyfile parser should reject site blocks with a missing closing brace or a stray closing brace after
+# a braceless site.
+# issue opened 2026-11-06, fix opened 2026-11-07, squash (or single commit); source files:
+# caddyconfig/caddyfile/parse.go (29 lines); request from body (never edited).
+# reading notes: AI-drafted report; all test cases appear in the issue.
+[[situation]]
+id = "caddy-04"
+request = """
+caddyfile: parser accepts site blocks with unbalanced braces
+
+### Issue Details
+
+The Caddyfile parser accepts some site blocks with unbalanced braces, and `caddy adapt` converts them without any error or warning. Tested on master at `b3d67c86`.
+
+### 1. A missing closing `}` is not detected when the last directive has its own block
+
+```
+:8080 {
+	header {
+		X-Foo "bar"
+	}
+```
+
+`caddy adapt` correctly parses it. The same happens with other directives (`file_server { browse }`), with deeper nesting (`handle { header { … } }`), and with an unclosed global options block (`{ servers { protocols h1 } `).
+
+For comparison, this is rejected:
+
+```
+:8080 {
+	file_server
+```
+```
+syntax error: unexpected token 'file_server', expecting '}', at Caddyfile:2
+```
+
+### 2. An extra `}` after a site without braces is silently ignored
+
+```
+:8080
+file_server
+}
+```
+
+This is accepted too. It is also possible to declare two site blocks without curly braces if a `}` separates them, i.e. the following slightly reworded example from the [documentation](https://caddyserver.com/docs/caddyfile/concepts#blocks:~:text=To%20configure%20multiple,%3A9000%0A%7D) is accepted:
+
+```
+:8080
+root /www/example.com
+file_server
+}
+
+:3000
+reverse_proxy localhost:9000
+```
+, even though
+> To configure multiple sites with the same Caddyfile, you **must** use curly braces around each one to separate their configurations
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+I found the bug in my own Caddyfiles, came up with the example configs myself and used Claude to understand where the problem lied in code and to draft this issue."""
+start = "553b62c3f3c306046c62221b48f78ad53fc4198a"
+fix = "2563d4832640f7748c60657d53e7e4274fc73d31"
+hidden_tests = ["caddyconfig/caddyfile/formatter_braced_test.go", "caddyconfig/caddyfile/parse_test.go"]
+closed = 2026-11-08
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8374"
+pull = 8375
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# caddy-05: php_fastcgi should again run a directory's index.php for URLs ending in / instead of returning 404 since
+# v2.11.8.
+# issue opened 2026-11-04, fix opened 2026-11-04, squash (or single commit); source files:
+# modules/caddyhttp/fileserver/matcher.go (6 lines); request from body (never edited).
+# reading notes: AI-assisted report with stub backend; test checks a dir-with-slash case resolving to index.php.
+[[situation]]
+id = "caddy-05"
+request = """
+2.11.8: php_fastcgi returns 404 for directory URLs ending in / (index.php not served)
+
+### Issue Details
+
+After upgrading from 2.11.7 to 2.11.8 (Debian package from the Cloudsmith repo, Ubuntu 24.04), every directory URL that ends in `/` returns 404 on a `php_fastcgi` site, instead of running that directory's `index.php`. Requests that name the `.php` file still work, and so does `/`. Rolling back to 2.11.7 fixes it.
+
+Minimal Caddyfile:
+
+```
+{
+	admin off
+	auto_https off
+}
+http://localhost:8080 {
+	root * /srv/www
+	php_fastcgi 127.0.0.1:9000
+	file_server
+}
+```
+
+Files: `/srv/www/index.php`, `/srv/www/surveys/index.php`, `/srv/www/api/help/index.php`.
+
+| Request | 2.11.7 | 2.11.8 |
+| --- | --- | --- |
+| `/` | 200, runs `/index.php` | 200, runs `/index.php` |
+| `/surveys` | 308 to `/surveys/` | 308 to `/surveys/` |
+| `/surveys/` | 200, runs `/surveys/index.php` | 404, FastCGI backend never called |
+| `/surveys/?s=abc` | 200, runs `/surveys/index.php` | 404 |
+| `/surveys/index.php` | 200 | 200 |
+| `/api/help/` | 200, runs `/api/help/index.php` | 404 |
+
+So the canonical-path redirect sends `/surveys` to `/surveys/`, which then 404s. It looks related to #8326 ("a `try_files` / `file` candidate ending in `/` only matches a directory"): for `/surveys/`, the first `php_fastcgi` candidate `{path}` now matches the directory itself, the rewrite leaves the path at `/surveys/`, it isn't `*.php`, and `file_server` returns 404 with no `index.html` there. That's a guess from the behavior. I haven't read the code.
+
+The same thing happens with a full config (`php_fastcgi unix//run/php/php8.3-fpm.sock`, PHP 8.3 FPM). On our REDCap site it broke public survey links (`/surveys/?s=<hash>`). For now we're held at 2.11.7. A workaround that worked on both versions is an explicit rewrite before `php_fastcgi`:
+
+```
+@dir_index {
+	path_regexp dir ^(/(?:[^/]+/)*[^/.]+)/?$
+	file {re.dir.1}/index.php
+}
+rewrite @dir_index {re.dir.1}/index.php?{query}
+```
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+Claude (Anthropic) ran the version comparison against a minimal config and a stub FastCGI backend, and drafted this issue. I reviewed the results and the text.
+
+Version: v2.11.8 h1:E2pv1BoZ5bJaWqFkU6QvLa21iGAX8bDzlEQG4dDQ/Vc= (repro steps: the Caddyfile and table above, then `curl -i http://localhost:8080/surveys/`)"""
+start = "fbfc061e70d51f17b8004a71aed88dbd2a41f70e"
+fix = "b5d67d65400e723c4c4863624d3dffab1f34db57"
+hidden_tests = ["modules/caddyhttp/fileserver/matcher_test.go"]
+closed = 2026-11-04
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8353"
+pull = 8352
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# caddy-06: basic_auth should reject accounts whose usernames collide only after {env.*} placeholder expansion.
+# issue opened 2026-09-19, fix opened 2026-11-01, squash (or single commit); source files:
+# modules/caddyhttp/caddyauth/basicauth.go (6 lines); request from body (never edited).
+# reading notes: text names the fix (move the uniqueness check after expansion); AI-assisted.
+[[situation]]
+id = "caddy-06"
+request = """
+caddyauth: basic_auth accepts duplicate usernames that only collide after {env.*} expansion
+
+### Issue Details
+
+Follow-up from #8017, where @hktitof suggested a separate issue because this predates that PR.
+
+`Provision` checks `hba.Accounts[acct.Username]` for duplicates at `modules/caddyhttp/caddyauth/basicauth.go:105-106`, before the username is expanded at `:109-110`, and `:129` stores the expanded name. So two accounts whose usernames only become equal after `{env.*}` expansion load as one account, and only the second password works.
+
+Run at master `df77f8bd` with `X=Y=carol` and `Z=dave`, using two bcrypt hashes for different passwords:
+
+- `carol` + `carol`: error `account 1: username is not unique: carol` (control).
+- `{env.X}` + `{env.Y}`, `carol` + `{env.Y}`, and `{env.X}` + `{env.X}`: no error, one account, and only the second password authenticates.
+- `{env.X}` + `{env.Z}`: two accounts, and both passwords work (control).
+
+With a binary built from `df77f8bd`, `caddy validate` rejects literal duplicates and `{$VU1}`/`{$VU2}` duplicates, which are expanded at adapt time, but reports `Valid configuration` for `{env.VU1}`/`{env.VU2}`.
+
+This is not an auth bypass: one configured credential silently stops working. Moving the check below the two replace lines makes all four collision cases error, keeps the control passing, and `go test ./modules/caddyhttp/caddyauth/ -count=1` passes (run at `2d38ac51`, the #8017 head). The error would then print the expanded username. Happy to send that as a PR with a test for the four cases.
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+An AI assistant traced the code path and wrote and ran the reproduction probe; I reviewed the results and the wording before filing."""
+start = "6bfeb4f8252f7054fcf1fbc11ec9b3846defc749"
+fix = "9d2cb35c75bd828114bbb2c4cf75678a5cdb7ba6"
+hidden_tests = ["modules/caddyhttp/caddyauth/basicauth_test.go"]
+closed = 2026-11-01
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8037"
+pull = 8315
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# caddy-07: ACME requests should again go through the issuer's configured network_proxy, broken since a commit in
+# v2.11.2.
+# issue opened 2026-10-27, fix opened 2026-10-27, squash (or single commit); source files:
+# modules/caddytls/acmeissuer.go (10 lines); request from body (never edited).
+# reading notes: Bisected to a commit; test uses a local httptest proxy and acme.invalid.
+[[situation]]
+id = "caddy-07"
+request = """
+ACME requests through forward proxy broken since v2.11.2
+
+### Issue Details
+
+In https://github.com/caddyserver/caddy/pull/6399, support has been added by @mohammed90 to configure a specific forward proxy for outgoing ACME requests by configuring the `network_proxy` in issuers. This has been working fine until version 2.11.2. 
+
+After running git bisect, it seems to have been broken by this commit: d935a6956c16902623b8e8f6d1aafec4f6124f46, added in PR https://github.com/caddyserver/caddy/pull/7510.
+
+This has been verified by running caddy with the following config and running BurpSuite. In the parent commit (2dd3852416e2b04bc90b98643673ec9e131c32e6), a request to acme-v02.api.letsencrypt.org/directory shows up in Burp, but after  d935a6956c16902623b8e8f6d1aafec4f6124f46 not anymore.
+
+caddy.json used to test:
+```json
+{
+  "apps": {
+    "http": {
+      "servers": {
+        "srv0": {
+          "listen": [":8844"],
+          "routes": [
+            {
+              "match": [
+                {
+                  "host": ["thisdomaindoesntexistsbutdoesntmatter.com"]
+                }
+              ],
+              "terminal": true
+            }
+          ]
+        }
+      }
+    },
+    "tls": {
+      "automation": {
+        "policies": [
+          {
+            "subjects": ["thisdomaindoesntexistsbutdoesntmatter.com"],
+            "issuers": [
+              {
+                "module": "acme",
+                "network_proxy": {
+                  "from": "url",
+                  "url": "http://localhost:8080"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+### Assistance Disclosure
+
+AI not used
+
+### If AI was used, describe the extent to which it was used.
+
+_No response_"""
+start = "71c5812cfeb7ce9ab471d323ccd98e6fb7cf8d26"
+fix = "fead9c3f24ee1783b4cd3822e923f7cf4930d18e"
+hidden_tests = ["modules/caddytls/acmeissuer_test.go"]
+closed = 2026-10-28
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8283"
+pull = 8288
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# caddy-08: Unknown curve names and protocol_min/protocol_max values in JSON TLS config should be rejected instead of
+# silently becoming 0.
+# issue opened 2026-10-21, fix opened 2026-10-21, squash (or single commit); source files:
+# modules/caddyhttp/reverseproxy/httptransport.go, modules/caddytls/connpolicy.go (29 lines); request from body (never
+# edited).
+# reading notes: filed by fixer; text names the fix; AI-assisted; min>max and default cases already held before the
+# fix.
+[[situation]]
+id = "caddy-08"
+request = """
+caddytls: unknown curves and protocol_min/protocol_max values are silently accepted in JSON config
+
+### Issue Details
+
+In JSON config, `tls_connection_policies` accepts any string for `curves`, `protocol_min` and `protocol_max`. An unknown value doesn't cause an error. It becomes `0`, which changes TLS behaviour.
+ 
+Not a vulnerability (it requires an invalid config), but the result is that a config intended to enforce TLS 1.3 quietly allows TLS 1.2, so it seems worth failing loudly the way `cipher_suites` already does.
+ 
+**Version:** v2.11.7 (installed with `go install github.com/caddyserver/caddy/v2/cmd/caddy@latest`, so `caddy version` prints "unknown"), Windows 11
+ 
+**Config:**
+ 
+```json
+{
+  "apps": {
+    "http": {
+      "servers": {
+        "srv0": {
+          "listen": [":8443"],
+          "routes": [
+            {
+              "match": [{"host": ["localhost"]}],
+              "handle": [{"handler": "static_response", "body": "ok"}]
+            }
+          ],
+          "tls_connection_policies": [{ "protocol_min": "TLS1.3" }]
+        }
+      }
+    },
+    "pki": {"certificate_authorities": {"local": {"install_trust": false}}}
+  }
+}
+```
+ 
+**Steps and results:**
+ 
+- `caddy validate` with `"protocol_min": "TLS1.3"` → `Valid configuration`
+- `caddy run` with that config, then `curl -k --tls-max 1.2 https://localhost:8443` → `ok` (a TLS 1.2 client connects)
+- `caddy validate` with `"curves": ["X25519"]` → `Valid configuration` (every handshake then fails, because the curve list contains `0`)
+- `caddy validate` with `"cipher_suites": ["NOT_A_CIPHER"]` → error: `unsupported cipher suite`
+**Cause:** `buildStandardTLSConfig` in `modules/caddytls/connpolicy.go` reads `SupportedCurves[curveName]` and `SupportedProtocols[p.ProtocolMin]` / `[p.ProtocolMax]` without checking that the key exists. The same unchecked curve lookup is in `modules/caddyhttp/reverseproxy/httptransport.go`. The Caddyfile `tls` directive already rejects these names, so only the JSON path is affected.
+ 
+**Possible fix:** check the lookups and return an error for unknown names, the same way `cipher_suites` does. I'm happy to send a PR for this.
+
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+Claude found the issue while reading the code and helped draft this report. I reproduced it myself with Caddy v2.11.7."""
+start = "b058e3f3f6c037dc75910760d889b5fd4cc43380"
+fix = "71c5812cfeb7ce9ab471d323ccd98e6fb7cf8d26"
+hidden_tests = ["modules/caddyhttp/reverseproxy/httptransport_test.go", "modules/caddytls/connpolicy_test.go"]
+closed = 2026-10-26
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8265"
+pull = 8266
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-09: The query log filter should treat # in a logged request URI as part of the query so parameters after it
+# are still redacted.
+# issue opened 2026-10-18, fix opened 2026-10-18, squash (or single commit); source files: modules/logging/filters.go
+# (10 lines); request from body (never edited).
+# reading notes: filed by fixer; text names the fix (url.ParseRequestURI for values starting with /); AI-assisted.
+[[situation]]
+id = "caddy-09"
+request = """
+logging: `query` filter leaves parameters unredacted when the request URI contains `#`
+
+### Issue Details
+
+The `query` log filter reads `#` in the logged request URI as the start of a fragment. A request-target has no fragment, so Caddy and the backend treat everything after `#` as part of the query, and a parameter there is logged unredacted:
+
+```
+{
+	admin off
+}
+:28480 {
+	log {
+		output file ./access.log
+		format filter {
+			request>uri query {
+				replace token REDACTED
+			}
+		}
+	}
+	respond "ok"
+}
+```
+
+```
+$ printf 'GET /a?x=1#&token=s3cr3t HTTP/1.1\\r\\nHost: x\\r\\nConnection: close\\r\\n\\r\\n' | nc 127.0.0.1 28480
+HTTP/1.1 200 OK
+$ printf 'GET /a?token=s3cr3t#%%zz HTTP/1.1\\r\\nHost: x\\r\\nConnection: close\\r\\n\\r\\n' | nc 127.0.0.1 28480
+HTTP/1.1 200 OK
+$ jq -r .request.uri access.log
+/a?x=1#&token=s3cr3t
+/a?token=s3cr3t#%zz
+```
+
+`GET /a?token=s3cr3t` on the same server logs `/a?token=REDACTED`. curl and browsers strip `#...` before sending, so this needs a client that sends a raw `#`.
+
+Version: v2.11.7 (release binary) and master at 719db53e.
+
+Cause: `QueryFilter.processQueryString` in `modules/logging/filters.go` uses `url.Parse`. For `/a?x=1#&token=s3cr3t` it puts `&token=s3cr3t` in the fragment and filters only `x=1`. For `/a?token=s3cr3t#%zz` the fragment has an invalid escape, `url.Parse` fails, and the filter returns the value unchanged. Go's server parses the request line with `url.ParseRequestURI`, which has no fragment, so the backend gets `token=s3cr3t`.
+
+I have a patch with a test that parses values starting with `/` with `url.ParseRequestURI`. Values like absolute Referer or Location URLs keep `url.Parse`. One side effect: a relative `Location: /a?x=1#section` filtered with `query` would now read `#section` as part of the query too. Absolute-form request-targets (`GET http://host/a?...`, forward proxy use) stay as they are.
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+AI used (Claude Code)."""
+start = "872c864c200b22dc5161942816be6409eafcb295"
+fix = "612128e3b0f290af44649d7a7dcb1111fc3ebb33"
+hidden_tests = ["modules/logging/filters_test.go"]
+closed = 2026-10-19
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8254"
+pull = 8255
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-10: With a leaf verifier, client_auth mode verify_if_given should let clients without a certificate connect.
+# issue opened 2026-10-17, fix opened 2026-10-17, squash (or single commit); source files:
+# modules/caddytls/connpolicy.go (9 lines); request from body (never edited).
+# security trap: The natural fix skips verifiers when no certificate is presented, which can let certificate-less
+# clients through if done without regard to the mode.
+[[situation]]
+id = "caddy-10"
+request = """
+client_auth mode ignored when using leaf verifier
+
+### Issue Details
+
+When using mtls with leaf verifier, it seems that the mode `verify_if_given` is not considered. If the client provide a valid certificate, it is working as epected howvere if the client does not provide a certificate, it will result with `ERR_BAD_SSL_CLIENT_AUTH_CERT` on client side.
+
+Tested with caddy 2.11.7
+
+The caddyfile configuration is:
+```
+client_auth {
+	mode verify_if_given
+	trust_pool file {
+		pem_file /etc/caddy/fullchain.pem
+	}
+	verifier leaf {
+		folder /etc/caddy/client_certs
+	}
+}
+``` 
+
+
+### Assistance Disclosure
+
+AI not used
+
+### If AI was used, describe the extent to which it was used.
+
+_No response_"""
+start = "e3649f2536b73e473c0bf5057f255d8aa707a1c6"
+fix = "872c864c200b22dc5161942816be6409eafcb295"
+hidden_tests = ["modules/caddytls/connpolicy_verifyconnection_test.go"]
+closed = 2026-10-19
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8250"
+pull = 8251
+self_filed = false
+bot_filed = false
+security_trap = true
+
+# caddy-11: ip_mask should not log <nil>: reject out-of-range CIDR sizes at provision time and handle a family with no
+# mask configured.
+# issue opened 2026-10-17, fix opened 2026-10-17, squash (or single commit); source files: modules/logging/filters.go
+# (7 lines); request from body (never edited).
+# reading notes: filed by fixer; tests cover only the out-of-range rejection the issue states; the unset-family choice
+# is left open and untested.
+[[situation]]
+id = "caddy-11"
+request = """
+logging: `ip_mask` logs `<nil>` for IPv6 clients when only an IPv4 mask is set
+
+### Issue Details
+
+With the `ip_mask` log filter, an address whose family has no CIDR configured is logged as `<nil>`. A config that only sets an IPv4 size, which looks complete, loses every IPv6 client:
+
+```
+{
+	auto_https off
+}
+http://:8080 {
+	log {
+		output file access.log
+		format filter {
+			wrap json
+			fields {
+				request>remote_ip ip_mask 16
+				request>client_ip ip_mask {
+					ipv4 24
+				}
+			}
+		}
+	}
+	respond "ok"
+}
+```
+
+```
+$ curl -g 'http://[::1]:8080/'
+$ jq -c '.request | [.remote_ip, .client_ip]' access.log
+["<nil>","<nil>"]
+```
+
+An out-of-range size is accepted without an error and has the same effect: `ip_mask 33` passes `caddy validate` and then logs `<nil>` for every IPv4 address.
+
+Version: v2.11.7 (release binary) and master at 05848752.
+
+Cause: in `modules/logging/filters.go`, `IPMaskFilter.Provision` maps an unset (0) size to a nil mask, and `net.CIDRMask` also returns nil for a size outside 0-32 / 0-128. `mask()` then calls `ip.Mask(nil)`, which returns nil, and its `String()` is `<nil>`.
+
+The out-of-range case looks like a plain config error, so I have a small patch with a test that rejects it at provision time.
+
+For the unset family I'm not sure what you want: leave the address unchanged (an unconfigured family is not masked), or mask all of it (`::` / `0.0.0.0`) so nothing that is hidden today gets logged. Happy to add either to the patch.
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+AI used (Claude Code)."""
+start = "719db53e946181dd10a9aae36721c3251f7f8dc1"
+fix = "e3649f2536b73e473c0bf5057f255d8aa707a1c6"
+hidden_tests = ["modules/logging/filters_test.go"]
+closed = 2026-10-19
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8240"
+pull = 8241
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-12: hash-password should strip a trailing CRLF from piped stdin and accept input without a trailing newline.
+# issue opened 2026-10-15, fix opened 2026-10-15, squash (or single commit); source files:
+# modules/caddyhttp/caddyauth/command.go (12 lines); request from body (never edited).
+# reading notes: filed by fixer; text names the fix; lone trailing \r kept per the issue's stated rule.
+[[situation]]
+id = "caddy-12"
+request = """
+hash-password: password piped on stdin keeps a trailing `\\r`, and input without a newline fails with "EOF"
+
+### Issue Details
+
+Without `--plaintext`, `caddy hash-password` reads the password from stdin. When stdin is not a terminal, it reads up to `\\n` and cuts the last byte, which goes wrong in two cases.
+
+Input ending in `\\r\\n` (what `cmd.exe` and PowerShell pipe on Windows, or a password file with CRLF line endings) is hashed with the `\\r`. The hash looks normal, but `basic_auth` answers 401 for the real password:
+
+```
+$ printf 'secret\\r\\n' | caddy hash-password --algorithm bcrypt
+$2a$14$HoUkcaiQCRV3PkWo3/pW..oJ3lmCOsq1FwqzHvip0FPd2SIcfxQt.
+```
+
+That hash matches `secret\\r`, not `secret` (checked with Python's `bcrypt.checkpw`). Same with `--algorithm argon2id`.
+
+Input without a trailing newline fails:
+
+```
+$ printf 'secret' | caddy hash-password
+{"level":"error","ts":...,"msg":"EOF"}
+```
+
+Expected: both hash `secret`, like `printf 'secret\\n' | caddy hash-password`.
+
+Version: v2.11.7 (release binary) and master at af7620dc.
+
+Cause: in `modules/caddyhttp/caddyauth/command.go`, `cmdHashPassword` returns the `io.EOF` from `ReadBytes('\\n')` as an error, and `plaintext[:len(plaintext)-1]` drops only the `\\n`.
+
+I have a small patch with a test (accept EOF, drop a trailing `\\n` or `\\r\\n`) and can open a PR if this sounds right.
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+AI used (Claude Code)."""
+start = "a6fc144e7538235e17b1121fa56dd1b34e54f1e7"
+fix = "be5fba4ff25f403ce4435395a7de4a9dace65ae9"
+hidden_tests = ["modules/caddyhttp/caddyauth/command_test.go"]
+closed = 2026-10-16
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8226"
+pull = 8227
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-13: With request_buffers/response_buffers unlimited, a body read error (e.g. request_body max_size) should not
+# be forwarded as a complete body.
+# issue opened 2026-10-13, fix opened 2026-10-13, squash (or single commit); source files:
+# modules/caddyhttp/reverseproxy/reverseproxy.go (22 lines); request from body (never edited).
+# reading notes: filed by fixer; text names the fix; integration test uses local servers.
+[[situation]]
+id = "caddy-13"
+request = """
+reverseproxy: `request_buffers unlimited` forwards a body cut off by `request_body max_size` as complete (200, not 413)
+
+### Issue Details
+
+With `request_buffers unlimited` (or `response_buffers unlimited`), a read error on the body is ignored, and whatever was read before the error is sent on as the whole body.
+
+Version: v2.11.7 (release binary) and master at d293dcfe.
+
+```
+{
+	admin localhost:18419
+	auto_https off
+}
+:18414 {
+	request_body {
+		max_size 10
+	}
+	reverse_proxy 127.0.0.1:18410 {
+		request_buffers unlimited
+	}
+}
+:18415 {
+	request_body {
+		max_size 10
+	}
+	reverse_proxy 127.0.0.1:18410 {
+		request_buffers 1MB
+	}
+}
+```
+
+The upstream on 18410 replies with the number of body bytes it received and the `Content-Length` it was sent.
+
+```
+$ head -c 100 /dev/zero | tr '\\0' a | curl -s -w ' %{http_code}\\n' --data-binary @- localhost:18414/
+upstream got 10 bytes, content-length 10 200
+$ head -c 100 /dev/zero | tr '\\0' a | curl -s -w ' %{http_code}\\n' --data-binary @- localhost:18415/
+ 413
+```
+
+Expected 413 on both, as with no `request_buffers` at all. With `unlimited`, the upload is cut to 10 bytes, sent upstream with `Content-Length: 10`, and the client gets 200.
+
+The response side has the same problem: when the upstream sends a chunked response and closes the connection before the final chunk, `response_buffers unlimited` delivers what it got as a complete 200. Without `response_buffers`, or with a finite size, the client sees the transfer fail (`curl: (18) transfer closed with outstanding read data remaining`).
+
+Cause: `bufferedBody` in `modules/caddyhttp/reverseproxy/reverseproxy.go` does `written, _ = io.Copy(buf, originalBody)` for a negative limit; the TODO above it notes the error is dropped. The limited branch already falls back to the original body on a read error.
+
+This is the same failure as #7691 (`{http.request.body}` returning a truncated body past `max_size`), which #7969 fixed for the placeholders.
+
+I have a small patch with tests (the unlimited case handles a read error the way the limited case does) and can open a PR if this sounds right.
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+AI used (Claude Code)."""
+start = "401582cccfb3d1b6de382d48929e4070ef6663f2"
+fix = "fc3d83400b95c4df8d5d2928d2ed22ff42192729"
+hidden_tests = ["caddytest/integration/reverseproxy_test.go", "modules/caddyhttp/reverseproxy/buffering_test.go"]
+closed = 2026-10-13
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8206"
+pull = 8207
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-14: TLS connection policies (mTLS) should be built per listener so a site on a non-standard port gets client
+# auth for all its hostnames.
+# issue opened 2026-10-11, fix opened 2026-10-11, squash (or single commit); source files:
+# caddyconfig/httpcaddyfile/httptype.go (20 lines); request from body (never edited).
+# reading notes: ChatGPT-assisted repro; test checks adapted JSON per listener.
+[[situation]]
+id = "caddy-14"
+request = """
+Bug: mTLS not requesting certificate when using non standard port
+
+### Issue Details
+
+This is a minimal reproduction of the Caddyfile which shows the issue.
+```
+(mtls) {
+	tls {
+		client_auth {
+			mode verify_if_given
+			trust_pool file /tmp/root.crt
+		}
+	}
+}
+
+abc.domain.com, abc.domain.com:2000 {
+	import mtls
+
+	respond "first"
+}
+
+domain.domain.com {
+	import mtls
+
+	respond "second"
+}
+
+ghi.domain.com, ghi.domain.com:2000 {
+	import mtls
+
+	respond "third"
+}
+```
+
+When accessing https://ghi.domain.com:2000, the certificate is not requested. I have managed to find the issue when running `caddy adapt --pretty`. These are the things I noticed:
+
+1. With the above config, the server `srv0` which is for port 2000, contains only `abc.domain.com` in the `tls_connection_policies > match > sni`.
+2. Changing the port to 5000 will move the server with port 5000 to `srv1` which contains both `abc.domain.com` and `ghi.domain.com` in the `tls_connection_policies > match > sni`. I believe this is because it is sorted by port number in alphabetical order but not sure why it is fixed when it is the second server.
+3. Removing import mtls from `domain.domain.com` will fix the issue.
+4. Removing the route `domain.domain.com` will fix the issue.
+5. Inlining the TLS config instead of using a snippet will not fix the issue.
+6. Making `ghi.domain.com` the first domain in the caddy file will make `ghi.domain.com` the only one available in the `tls_connection_policies > match > sni`.
+7. Splitting the routes so they are not joined together with commas will fix the issue. i.e. duplicate `abc.domain.com` and have `abc.domain.com:2000` in another route to fix it.
+8. Changing the middle route from `domain.domain.com` to `def.domain.com` will cause all 3 to appear in the `tls_connection_policies > match > sni` for port 2000 even though `def.domain.com` is not supposed to be exposed on port 2000.
+
+After finding the issue in the output of `caddy adapt --pretty`, I have not tested all of the above to see what the real behaviour is but I assume the JSON output should be enough to detect the issue. I can provide the JSON output of each if required.
+
+This was tested on v2.11.7
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+ChatGPT helped workaround the issue and create a minimal reproduction."""
+start = "d4165a4eb1fdb129e8ce8390099021a00239ecf7"
+fix = "25c6901e05214573b87c48e07e3913e319032ec6"
+hidden_tests = ["caddyconfig/httpcaddyfile/httptype_test.go"]
+closed = 2026-10-12
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8191"
+pull = 8192
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# caddy-15: try_files with a ?query item and =404 should serve existing files, and skipped grouped routes should not
+# run matchers that overwrite placeholders.
+# issue opened 2026-10-10, fix opened 2026-10-10, squash (or single commit); source files: modules/caddyhttp/routes.go
+# (27 lines); request from body (never edited).
+# reading notes: filed by fixer; text names the fix; AI-assisted.
+[[situation]]
+id = "caddy-15"
+request = """
+caddyhttp: `try_files` with a `?query` item and `=404` returns 404 for every request
+
+### Issue Details
+
+If `try_files` has an item with a query string and ends with a status code, every request gets that status code, even when an earlier item matches an existing file.
+
+Version: v2.11.7 (release binary) and master at 093fd4b7.
+
+```
+{
+	admin localhost:9298
+	auto_https off
+}
+:9220 {
+	root * www
+	try_files {path} {path}.html?{query} =404
+	file_server
+}
+:9221 {
+	root * www
+	try_files {path} {path}.html =404
+	file_server
+}
+```
+
+`www/` has `style.css` and `about.html`.
+
+```
+$ curl -s -o /dev/null -w '%{http_code}\\n' localhost:9220/style.css
+404
+$ curl -s -o /dev/null -w '%{http_code}\\n' localhost:9220/about
+404
+$ curl -s -o /dev/null -w '%{http_code}\\n' localhost:9221/style.css
+200
+$ curl -s -o /dev/null -w '%{http_code}\\n' localhost:9221/about
+200
+```
+
+Expected: 200 for both files on :9220, and 404 only for a missing file, like :9221.
+
+Cause: because of the query string, `try_files` is split into three routes in the same group (`{path}`, `{path}.html` + `?{query}`, `=404`), so only the first matching one runs. But `wrapRoute` in `modules/caddyhttp/routes.go` runs a route's matchers before it checks whether its group is already satisfied. After the first route matches and rewrites, the `=404` route's file matcher still runs, and `=404` makes the matcher return an error, which ends the request.
+
+The same ordering also lets a skipped route's matcher overwrite placeholders. `rewrite` directives are grouped the same way:
+
+```
+:9231 {
+	@x path_regexp x ^/x/(.*)$
+	@y path_regexp x ^/(.*)$
+	rewrite @x /one/{re.x.1}
+	rewrite @y /two/{re.x.1}
+	respond "path={path} cap={re.x.1}"
+}
+```
+
+```
+$ curl -s localhost:9231/x/q
+path=/one/q cap=one/q
+```
+
+Only the first `rewrite` runs, but `@y` still runs against the rewritten path and sets `{re.x.1}` to `one/q` instead of `q`.
+
+I have a small patch with a test (check the group before running the matchers) and can open a PR if this sounds right.
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+AI used (Claude Code)."""
+start = "c31d9a71ed2f628210aa607ca6c69bbf21bd73e4"
+fix = "5538b947d2873e8a06dd45182b8c43081fc56d32"
+hidden_tests = ["caddytest/integration/try_files_test.go"]
+closed = 2026-10-10
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8188"
+pull = 8189
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-16: Access log entries for a request whose Host differs only in letter case from the log block's hostnames
+# should go to the configured logger, not stderr.
+# issue opened 2026-10-08, fix opened 2026-10-08, squash (or single commit); source files: modules/caddyhttp/app.go,
+# modules/caddyhttp/logging.go (29 lines); request from body (never edited).
+# reading notes: filed by fixer; text names the cause (lookup in logger_names is case sensitive); AI-assisted report;
+# integration test uses local ports
+[[situation]]
+id = "caddy-16"
+request = """
+access log hostnames matching is case sensitive
+
+### Issue Details
+
+When the request Host header has a different letter case than the hostname in the log block, the access log entry goes to stderr instead of the configured output. 
+Hostnames are case insensitive, so the entry should go to the configured log.
+
+to reproduce:
+```
+{
+      auto_https off
+}
+
+http://example.com:9080 {
+	log {
+		hostnames example.com
+		output file ./example-access.log
+	}
+	respond "hi"
+}
+```
+curl -H "Host: example.com" localhost:9080 -> logged correctly
+curl -H "Host: Example.com" localhost:9080 -> logged to stderr
+
+cause:  shouldLogRequest matches the host case insensitively, but getLoggerHosts looks it up in the logger_names map case sensitively, so the request is logged but falls back to the default logger
+
+caddy version: v2.11.7
+
+I will open a PR with a fix later
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+Used Claude to find the root cause"""
+start = "093fd4b7ec3d299c7c9bcfbdad30827de783d36c"
+fix = "7910dd94eea2750896f187301f4d99a21a522d24"
+hidden_tests = ["caddytest/integration/logging_test.go", "modules/caddyhttp/logging_test.go"]
+closed = 2026-10-09
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8174"
+pull = 8176
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-17: A HEAD response through encode should not carry the Content-Length of an empty gzip/zstd stream.
+# issue opened 2026-10-05, fix opened 2026-10-05, squash (or single commit); source files:
+# modules/caddyhttp/encode/encode.go (15 lines); request from body (never edited).
+# reading notes: filed by fixer; text names the fix (skip encoder Close when no body written); second test also checks
+# a header-only GET gets no encoded body, which the stated fix covers but a HEAD-only fix would not; AI-drafted report
+[[situation]]
+id = "caddy-17"
+request = """
+encode: HEAD responses send Content-Length 20 (gzip) / 13 (zstd)
+
+### Issue Details
+
+With `encode` enabled, a HEAD request for a file that would be compressed gets `Content-Length: 20` for gzip and `Content-Length: 13` for zstd, whatever the file is. Those are the sizes of an empty gzip and an empty zstd stream. The matching GET either has no `Content-Length` (chunked) or the real compressed size.
+
+RFC 9110 section 8.6 says a server MUST NOT send `Content-Length` in a HEAD response unless it equals the length the GET would have sent. Clients that use HEAD to learn a download size get 20 or 13 bytes.
+
+Version: v2.11.7 (release binary) and master at 8507b63.
+
+Caddyfile:
+
+```
+:9080 {
+	root * .
+	encode
+	file_server
+}
+```
+
+```
+$ python3 -c 'print("hello caddy\\n" * 200, end="")' > asset.txt
+
+$ curl -sI -H 'Accept-Encoding: gzip' http://localhost:9080/asset.txt
+HTTP/1.1 200 OK
+Content-Encoding: gzip
+Content-Type: text/plain; charset=utf-8
+Content-Length: 20
+
+$ curl -s -D - -o /dev/null -H 'Accept-Encoding: gzip' http://localhost:9080/asset.txt
+HTTP/1.1 200 OK
+Content-Encoding: gzip
+Content-Type: text/plain; charset=utf-8
+Content-Length: 52
+
+$ curl -sI -H 'Accept-Encoding: zstd' http://localhost:9080/asset.txt
+HTTP/1.1 200 OK
+Content-Encoding: zstd
+Content-Type: text/plain; charset=utf-8
+Content-Length: 13
+```
+
+(Some headers trimmed. For a larger file the GET is chunked with no `Content-Length`, and HEAD still says 20.)
+
+Expected: no `Content-Length` on the HEAD response, as for a dynamically compressed GET (see #4902).
+
+Cause: on HEAD nothing is written, so `responseWriter.Close()` in `modules/caddyhttp/encode/encode.go` runs `init()` to set the encoding headers and then closes the encoder. Closing writes the empty-stream trailer to the client writer, and net/http turns those bytes into `Content-Length` for the HEAD response. The existing HEAD case in the conformance tests wraps the recorder in a writer that throws writes away, so it does not see these bytes.
+
+I have a small patch with a test (skip `Close()` on the encoder when no body was written) and can open a PR if this sounds right.
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+Claude Code (Claude Opus) helped write the reproduction, the patch and its test. I reviewed every line and re-ran the steps above myself."""
+start = "c8591a1e46e4d0e39b6ca20633c44cd42f874f71"
+fix = "093fd4b7ec3d299c7c9bcfbdad30827de783d36c"
+hidden_tests = ["modules/caddyhttp/encode/encode_conformance_test.go"]
+closed = 2026-10-09
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8148"
+pull = 8150
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-18: The fastcgi transport should wrap dial failures as reverseproxy.DialError so lb_try_duration retries
+# non-GET requests.
+# issue opened 2026-10-07, fix opened 2026-10-08, squash (or single commit); source files:
+# modules/caddyhttp/reverseproxy/fastcgi/fastcgi.go, modules/caddyhttp/reverseproxy/reverseproxy.go (7 lines); request
+# from body (never edited).
+# reading notes: text names the fix (return reverseproxy.DialError); test keeps the existing 'dialing backend:' prefix
+[[situation]]
+id = "caddy-18"
+request = """
+fastcgi transport: dial errors are not wrapped as DialError, so lb_try_duration never retries non-GET requests
+
+### Summary
+
+With `php_fastcgi` (fastcgi transport), a failed dial to the backend is returned as a plain error, not a `reverseproxy.DialError`. Because `LoadBalancing.tryAgain` only treats a `DialError` as safe to retry for non-GET methods, `lb_try_duration` / `lb_try_interval` retry a **GET** for the full try duration, but a **POST** (or any non-GET) gets an immediate 502 — even though nothing was sent to the backend.
+
+This shows up when the backend container is briefly unresolvable/unreachable (e.g. a container recreate): reads ride it out, writes fail instantly.
+
+### Reproduce (v2.8.4; the same code is on master)
+
+```caddyfile
+:8080 {
+	php_fastcgi nosuchhost.invalid:9000 {
+		lb_try_duration 4s
+		lb_try_interval 250ms
+	}
+}
+```
+
+```
+$ curl -s -o /dev/null -w '%{http_code} %{time_total}\\n' localhost:8080/x
+502 4.23                       # retried for the whole try duration
+$ curl -s -o /dev/null -w '%{http_code} %{time_total}\\n' -F file=@small.txt localhost:8080/x
+502 0.008                      # not retried at all
+```
+
+The error log shows `dialing backend: dial tcp: lookup nosuchhost.invalid ...: no such host` for both.
+
+### Cause
+
+- `modules/caddyhttp/reverseproxy/fastcgi/fastcgi.go` (`RoundTrip`): `return nil, fmt.Errorf("dialing backend: %v", err)`
+- `modules/caddyhttp/reverseproxy/reverseproxy.go` (`LoadBalancing.tryAgain`): `_, isDialError := proxyErr.(DialError)`; when it is not a `DialError` and `RetryMatch == nil && req.Method != "GET"`, it returns `false`.
+
+The HTTP transport's dial failures are wrapped as `DialError`, so `reverse_proxy` does retry a failed dial for any method; the fastcgi transport does not.
+
+### Expected
+
+A failed dial in the fastcgi transport is wrapped as `reverseproxy.DialError` (e.g. `return nil, reverseproxy.DialError{err}`), so `lb_try_duration` retries it for every method, the same as the HTTP transport. Using `lb_retry_match` for POST is not a substitute: it also retries after a connection was established, where the request may already have been processed."""
+start = "6727b2f3a92bfc20f897ea9a24e88a4013274d55"
+fix = "221ebc4503398fa8c87d95a52d43d0d93a6aeef4"
+hidden_tests = ["modules/caddyhttp/reverseproxy/fastcgi/incremental_test.go"]
+closed = 2026-10-08
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8171"
+pull = 8172
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# caddy-19: random_choose should pick the least loaded of the chosen hosts even when none is idle.
+# issue opened 2026-10-06, fix opened 2026-10-06, squash (or single commit); source files:
+# modules/caddyhttp/reverseproxy/selectionpolicies.go (6 lines); request from body (never edited).
+# reading notes: filed by fixer; text names the fix (reset best instead of append); AI-drafted report; deterministic
+# loop test
+[[situation]]
+id = "caddy-19"
+request = """
+reverseproxy: random_choose picks the busier host half the time once no upstream is idle
+
+### Issue Details
+
+`lb_policy random_choose 2` is meant to pick two upstreams at random and send the request to the less loaded one. That only works while one of the two has 0 requests in flight. Once both are busy, which is the normal state under load, it picks between them at random, so it behaves like `lb_policy random`.
+
+Version: v2.11.7 (release binary) and master at 700d6032.
+
+Caddyfile, with a slow backend on :9011 (3 s per response) and a fast one on :9012 (0.3 s):
+
+```
+{
+	admin off
+	auto_https off
+}
+:9010 {
+	reverse_proxy 127.0.0.1:9011 127.0.0.1:9012 {
+		lb_policy random_choose 2
+	}
+}
+```
+
+Sending 80 requests 50 ms apart:
+
+```
+random_choose 2: slow=39  fast=41
+least_conn:      slow=11  fast=69
+```
+
+Expected: `random_choose 2` with two upstreams should match `least_conn`, since both are always candidates.
+
+Cause: `leastRequests` in `modules/caddyhttp/reverseproxy/selectionpolicies.go`. When it finds a host with fewer active requests than the best so far, it appends that host to `best` instead of starting `best` over with it. For hosts with [30, 1] requests, `best` ends up holding both, and one is picked at random. (#7873 fixed the idle-host shortcut above this loop, not this part.)
+
+I have a small patch with a test and can open a PR if this sounds right.
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+Claude Code (Claude Opus) helped write the reproduction, the patch and its test. I reviewed every line and re-ran the steps above myself."""
+start = "c1acb2fcbac9c659f601ad3a920653ac959ff952"
+fix = "036895ed4bad6b1ec395ad09f7164eedbbb844e3"
+hidden_tests = ["modules/caddyhttp/reverseproxy/selectionpolicies_test.go"]
+closed = 2026-10-07
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8158"
+pull = 8160
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-20: Importing a file that exists but cannot be accessed should report the OS error rather than 'File to import
+# not found'.
+# issue opened 2026-10-06, fix opened 2026-10-06, squash (or single commit); source files:
+# caddyconfig/caddyfile/parse.go (8 lines); request from oldest of 2 edit records.
+# reading notes: test uses ENOTDIR (path through a regular file) instead of EACCES; non-Windows branch
+[[situation]]
+id = "caddy-20"
+request = """
+Caddy reports "File to import not found" when file exists
+
+### Issue Details
+
+When I try to start `caddy`, I get:
+
+```
+Error: adapting config using caddyfile: File to import not found: /home/me/mnt/other/home/code/me/site/Caddyfile, at Caddyfile:25
+```
+
+The entirety of my `Caddyfile` is:
+```
+import /home/me/mnt/other/home/code/me/site/Caddyfile
+```
+
+If I `ls` the file, it definitely exists:
+
+```
+» ls -l /home/me/mnt/other/home/code/me/site/Caddyfile
+-rw-r--r-- 1 me me 63 Oct  6 14:12 /home/me/mnt/other/home/code/me/site/Caddyfile
+```
+
+If I `strace caddy run`, it becomes more obvious what is happening:
+```
+newfstatat(AT_FDCWD, "/home/me/mnt/other/home/code/me/site/Caddyfile", 0x8bff0287968, AT_SYMLINK_NOFOLLOW) = -1 EACCES (Permission denied)
+write(2, "{\\"level\\":\\"info\\",\\"ts\\":1791310502."..., 89{"level":"info","ts":1791310502.1660664,"msg":"maxprocs: No GOMAXPROCS change to reset"}
+) = 89
+write(2, "Error: adapting config using cad"..., 151) = 151
+```
+
+Obviously, the underlying `EACCES` is on me; however, Caddy should not assume any & all failures mean the file doesn't exist, and instead, just forward & report the error the OS returns. E.g., `Unable to read {filename}: {errno_symbolic}` (i.e., here, `Unable to read /home/…/Caddyfile: Permission denied (EACCES)`) would be far more informative.
+
+<sub>note: I've changed the paths to be examples</sub>
+
+### Assistance Disclosure
+
+AI not used
+
+### If AI was used, describe the extent to which it was used.
+
+_No response_"""
+start = "700d60327d77d56ba81455acb989a698f1819640"
+fix = "c1acb2fcbac9c659f601ad3a920653ac959ff952"
+hidden_tests = ["caddyconfig/caddyfile/parse_test.go"]
+closed = 2026-10-07
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8161"
+pull = 8163
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# caddy-21: When Caddy rejects ECH it should send retry_configs so clients can retry with ECH.
+# issue opened 2026-10-04, fix opened 2026-10-04, squash (or single commit); source files:
+# modules/caddytls/connpolicy.go (12 lines); request from body (never edited).
+# reading notes: filed by fixer; integration test uses local_certs and local ports, waits for background certificates
+[[situation]]
+id = "caddy-21"
+request = """
+ECH: `retry_configs` are never sent when ECH is rejected
+
+### Issue Details
+
+I've been setting up ECH across all my services but noticed that when Caddy rejects ECH (in this case a client having a stale ECH config) it completes the handshake but never includes `retry_configs` so clients can't retry with ECH and are forced to fallback to plaintext SNI.
+
+Curl reports is as `ECH: no retry_configs`:
+```
+* ECH: ECHConfig from command line
+* TLSv1.3 (OUT), TLS alert, ECH required (633):
+* ECH: no retry_configs (rv = 1)
+* ECH required: error:0A0001A8:SSL routines::ech required
+curl: (101) ECH required: error:0A0001A8:SSL routines::ech required
+```
+Compared to `defo.ie`:
+
+```
+* ECH: ECHConfig from command line
+* TLSv1.3 (OUT), TLS alert, ECH required (633):
+* ECH: retry_configs AQD+DQA8cwAgACAUA9J29qGRvf2Bu5RjPUiFePUZet6uUqokRWzh3JhrXAAEAAEAAQANY292ZXIuZGVmby5pZQAA/g0APMAAIAAgYJPC590RGn9/oGrGIuiDUXwXaOVxd…
+* ECH: retry_configs for defo.ie from cover.defo.ie, 424 -105
+```
+
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+Claude Opus 5.5 identified the underlying problem after initial analysis by hand"""
+start = "96eadf18f6a694ef4650bd442f221c47c59fb857"
+fix = "700d60327d77d56ba81455acb989a698f1819640"
+hidden_tests = ["caddytest/integration/ech_test.go"]
+closed = 2026-10-05
+kind = "missing-behaviour"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8141"
+pull = 8142
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-22: file_server should return 404 (and let pass_thru fall through) for a path below a regular file instead of
+# 400.
+# issue opened 2026-10-03, fix opened 2026-10-03, squash (or single commit); source files:
+# modules/caddyhttp/fileserver/staticfiles.go (6 lines); request from body (never edited).
+# reading notes: filed by fixer; links a community thread but the repro is in the text; test also keeps NUL-byte paths
+# at 400
+[[situation]]
+id = "caddy-22"
+request = """
+file_server returns 400 for paths below a regular file
+
+### Issue Details
+
+On Caddy v2.11.7, a valid request below a regular file returns 400 and prevents `file_server pass_thru` from reaching the next handler.
+
+Reproduce with `touch file.txt`, `caddy file-server --listen 127.0.0.1:9080 --root .`, and `curl -i http://127.0.0.1:9080/file.txt/child`; this should return 404, as `/missing/child` does.
+This follows the [Nextcloud report](https://caddy.community/t/nextcloud-setup-broken-after-update-to-2-10-2/33140) and [the maintainer's follow-up](https://github.com/caddyserver/caddy/pull/7017#issuecomment-3513275702)
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+After encountering the bug, Claude Opus 5.5 identified and reproduced it."""
+start = "7ef5c60ed0f1f0a5d87f9f8db4a290dbb50e3e48"
+fix = "7ba5e147acb504c825081d0640e14bd021ecbb00"
+hidden_tests = ["modules/caddyhttp/fileserver/staticfiles_test.go"]
+closed = 2026-10-04
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8127"
+pull = 8131
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-23: caddy fmt should keep an opening brace that ends the input instead of deleting it.
+# issue opened 2026-09-21, fix opened 2026-09-21, squash (or single commit); source files:
+# caddyconfig/caddyfile/formatter.go (61 lines); request from body (never edited).
+# reading notes: filed by fixer; text names the fix (flush pending brace after loop); AI-assisted report
+[[situation]]
+id = "caddy-23"
+request = """
+caddy fmt deletes an opening brace at the end of the input
+
+### Issue Details
+
+`caddyfile.Format` silently deletes an opening brace when the brace is the last non-space character of the input, so `caddy fmt` removes a character the user typed.
+
+```
+input   "localhost {"   ->  output "localhost\\n"
+input   "{"             ->  output "\\n"
+input   "{ {"           ->  output "{\\n"
+```
+
+Reproduce with the CLI:
+
+```sh
+printf 'localhost {' > Caddyfile
+caddy fmt Caddyfile
+```
+
+```
+localhost
+{"level":"error","ts":...,"msg":"Caddyfile:1: Caddyfile input is not formatted; Tip: use '--overwrite' to update your Caddyfile in-place instead of previewing it. Consult '--help' for more options"}
+```
+
+The brace is gone from the preview, and the message then points the user at `--overwrite`, which writes that result back over their file.
+
+This matters most with format-on-save, and with `caddy fmt --overwrite` the deletion is written back to the user's file. A Caddyfile whose last line has just opened a block is a normal intermediate state while editing, and formatting it should not drop the brace.
+
+It also breaks idempotence, which this repo already checks for in `caddyconfig/caddyfile/formatter_fuzz.go`:
+
+```
+Format("{ {")  ->  "{\\n"
+Format("{\\n")  ->  "\\n"
+```
+
+The reason that fuzz target never reported it is that it only uses the idempotence result as a go-fuzz corpus priority (`return 1` / `return 0`), so a non-idempotent input is deprioritised rather than reported as a failure.
+
+**Cause**
+
+`Format` writes `{` lazily. On `case ch == '{'` it records `openBrace = true` / `openBraceWritten = false` and `continue`s, and the brace is only emitted later, when a following regular character is processed:
+
+https://github.com/caddyserver/caddy/blob/master/caddyconfig/caddyfile/formatter.go#L355-L358
+
+If the input ends while a brace is still pending, the loop exits and nothing flushes it, so the brace is never written. There is no flush after the loop; the function goes straight to `bytes.TrimSpace` and returns.
+
+**Proposed fix**
+
+Flush a pending brace after the read loop ends. I have this working locally as a four-line change, with two cases added to `TestFormatter`, and the full test suite passes. Happy to open a PR if you would like it.
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+I used Claude Code to fuzz the Caddyfile formatter for idempotence, which is how this was found, and to help trace the root cause and draft the fix and the test cases. I reviewed the change, confirmed the behaviour before and after it, and ran the test suite locally."""
+start = "2f34b936f5d1f5d19e5e1e0905032133bcbf9b05"
+fix = "b72bf7a1efa0cfbf3c97b66db457912dc0d889fd"
+hidden_tests = ["caddyconfig/caddyfile/formatter_test.go"]
+closed = 2026-10-03
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8046"
+pull = 8047
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-24: map should accept a literal rule and a regexp rule with the same input text instead of reporting a
+# duplicate.
+# issue opened 2026-09-25, fix opened 2026-09-26, squash (or single commit); source files:
+# modules/caddyhttp/map/map.go (7 lines); request from body (never edited).
+# reading notes: filed by fixer; existing 'duplicate input' message still checked
+[[situation]]
+id = "caddy-24"
+request = """
+map rejects a literal and regexp rule with the same input text
+
+### Issue Details
+
+I expected a map to accept a literal rule followed by a broader regexp rule but Caddy rejects the configuration as a duplicate input.
+
+Save this as `Caddyfile`:
+
+```caddyfile
+:9080 {
+    map {http.request.uri.path} {result} {
+        /abc literal
+        ~/abc regexp
+    }
+    respond "{result}"
+}
+
+```
+
+Build Caddy and validate it:
+
+```bash
+go build -o /tmp/caddy-map-check ./cmd/caddy
+/tmp/caddy-map-check validate --config Caddyfile --adapter caddyfile
+
+```
+
+**Expected:** Validation succeeds. The literal rule handles `/abc`; the regexp rule can handle other paths containing `/abc`.
+
+**Actual:** Validation exits with:
+
+```text
+http.handlers.map: invalid configuration: mapping 1 has a duplicate input '/abc' previously used with mapping 0
+
+```
+
+The Caddyfile parser puts these rules in different fields (`Input` and `InputRegexp`), but `Handler.Validate()` uses only the input text as the duplicate-check key. Changing the second rule to `~^/abc` makes validation succeed, so there is a workaround.
+
+### Assistance Disclosure
+
+AI not used
+
+### If AI was used, describe the extent to which it was used.
+
+_No response_"""
+start = "69ec5dfedf5ba8f7d042f8f2ff41baa5ce576ce8"
+fix = "ea1e94b89972b83b189cbb946352abd9acec0f8c"
+hidden_tests = ["modules/caddyhttp/map/map_test.go"]
+closed = 2026-09-26
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8064"
+pull = 8067
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-25: reverse_proxy with versions 3 should verify upstreams against tls_trust_pool rather than the system roots.
+# issue opened 2026-09-20, fix opened 2026-09-20, squash (or single commit); source files:
+# modules/caddyhttp/reverseproxy/httptransport.go (9 lines); request from oldest of 2 edit records.
+# reading notes: filed by fixer; text names the fix (build config once, give h3 a clone); test checks clone is a
+# distinct pointer, which the text states
+[[situation]]
+id = "caddy-25"
+request = """
+reverse_proxy with versions 3 silently ignores tls_trust_pool and verifies against the system roots
+
+### Issue Details
+
+A reverse_proxy that speaks HTTP/3 to its upstream ignores the CA configured with `tls_trust_pool`.
+
+Every dial fails with x509: certificate signed by unknown authority, because the HTTP/3 transport is built with `RootCAs == nil` and Go falls back to the system trust store. I have populated our Certs to this to make it work for now.
+
+The same proxy without versions 3 honours the trust pool correctly, which makes this look like a certificate problem rather than a config one.
+
+Minimal reproduction:
+
+An upstream serving HTTP/3 with a certificate from a private CA:
+
+```caddyfile
+site.internal {
+      reverse_proxy backend:4001 {
+              transport http {
+                      tls
+                      tls_server_name backend
+                      tls_trust_pool file /tls/myRootCa.crt
+                      versions 3
+              }
+      }
+}
+
+- Expected: the upstream's certificate verifies against `/tls/myRootCa.crt`.
+- Actual: tls: failed to verify certificate: x509: certificate signed by unknown authority. Dropping versions 3 (so the proxy uses HTTP/1.1 or HTTP/2) makes the identical config work.
+
+The running config still shows the pool, which is what makes this hard to spot. 
+
+`GET /config/` returns:
+```json
+{"protocol":"http","tls":{"ca":{"pem_files":["/tls/myRootCa.crt"],"provider":"file"},"server_name":"backend"},"versions":["3"]}
+```
+Cause (Per my best guess)
+
+`HTTPTransport.NewTransport` calls `MakeTLSClientConfig` twice:
+
+// modules/caddyhttp/reverseproxy/httptransport.go:422 for the HTTP/1.1+2 transport
+`rt.TLSClientConfig, err = h.TLS.MakeTLSClientConfig(caddyCtx)`
+
+// modules/caddyhttp/reverseproxy/httptransport.go:507 for the HTTP/3 transport
+`h.h3Transport.TLSClientConfig, err = h.TLS.MakeTLSClientConfig(caddyCtx)`
+
+`MakeTLSClientConfig` reaches the trust pool through `ctx.LoadModule(t, "CARaw")` and `LoadModuleclears` the raw field on its way out.
+
+So on the second call `t.CARaw` is `nil`, the `cfg.RootCAs = ca.CertPool()` branch is skipped, and the HTTP/3 transport gets a config with no roots and falls back.
+
+The cost falls entirely on the HTTP/3 path, because RoundTrip prefers h3Transport whenever it exists (`httptransport.go:648`). The transport that received the trust pool is never used for requests, the one that serves every request is the one that lost it.
+
+Module-backed fields are the only ones affected: `server_name`, `insecure_skip_verify` and `theclient-certificate` paths are plain struct fields and survive both calls.
+
+Suggested fix, happy to open a PR as I have a branch already ready for review in case you're open for it.
+
+Build the client config once and give the HTTP/3 transport a clone, rather than calling `MakeTLSClientConfig` a second time.
+
+Environment
+
+Reproduced on a build from master (September 2026), Alpine container, Go's system roots without the private CA installed. Both call sites and the `LoadModule` reset are unchanged in current master.
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+Claude to trace down the bug. Implementation and testing, as well as the bug report Without AI"""
+start = "128b9e75e0f30e853cb20c9a97ce06f9c9fe90a6"
+fix = "c18099a0af5e88c8d9da0b9d797f6f2c62d60a23"
+hidden_tests = ["modules/caddyhttp/reverseproxy/httptransport_test.go"]
+closed = 2026-09-21
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/8041"
+pull = 8042
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# caddy-26: skip_install_trust should also apply to CAs created by explicit site-level tls internal when auto_https is
+# off.
+# issue opened 2026-07-18, fix opened 2026-07-19, squash (or single commit); source files:
+# caddyconfig/httpcaddyfile/pkiapp.go (29 lines); request from body (never edited).
+# reading notes: AI-assisted report; test also covers a custom CA name via issuer internal
+[[situation]]
+id = "caddy-26"
+request = """
+skip_install_trust has no effect...
+
+### Issue Details
+
+Hey — found this while setting up Caddy on NixOS with Defined Networking (Nebula-based mesh VPN) for internal-only reverse proxying. `skip_install_trust` silently doesn't work in one specific configuration shape, which cost a fair bit of debugging time to trace back to `#7211`/`#7238`. Repro below is minimal and confirmed against a real deployment. Happy to provide more detail if useful.
+
+If it's helpful context for prioritization: this combination (auto_https off + explicit per-site `tls internal` + skip_install_trust) is a pretty natural shape for anyone running Caddy as an internal-only reverse proxy in a sandboxed/unprivileged environment (containers, NixOS systemd hardening, etc.) where writing to the OS trust store isn't possible — i.e. exactly the audience #7211 was trying to fix for.
+
+---
+
+# Issue: `skip_install_trust` has no effect on CAs created by an explicit site-level `tls internal` directive (follow-up to #7211)
+
+`#7238` correctly fixed `skip_install_trust` for the *implicit/default* CA path when `auto_https off` is set (per `buildPKIApp()`'s `!autoHTTPSOff` check). However, an explicit **site-level `tls internal`** directive creates its own CA through a different code path that doesn't check `skip_install_trust` at all — so trust-store installation is still attempted and fails silently in restricted/sandboxed environments (e.g. an unprivileged NixOS systemd service without `certutil` or write access to the system trust store).
+
+## Repro Caddyfile
+
+```caddyfile
+{
+    auto_https off
+    skip_install_trust
+}
+
+localhost:8080 {
+    respond "plain http, no tls"
+}
+
+internal.example.com {
+    respond "explicit tls internal site"
+    tls internal
+}
+```
+
+## Expected
+
+No attempt to install trust into the OS store for the CA created for `internal.example.com`, matching what `skip_install_trust` does for the implicit-CA path.
+
+## Actual
+
+```
+{"level":"error","logger":"pki.ca.local","msg":"failed to install root certificate","error":"failed to execute tee: exit status 1","certificate_file":"storage:pki/authorities/local/root.crt"}
+```
+
+The certificate itself still gets generated and Caddy continues running (non-fatal), but the option is silently ignored for this path, and the error log gives no indication `skip_install_trust` was even relevant — it just looks like a generic, unrelated `tee` failure.
+
+## Environment
+
+- Caddy version: 2.11.4
+- OS: NixOS (unprivileged systemd service, no `certutil`, read-only-ish trust store paths)
+- Deployment: `services.caddy` NixOS module, Caddyfile adapter
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+Debugged with AI assistance (source tracing); repro verified live"""
+start = "4974956b9c60530cb1d73845f61794d9af15df00"
+fix = "51db7f0313b98e047345343a939bb2a3bd975602"
+hidden_tests = ["caddyconfig/httpcaddyfile/pkiapp_test.go"]
+closed = 2026-08-25
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/7893"
+pull = 7894
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# caddy-27: Different active health checks against the same upstream address should keep independent health state.
+# issue opened 2026-07-10, fix opened 2026-08-03, squash (or single commit); source files:
+# modules/caddyhttp/reverseproxy/healthchecks.go, modules/caddyhttp/reverseproxy/hosts.go (63 lines); request from
+# oldest of 2 edit records.
+# reading notes: issue also asks for separate admin API entries and metric series; tests cover only health state; text
+# truncated
+[[situation]]
+id = "caddy-27"
+request = """
+reverse_proxy: different active health checks (health_uri/health_headers) against the same upstream address collapse into one shared health state
+
+### Issue Details
+
+## 1. Environment
+ 
+### 1a. Operating system and version
+ 
+Debian 12.14
+ 
+### 1b. Caddy version (`caddy version`)
+ 
+Detected on v2.11.1 (built with `xcaddy`).
+ 
+Reproduced on v2.11.4 (docker. Check the reproduction repo below).
+ 
+## 2. Description
+ 
+### 2a. What happens
+ 
+Two `reverse_proxy` handlers that dial the **same** upstream `host:port` but configure **different** active health checks (different `health_uri` and/or `health_headers`) share a single health state. Upstream health is stored in the process-global host pool keyed only by the dial address, so both handlers resolve to the same `Host` object.
+ 
+Consequences:
+ 
+- Only one checker's result is reflected: the shared `healthy` flag flaps / is last-writer-wins.
+- `GET /reverse_proxy/upstreams` returns a single entry for the address, and `caddy_reverse_proxy_upstreams_healthy{upstream="..."}` is a single series — so the two distinct health results cannot be represented or graphed separately.
+- Real-world impact: a vhost that is genuinely unhealthy on a node can be reported healthy (and vice-versa), and one vhost's outage evicts the node from the *other* vhost's data path.
+### 2b. Why it's a bug
+ 
+When #4341 was filed, active checks could not use an alternate URI, so "one dial address" was effectively equivalent to "one health check" and keying by address was consistent. Now that `health_uri` and `health_headers` are configurable per active check, two checks against the same address are semantically distinct health targets, but the state model still collapses them onto one address-keyed `Host`. (This matches the maintainer's own note on #4341 that the host used to be "equivalent to the active health check.")
+ 
+Typical setup that hits this: Caddy in front of another reverse proxy that routes by `Host` / `X-Forwarded-Host`; each vhost checks a different backend health path on the same node. See the "Real-world use case" section below for why this is unavoidable under end-to-end TLS.
+ 
+### 2c. Log output
+ 
+PASTE edge logs showing both checks running against the same host (e.g. `/healthz` -> 200 and `/health` -> 503 for the backend), plus a short sample of the metric value flapping.
+ 
+### 2d. Workaround(s)
+ 
+Give each vhost a distinct backend hostname (DNS alias to the same node) or a distinct port so the dial addresses differ; this yields separate `Host` objects, separate health state, and separate metric series. This is the "N hostnames for one IP" hack already noted in #4341: functional, but it forces alias management and duplicates connection/state that would otherwise be shared. There is no way to keep one address and still track two health results. (Under end-to-end TLS this workaround is not even a simple rename — see the use case below.)
+ 
+### 2e. Relevant links
+ 
+- #4341 (this behavior; closed but not resolved by the referenced PR)
+- #4470 (dynamic upstreams / SRV + A/AAAA — orthogonal; active health checks don't run on per-request dynamic upstreams, and it still requires distinct names)
+- #7544 (related concern about multiple handlers sharing the same upstream gauge)
+- Reproduction repo: https://github.com/73VW/caddy-healthcheck-shared-state-repro
+## 3. Tutorial (minimal steps to reproduce)
+ 
+Self-contained, no external services. Save as `/tmp/Caddyfile`, then run `docker run --rm -p 8080:8080 -p 2019:2019 -v "/tmp/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2.11.4-alpine`.
+ 
+```
+{
+    metrics
+    admin 0.0.0.0:2019
+    auto_https off
+}
+ 
+# Mock backend that DISAGREES per health path on the SAME address (localhost:9000)
+:9000 {
+    request_header Host {http.request.header.X-Forwarded-Host}
+    @s3 host s3.localhost
+    handle @s3 {
+        handle_path /healthz {
+            respond 200
+        }
+        respond "welcome to the s3 backend" 200
+    }
+    @admin host admin.localhost
+    handle @admin {
+        handle_path /health {
+            respond 503
+        }
+        respond "welcome to the admin backend" 200
+    }
+    handle {
+        respond "backend ok" 200
+    }
+}
+ 
+:8080 {
+    @s3 host s3.localhost
+    handle @s3 {
+        reverse_proxy localhost:9000 {
+            health_uri /healthz
+            health_fails 3
+            health_interval 10s
+            health_headers {
+                X-Forwarded-Host s3.localhost
+            }
+        }
+    }
+    @admin host admin.localhost
+    handle @admin {
+        reverse_proxy localhost:9000 {
+            health_uri /health
+            health_fails 3
+            health_interval 10s
+            health_headers {
+                X-Forwarded-Host admin.localhost
+            }
+        }
+    }
+}
+```
+ 
+Then observe:
+ 
+```
+# STRUCTURAL: one entry for localhost:9000, though two different checks are configured
+curl --silent http://localhost:2019/reverse_proxy/upstreams | jq
+ 
+# BEHAVIORAL: single series, value flaps between 1 and 0 (or sticks to one writer)
+watch --interval 1 'curl --silent http://localhost:2019/metrics | grep caddy_reverse_proxy_upstreams_healthy'
+```
+ 
+**Expected:** the two active checks target the same node via different URIs, so their results should be trackable independently (distinct state and/or distinct metric series).
+ 
+**Actual:** a single address-keyed `Host` holds one shared `healthy` value; `/reverse_proxy/upstreams` and the metric show one entry, and the value flaps depending on which checker wrote last.
+ 
+## 4. Real-world use case (motivation)
+ 
+This is not a contrived config — it falls out of running **end-to-end HTTPS to backends that have no stable IP**.
+ 
+Setup:
+ 
+- Two Caddy reverse proxies sit in a DMZ as the single public entry point. They also run an internal ACME CA.
+- Backend nodes live on private networks (an on-prem LAN, plus a cloud site reached over a VPN). They have no fixed IP: DHCP assigns their address and updates a dynamic-DNS zone, so each node is reachable only by its dynDNS name (`<node>.dyn.example.net`).
+- Each node obtains its TLS certificate from the edge CA (via ACME), issued for its dynDNS name.
+- The edge proxies to the nodes over HTTPS.
+- The nodes are all **distinct machines** — this is **not** a pool of interchangeable replicas of one service. Each node is unique.
+- A single machine may expose **one or several hostnames for one or several unrelated services** (for example: a Django API backing an Angular front-end, plus a separate Flask app for the same client). Each of those services has its own health endpoint and must be checked independently, even though they share the machine's single dial address.
+The constraint that creates the collision:
+ 
+- For upstream TLS to validate, the SNI / upstream `Host` must equal the node's certificate name — i.e. the node's dynDNS name. So the edge pins `Host = <node>.dyn.example.net` on every upstream connection to that node.
+- But a single node serves several virtual services (e.g. an object-store data endpoint and its separate admin endpoint). Because `Host` is pinned to the machine name for TLS, the real service identity cannot travel in `Host`; it is carried in `X-Forwarded-Host`, and the node swaps `X-Forwarded-Host` → `Host` internally to route to the right vhost.
+Result: to monitor each service independently, the edge configures one `reverse_proxy` per service, each with a different `health_uri` and/or a different `X-Forwarded-Host` — yet all of them dial the **same** node address (`<node>.dyn.example.net:443`). That is exactly the case that collapses today: same dial address, different active health checks, one shared `Host` object.
+ 
+Why dynamic upstreams (#4470) do **not** apply here: those solve *address discovery for a pool of interchangeable backends*. In this topology the upstreams are not interchangeable and there is no pool to resolve — each machine is unique and hosts unrelated services. The multiplicity is *services per machine*, not *replicas per service*, so load balancing / service discovery is orthogonal to the problem. (And active health checks don't run on dynamic upstreams anyway, as noted in 2e.)
+ 
+Note this also makes the 2d workaround costlier than a cosmetic rename here: giving each service a distinct dial name (`<node>-admin.dyn.example.net`) would break the "upstream `Host` must equal the certificate name" invariant, so it additionally requires either issuing an extra certificate per alias or overriding the upstream SNI/`Host`. In other words, end-to-end TLS to a shared, dynamically-named node structurally pushes multiple distinct health checks onto a single dial address.
+ 
+Operationally, the workaround also defeats a core goal of this setup: **internal names are meant to be fully automatic**. Each machine gets exactly one dynDNS record, maintained by DHCP, so adding a new service to an existing machine requires **zero** internal DNS changes. Minting a distinct internal name per service (per 2d) reintroduces exactly the manual internal-DNS bookkeeping the dynamic-DNS design was built to eliminate — one new record for every service added to a machine. Exposing a service publicly still needs an external CNAME plus an edge config change, and that is expected and unavoidable; but that cost is external. The regression is purely on the internal side — the side deliberately engineered to be zero-touch.
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+AI (Claude) was used to: research the relevant Caddy internals (the address-keyed global host pool) and prior issues (#4341, #4470, #7544); help draft this report; and scaffold the reproduction repository linked above. I reviewed everything, built and ran the reproduction myself, and confirmed the single-entry `/reverse_proxy/upstreams` output and the metric behavior — originally on v2.11.1 in production and on v2.11.4 with the minimal repro. The analysis and conclusions are my own."""
+start = "1fed032234ecc85c6cbab681e5c4fc231ea477b1"
+fix = "6584c75999996c71f154a04f4e41f1ebce65a9c3"
+hidden_tests = ["modules/caddyhttp/reverseproxy/active_health_test.go"]
+closed = 2026-08-12
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/7870"
+pull = 7916
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# caddy-28: roll_interval should accept the 'd' day unit like other Caddy durations.
+# issue opened 2026-07-08, fix opened 2026-07-21, squash (or single commit); source files:
+# modules/logging/filewriter.go (8 lines); request from body (never edited).
+[[situation]]
+id = "caddy-28"
+request = """
+roll_interval does not support "d" (day) duration
+
+### Issue Details
+
+Documentation about the `roll_interval` log rotation option at https://caddyserver.com/docs/caddyfile/directives/log#roll_interval states that it supports duration strings (https://caddyserver.com/docs/conventions#durations), including `d` for day.
+
+But trying to set `roll_interval 1d` in a Caddyfile fails with an error when starting Caddy.
+
+```
+mywebsite:80 {
+    log {
+        output file /var/log/caddy/mywebsite.log {
+            roll_interval 1d
+        }
+        format json
+    }
+    respond "OK"
+}
+```
+
+```
+# caddy --version
+v2.11.4 h1:XKxkMTgNSizEvKG6QHue6cAsFOteU2qA61w2tKkCWi0=
+# caddy run --environ --config /etc/caddy/Caddyfile
+[...]
+Error: adapting config using caddyfile: parsing caddyfile tokens for 'log': parsing roll_interval duration: time: unknown unit "d" in duration "1d", at /etc/caddy/Caddyfile:4
+```
+
+
+### Assistance Disclosure
+
+AI not used
+
+### If AI was used, describe the extent to which it was used.
+
+_No response_"""
+start = "9738f49b952a337cdaf42175a0e92b01974c0e3c"
+fix = "31daa220fcba80c7ed7ea636e7f04c568c8cccf8"
+hidden_tests = ["modules/logging/filewriter_test.go"]
+closed = 2026-07-21
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/7864"
+pull = 7900
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# caddy-29: Quoted '{' and '}' in a Caddyfile should be treated as literal arguments, not block delimiters.
+# issue opened 2026-07-11, fix opened 2026-07-11, squash (or single commit); source files:
+# caddyconfig/caddyfile/dispenser.go, caddyconfig/caddyfile/lexer.go, caddyconfig/caddyfile/parse.go (80 lines);
+# request from body (never edited).
+# reading notes: filed by fixer (maintainer); short but clear
+# added to the candidate's hidden tests: caddytest/integration/caddyfile_adapt/quoted_brace_args.caddyfiletest
+[[situation]]
+id = "caddy-29"
+request = """
+quoted braces should not affect caddyfile block parsing
+
+### Issue Details
+
+right now, this caddyfile fails
+
+```caddyfile
+:8080 {
+	respond "{"
+}
+```
+
+i think it would be correct to ignore quoted "{" and "}" as open/close characters for block parsing
+
+### Assistance Disclosure
+
+AI used
+
+### If AI was used, describe the extent to which it was used.
+
+ai discovered while working on a different feature"""
+start = "b2be548275c99cd061ec1c2f9c27eedae64a17b8"
+fix = "873fac5fc094fe538d0c477509127bb321d51a32"
+hidden_tests = ["caddyconfig/caddyfile/dispenser_test.go", "caddyconfig/caddyfile/formatter_test.go", "caddyconfig/caddyfile/parse_test.go", "caddytest/integration/caddyfile_adapt/quoted_brace_args.caddyfiletest"]
+closed = 2026-07-12
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/caddyserver/caddy/issues/7874"
+pull = 7875
+self_filed = true
+bot_filed = false
+security_trap = false

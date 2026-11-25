@@ -1,0 +1,3054 @@
+# rclone: rclone/rclone, go, reserve project of set 2026-12 (fulltest PLAN sections 3 and 4).
+# Settings: written by reading the project's CI and docs at the oldest and newest start commit, nothing run;
+# every command marked `unverified` is for the admission session to try and fix. Notes: notes/rclone.md.
+# Situations: every candidate of bench-candidates/rclone.toml (REPORT-window-rule.md, 2026-11-26), in its order,
+# all 24 of them.
+# half is `work` for every candidate until the split after admission and the hardness runs (cloud/README.md).
+# hidden_tests: the fix's changed files (start..fix, compare API) that match [project] tests or the travel
+# globs ["testdata/*", "*/testdata/*"],
+# and not []; deleted files left out.
+# self_filed: the issue's author opened the fix. bot_filed: the issue's author is an automation account
+# (a login ending in bot or -ci, or turso-github-handyman, roboturso). security_trap: the reading pass's
+# flag for a request whose natural fix invites a flaw. kind race is the race flag.
+
+# rclone: settings for Rail's bench (no [[situation]] tables; those are written elsewhere).
+# Read at the oldest start c1b5756eec76b9f0f7ee4da43fdbcae9cb73a2db (rclone-24, go 1.25.0) and the newest
+# 554ddb5de24f0e396aa4aa8afc97f4a039206f66 (rclone-01, go 1.26.0). See rclone.md for what was read and why.
+# Go mechanics shared by the four Go projects: GO-COMMON.md (BASH_ENV sources $BENCH_CACHE/go-env.sh, which sets the
+# absolute GOMODCACHE and GOCACHE that the literal [commands] env table cannot hold).
+
+[project]
+name = "rclone"
+repo = "https://github.com/rclone/rclone"
+language = "go"
+package = "github.com/rclone/rclone"
+tests = ["*_test.go"]
+# clash: the Go default "dir". See rclone.md: vfs/, fs/sync/, fs/operations/ and backend/chunker/ keep helpers,
+# TestMain or the TestIntegration runner in other _test.go files, so "dir" can drop a file the hidden tests need.
+clash = "dir"
+build_dirs = []
+
+[commands]
+# from: Makefile@554ddb5de2 (quicktest: RCLONE_CONFIG="/notfound" go test ./...), AGENTS.md@554ddb5de2,
+#       go.mod@c1b5756eec (go 1.25.0) and @554ddb5de2 (go 1.26.0); toolchain caching from Go 1.24.7 cmd/go source.
+# unverified: never run; the offline toolchain switch and the vet warm-up are reasoned from source, not tried.
+setup = '''
+set -euo pipefail
+mkdir -p "$BENCH_CACHE"
+t=$(mktemp "$BENCH_CACHE/.go-env.XXXXXX")
+printf '%s\n' 'export GOMODCACHE="$BENCH_CACHE/gomod"' 'export GOCACHE="$BENCH_CACHE/gocache"' > "$t"
+mv -f "$t" "$BENCH_CACHE/go-env.sh"
+. "$BENCH_CACHE/go-env.sh"
+export GOPROXY=https://proxy.golang.org,direct
+go version
+go mod download
+go list -deps -test ./... > /dev/null
+go build ./...
+go vet ./... > /dev/null 2>&1 || echo "setup: go vet ./... reports problems at this start (not fatal)"
+git diff --quiet -- go.mod go.sum || { git diff --stat -- go.mod go.sum; git checkout -- go.mod go.sum; }
+if [ -n "$(git status --porcelain)" ]; then git status --porcelain | head -20; echo "setup left changes in the copy"; exit 1; fi
+'''
+# from: Makefile@554ddb5de2 quicktest (go test, RCLONE_CONFIG=/notfound, -timeout 20m); selection by -run is ours.
+# unverified: the -run selection, the InternalTest fallback (rclone-07) and the "no tests to run" guard are untried.
+test_files = '''
+. "$BENCH_CACHE/go-env.sh"
+list=""
+for f in {files}; do
+  case "$f" in *_test.go) ;; *) continue ;; esac
+  [ -f "$f" ] || continue
+  n=$(grep -ohE '^func (Test|Fuzz|Example)[A-Za-z0-9_]*\(' "$f" | sed -E 's/^func //; s/\($//' | grep -vx TestMain | paste -sd'|' -)
+  if [ -z "$n" ] && grep -qE '^func \([A-Za-z_]+ \*Fs\) InternalTest\(' "$f"; then n=TestIntegration; fi
+  list="$list$(dirname "$f") ${n:-.*}"$'\n'
+done
+[ -n "$list" ] || { echo "no Go test file among: {files}"; exit 2; }
+rc=0
+for d in $(printf '%s' "$list" | cut -d' ' -f1 | sort -u); do
+  names=$(printf '%s' "$list" | awk -v d="$d" '$1 == d { print $2 }' | paste -sd'|' -)
+  out=$(go test -count=1 -timeout 20m "./$d" -run "^($names)\$" 2>&1); st=$?
+  printf '%s\n' "$out"
+  if [ $st -eq 0 ] && grep -q 'no tests to run' <<< "$out"; then echo "FAIL: no hidden test ran in ./$d"; st=1; fi
+  [ $st -eq 0 ] || rc=1
+done
+exit $rc
+'''
+# from: Makefile@554ddb5de2 quicktest; AGENTS.md@554ddb5de2 ("go test -v ./backend/memory/").
+# unverified: the walk-up to the nearest folder with Go files and the "." case (go build ./... then the root package).
+test_package = '''
+. "$BENCH_CACHE/go-env.sh"
+p={package}
+while [ "$p" != . ] && ! compgen -G "$p/*.go" > /dev/null; do p=$(dirname "$p"); done
+if [ "$p" = . ]; then go build ./... && go test -count=1 -timeout 20m .; else go test -count=1 -timeout 20m "./$p"; fi
+'''
+# The folder of the changed file, cut at testdata/ (a Go package is a folder); a root file gives ".".
+package_of = 'regex:^(.*?)(?:/testdata/.*|/[^/]*)$'
+# from: Go's testing output: "--- FAIL: TestX (0.00s)", subtests indented "    --- FAIL: TestX/sub (0.00s)".
+failed = '^\s*--- FAIL: (\S+)'
+timeout_minutes = 30
+# GOMODCACHE/GOCACHE are not here: the table is set literally and Go wants absolute paths. go-env.sh sets them.
+# GOSUMDB must stay sum.golang.org: a cached golang.org/toolchain module is still checked against the (cached)
+# checksum database, and GOSUMDB=off makes that check fail. RCLONE_CONFIG=/notfound is what CI's quicktest sets: it
+# makes fstests skip every backend integration test that needs a configured remote (fstests.go Run, "quicktest only").
+env = { GOTOOLCHAIN = "auto", GOPROXY = "off", GOSUMDB = "sum.golang.org", GOFLAGS = "-mod=mod", BASH_ENV = "$BENCH_CACHE/go-env.sh", RCLONE_CONFIG = "/notfound", BASH_DEFAULT_TIMEOUT_MS = "1800000", BASH_MAX_TIMEOUT_MS = "7200000", GOMODCACHE = "/srv/rail-bench/cache/rclone/gomod", GOCACHE = "/srv/rail-bench/cache/rclone/gocache" }
+[rail.config.commands]
+# Rail's setup in a new worktree, offline: modules and build cache are shared through $BENCH_CACHE, so this only
+# checks that the toolchain and modules resolve offline and warms the worktree's build.
+# from: AGENTS.md@554ddb5de2 ("go build"). unverified: offline in a fresh worktree not tried.
+setup = '''
+. "$BENCH_CACHE/go-env.sh"
+go version && go build ./...
+'''
+# Fast part always: gofmt of changed .go files and go build ./... . Then go vet and go test of each changed package.
+# from: Makefile@554ddb5de2 (quicktest, check: golangci-lint with govet enable-all minus fieldalignment/shadow in
+# .golangci.yml@554ddb5de2, so plain go vet is a subset). unverified: golangci-lint left out (not installed, and its
+# "latest" version in CI cannot be pinned offline); timings estimated.
+verify = '''
+set -euo pipefail
+. "$BENCH_CACHE/go-env.sh"
+base="${RAIL_BASE:-refs/heads/main}"
+changed=$( { git diff --name-only "$base" --; git ls-files --others --exclude-standard; } | grep -vE '^\.(rail|claude)/' | sort -u || true)
+gofiles=$(printf '%s\n' "$changed" | grep -E '\.go$' | while read -r f; do if [ -f "$f" ]; then echo "$f"; fi; done || true)
+if [ -n "$gofiles" ]; then
+  bad=$(printf '%s\n' "$gofiles" | xargs gofmt -l)
+  if [ -n "$bad" ]; then echo "gofmt -w needed on: $bad"; exit 1; fi
+fi
+go build ./...
+pkgs=$(printf '%s\n' "$changed" | while read -r f; do
+  [ -n "$f" ] || continue
+  d=$(dirname "$f"); d=${d%%/testdata*}
+  while [ "$d" != . ] && ! compgen -G "$d/*.go" > /dev/null; do d=$(dirname "$d"); done
+  echo "./$d"
+done | sort -u || true)
+if [ -n "$pkgs" ]; then
+  go vet $pkgs
+  go test -count=1 -timeout 20m $pkgs
+fi
+'''
+timeout_secs = 1800
+setup_timeout_secs = 900
+verify_timeout_secs = 2400
+
+# The bench's additions, the same for every project file of this set:
+# - [commands] env BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS: the Bash tool limits Rail's own
+#   .claude/settings.json gives its worker, given to every child, so a plain arm's Bash tool is not cut at
+#   two minutes while Rail's runs for thirty.
+# - [commands] env GOMODCACHE and GOCACHE: the paths go-env.sh exports, written out for the store
+#   /srv/rail-bench (BENCH_STORE), so a child's Go finds the cached modules and toolchain even if its shell
+#   does not read BASH_ENV.
+# - [rail.config.worker] ladder: the Rail arm of the first run (PLAN section 6, owner 2026-11-25): Sonnet 5.5
+#   medium, then Opus 5.5 medium. It sits here because an arm file can give only one rung (bench/arms.py);
+#   person_ladder and contract stay as Rail's seed has them.
+# - [rail.config.claim] stale_minutes: above the longest Rail command's limit plus save_minutes (10), as
+#   `rail docs config` asks.
+[rail.config.worker]
+ladder = ["claude-sonnet-5-5:medium", "claude-opus-5-5:medium"]
+
+[rail.config.claim]
+stale_minutes = 55
+
+# rclone-01: With --name-transform, files moved to --backup-dir or renamed with --suffix should keep their destination
+# name instead of having the transform applied again.
+# issue opened 2026-11-13, fix opened 2026-11-13, squash (or single commit); source files: fs/operations/operations.go
+# (6 lines); request from body (never edited).
+# reading notes: text names the cause and the code path; issue author is a maintainer, not the fixer
+[[situation]]
+id = "rclone-01"
+request = """
+sync: --backup-dir and --suffix apply --name-transform to the backup's name
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+_No response_
+
+### What is the problem you are having with rclone?
+
+With `--name-transform`, every file that `sync`, `copy`, or `move` moves into `--backup-dir` gets the transform applied to its name. A replaced `p-file.txt` is backed up as `p-p-file.txt`, and a deleted `other.txt`, a file the transform never touched, is backed up as `p-other.txt`. The [docs](https://rclone.org/docs/#backup-dir-string) say these files are moved "in their original hierarchy".
+
+```sh
+mkdir -p /tmp/bknt/src /tmp/bknt/dst /tmp/bknt/bak
+printf NEW_LONGER > /tmp/bknt/src/file.txt
+printf OLD > /tmp/bknt/dst/p-file.txt
+printf X > /tmp/bknt/dst/other.txt
+rclone sync /tmp/bknt/src /tmp/bknt/dst --backup-dir /tmp/bknt/bak --name-transform prefix=p-
+ls /tmp/bknt/bak
+```
+
+Expected: `other.txt` and `p-file.txt`. Actual: `p-other.txt` and `p-p-file.txt`. Exit 0, and nothing is lost, but the backups are renamed. With a transform like `base64encode`, the deleted `other.txt` is backed up as `b3RoZXIudHh0`, which has to be decoded to find. With `all,`, directories are transformed too (`p-p-sub/p-p-file.txt`). `--suffix .bak` gives `p-p-file.txt.bak`, both with `--backup-dir` and without it (where the backup stays in the destination).
+
+Cause: `MoveBackupDir` builds the backup's name from the destination object's name, which is already final, and passes it to `operations.Move`:
+
+https://github.com/rclone/rclone/blob/b0ef5f6a6eca641a6bfb55bc05ef1595f4105d07/fs/operations/operations.go#L2043-L2048
+
+`operations.move` applies the transform to whatever name it's given:
+
+https://github.com/rclone/rclone/blob/b0ef5f6a6eca641a6bfb55bc05ef1595f4105d07/fs/operations/operations.go#L437-L439
+
+The `overwritten` lookup in `MoveBackupDir` uses the untransformed name, so it never finds an earlier backup at the transformed name. On local, the move replaces it anyway, as it does without a transform. I haven't tested a backend that allows duplicate names.
+
+Replaced files reach `MoveBackupDir` from `sync` [here](https://github.com/rclone/rclone/blob/b0ef5f6a6eca641a6bfb55bc05ef1595f4105d07/fs/sync/sync.go#L404) and deleted files through [`DeleteFileWithBackupDir`](https://github.com/rclone/rclone/blob/b0ef5f6a6eca641a6bfb55bc05ef1595f4105d07/fs/operations/operations.go#L565-L582). I reproduced it with `sync`, `copy`, and `move`, local to local, on `v1.76.0`, master b0ef5f6a6, and #10333. `--copy-dest` isn't affected. It has been this way since `--name-transform` was added in 013c56329 (`v1.70`).
+
+### rclone version
+
+```text
+rclone v1.76.0
+- os/version: darwin 26.6.2 (64 bit)
+- os/kernel: 25.6.0 (arm64)
+- os/type: darwin
+- os/arch: arm64 (ARMv8 compatible)
+- go/version: go1.27.3
+- go/linking: dynamic
+- go/tags: cmount
+```
+
+Also reproduced from source at master b0ef5f6a6.
+
+### Operating system
+
+macOS
+
+### Which cloud storage system are you using?
+
+local (it doesn't depend on the backend)
+
+### Output of `rclone config redacted`
+
+```ini
+Not needed: reproduced on local paths with no config.
+```
+
+### The command you were trying to run
+
+```shell
+rclone --config /notfound sync /tmp/bknt/src /tmp/bknt/dst --backup-dir /tmp/bknt/bak --name-transform prefix=p- -vv
+```
+
+### A log from the command with the `-vv` flag
+
+```shell
+`$T` stands for the temporary directory the test ran in.
+
+
+DEBUG : rclone: Version "v1.76.0" starting with parameters ["/usr/local/bin/rclone" "--config" "/notfound" "sync" "$T/src" "$T/dst" "--backup-dir" "$T/bak" "--name-transform" "prefix=p-" "-vv"]
+DEBUG : Creating backend with remote "$T/src"
+DEBUG : Using config file from ""
+DEBUG : Creating backend with remote "$T/dst"
+DEBUG : Creating backend with remote "$T/bak"
+DEBUG : file.txt: transformed to: p-file.txt
+DEBUG : Local file system at $T/dst: Waiting for checks to finish
+DEBUG : file.txt: size = 10 (Local file system at $T/src)
+DEBUG : p-file.txt: size = 3 (Local file system at $T/dst)
+DEBUG : file.txt: Sizes differ
+DEBUG : p-file.txt: transformed to: p-p-file.txt
+INFO  : p-file.txt: Moved (server-side) to: p-p-file.txt
+DEBUG : Local file system at $T/dst: Waiting for transfers to finish
+DEBUG : file.txt: transformed to: p-file.txt
+DEBUG : $T/dst/p-file.txt.f90b97cb.partial: isCloned: true, error: <nil>
+DEBUG : p-file.txt.f90b97cb.partial: size = 10 OK
+DEBUG : file.txt: md5 = b6cea8176b4f69ad15d1e1de37fe20c7 OK
+DEBUG : p-file.txt.f90b97cb.partial: renamed to: p-file.txt
+INFO  : file.txt: Copied (server-side copy) to: p-file.txt
+DEBUG : Waiting for deletions to finish
+DEBUG : other.txt: transformed to: p-other.txt
+INFO  : other.txt: Moved (server-side) to: p-other.txt
+INFO  : other.txt: Moved into backup dir
+INFO  : 
+Transferred:   	         10 B / 10 B, 100%, 0 B/s, ETA -
+Checks:                 4 / 4, 100%, Listed 3
+Deleted:                1 (files), 0 (dirs), 1 B (freed)
+Renamed:                2
+Transferred:            1 / 1, 100%
+Server Side Copies:     1 @ 10 B
+Server Side Moves:      2 @ 4 B
+Elapsed time:         0.0s
+
+DEBUG : 4 go routines active
+```
+
+### Anything else?
+
+Another `--name-transform` name that gets transformed twice, like #10332, but in a different place: #10333 doesn't fix this one. Found while writing up #10338.
+
+I didn't find an existing issue (searched issues and PRs for backup-dir, backup, and suffix with name-transform or transform)."""
+start = "554ddb5de24f0e396aa4aa8afc97f4a039206f66"
+fix = "d90195580231222daeb39a30b53a89db33f4266a"
+hidden_tests = ["fs/sync/sync_transform_test.go"]
+closed = 2026-11-25
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/10339"
+pull = 10340
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-02: When a --name-transform fails for a top-level file, rclone should keep the original name instead of
+# producing an empty name.
+# issue opened 2026-11-13, fix opened 2026-11-13, squash (or single commit); source files: lib/transform/transform.go
+# (9 lines); request from body (never edited).
+# reading notes: text names the fix (return original name as soon as a transform fails)
+[[situation]]
+id = "rclone-02"
+request = """
+lib/transform: a top-level file gets an empty name when its transform fails
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+_No response_
+
+### What is the problem you are having with rclone?
+
+When a `--name-transform` fails for a file, rclone logs an error and is supposed to keep the file's original name. That works for files in subdirectories, but a file at the top level of the transfer gets an empty name instead. On local, the copy then fails. On bucket-based remotes, the file is written to the destination path itself, outside the destination.
+
+Local (the copy fails, and nothing is lost):
+
+```sh
+mkdir -p /tmp/ntroot/src/sub
+echo x > /tmp/ntroot/src/photo.jpeg
+echo x > /tmp/ntroot/src/sub/photo.jpeg
+rclone copy /tmp/ntroot/src /tmp/ntroot/dst --name-transform truncate_keep_extension=3
+find /tmp/ntroot/dst -type f
+```
+
+`.jpeg` is longer than the limit, so the transform fails for both files. `sub/photo.jpeg` is copied under its original name, as expected. The top-level `photo.jpeg` isn't copied at all: rclone tries to rename its partial file onto the destination root (`rename $T/dst/.645a37c3.partial $T/dst: file exists`), and then fails with `partial file rename failed: can't move object - incompatible remotes`. `copy`, `sync`, and `convmv` all exit 1.
+
+A bucket-based remote (shown here with `memory`, which needs a single process, so through `rcd`):
+
+```sh
+mkdir -p /tmp/ntbucket && echo x > /tmp/ntbucket/photo.jpeg
+rclone rcd --rc-no-auth --rc-addr 127.0.0.1:5599 &
+rclone rc --url http://127.0.0.1:5599/ sync/move --json '{"srcFs":"/tmp/ntbucket","dstFs":":memory:bkt/dir","_config":{"NameTransform":["truncate_keep_extension=3"]}}'
+rclone rc --url http://127.0.0.1:5599/ operations/list --json '{"fs":":memory:","remote":"bkt","opt":{"recurse":true}}'
+kill %1
+```
+
+The `move` returns `{}`, and `/tmp/ntbucket` is now empty. The file has become the object `bkt/dir`, a file with the same name as the destination directory, one level above it. If several top-level files fail, they all map to the same empty name, so only the first is moved; the others log `Duplicate object found in source - ignoring`. I only tested `memory`, but S3 builds its keys the same way (`bucket.Join("bkt/dir", "")` is `bkt/dir`), so I'd expect the same there.
+
+Cause: when a transform returns an error, `Path` logs it and carries on with the empty string that `transformPath` returned:
+
+https://github.com/rclone/rclone/blob/b0ef5f6a6eca641a6bfb55bc05ef1595f4105d07/lib/transform/transform.go#L66-L69
+
+The only thing that restores the original name is the segment-count check at the end. It works for `sub/photo.jpeg` → `""` (1 slash vs 0), but `photo.jpeg` → `""` has 0 slashes either way, so `Path` returns `""`:
+
+https://github.com/rclone/rclone/blob/b0ef5f6a6eca641a6bfb55bc05ef1595f4105d07/lib/transform/transform.go#L74-L78
+
+The logged error is also misleading. In the `baseOnly` branch, the error from `transformPathSegment` (here, "extension is longer than the truncation limit") is never checked; `validateSegment` rejects the empty result instead, so the log says `transform cannot render path segments empty`:
+
+https://github.com/rclone/rclone/blob/b0ef5f6a6eca641a6bfb55bc05ef1595f4105d07/lib/transform/transform.go#L92-L97
+
+A fix would be for `Path` to return the original name as soon as a transform fails. The existing tests only check failing transforms with a directory in the path (`stories/photo.jpeg`), which is why they pass.
+
+### rclone version
+
+```text
+rclone v1.76.0
+- os/version: darwin 26.6.2 (64 bit)
+- os/kernel: 25.6.0 (arm64)
+- os/type: darwin
+- os/arch: arm64 (ARMv8 compatible)
+- go/version: go1.27.3
+- go/linking: dynamic
+- go/tags: cmount
+```
+
+Also reproduced from source at master b0ef5f6a6.
+
+### Operating system
+
+macOS
+
+### Which cloud storage system are you using?
+
+local, memory (it doesn't depend on the backend; the consequences do)
+
+### Output of `rclone config redacted`
+
+```ini
+Not needed: reproduced on local paths and :memory: with no config.
+```
+
+### The command you were trying to run
+
+```shell
+rclone --config /notfound copy /tmp/ntroot/src /tmp/ntroot/dst --name-transform truncate_keep_extension=3 -vv --retries 1
+```
+
+### A log from the command with the `-vv` flag
+
+```shell
+`$T` stands for the temporary directory the test ran in.
+
+
+DEBUG : rclone: Version "v1.76.0" starting with parameters ["/usr/local/bin/rclone" "--config" "/notfound" "copy" "$T/src" "$T/dst" "--name-transform" "truncate_keep_extension=3" "-vv" "--retries" "1"]
+DEBUG : Creating backend with remote "$T/src"
+DEBUG : Using config file from ""
+DEBUG : Creating backend with remote "$T/dst"
+ERROR : Failed to transform: transform cannot render path segments empty
+DEBUG : photo.jpeg: transformed to: 
+ERROR : Failed to transform: transform cannot render path segments empty
+DEBUG : photo.jpeg: transformed to: 
+DEBUG : photo.jpeg: Need to transfer - File not found at Destination
+DEBUG : Added delayed dir = "sub", newDst=<nil>
+ERROR : Failed to transform: transform cannot render path segments empty
+DEBUG : photo.jpeg: transformed to: 
+DEBUG : sub/photo.jpeg: Need to transfer - File not found at Destination
+DEBUG : Local file system at $T/dst: Waiting for checks to finish
+ERROR : Failed to transform: transform cannot render path segments empty
+DEBUG : photo.jpeg: transformed to: 
+ERROR : Failed to transform: transform cannot render path segments empty
+DEBUG : sub/photo.jpeg: transformed to: 
+ERROR : sub/photo.jpeg: number of path segments must match: sub/photo.jpeg (1),  (0)
+DEBUG : Local file system at $T/dst: Waiting for transfers to finish
+DEBUG : $T/dst/.645a37c3.partial: isCloned: true, error: <nil>
+DEBUG : .645a37c3.partial: size = 2 OK
+DEBUG : $T/dst/sub/photo.jpeg.c37e7402.partial: isCloned: true, error: <nil>
+DEBUG : sub/photo.jpeg.c37e7402.partial: size = 2 OK
+DEBUG : photo.jpeg: md5 = 401b30e3b8b5d629635a5c613cdb7919 OK
+DEBUG : sub/photo.jpeg: md5 = 401b30e3b8b5d629635a5c613cdb7919 OK
+DEBUG : .645a37c3.partial: Can't move: rename $T/dst/.645a37c3.partial $T/dst: file exists: trying copy
+ERROR : .645a37c3.partial: partial file rename failed: can't move object - incompatible remotes
+INFO  : .645a37c3.partial: Removing failed copy
+DEBUG : sub/photo.jpeg.c37e7402.partial: renamed to: sub/photo.jpeg
+INFO  : sub/photo.jpeg: Copied (server-side copy)
+INFO  : sub: Set directory modification time (using DirSetModTime)
+ERROR : Attempt 1/1 failed with 7 errors and: can't move object - incompatible remotes
+INFO  : 
+Transferred:   	          4 B / 4 B, 100%, 0 B/s, ETA -
+Errors:                 7 (retrying may help)
+Checks:                 1 / 1, 100%, Listed 3
+Updated dirs:           1
+Transferred:            1 / 1, 100%
+Server Side Copies:     2 @ 4 B
+Elapsed time:         0.0s
+
+DEBUG : 4 go routines active
+NOTICE: Failed to copy with 7 errors: last error was: can't move object - incompatible remotes
+```
+
+### Anything else?
+
+Found while reviewing #10229, which makes `truncate_keep_extension` succeed on dotfiles like `.bashrc` that used to hit this. Any top-level file whose extension is longer than the limit still does.
+
+Related: #9938. `Path` has no error return, so the failure reaches the run only through the stats counter. That's why the rc `move` above returns `{}` (as does `sync/copy`), while `rclone copy` to `:memory:bkt/dir` on the command line exits 6. Returning the original name fixes where the file goes either way; #9938 is about getting the error back to the caller.
+
+I didn't find an existing issue (searched for name-transform with move, ignored, not applied, and truncate_keep_extension). #10300 is a different `--name-transform` bug."""
+start = "4d0869df6e3f214c2d798d99a8203a1c84a15e3f"
+fix = "8c9ed04aa6e3f31ed4b9844ca520d244481688a7"
+hidden_tests = ["lib/transform/transform_test.go"]
+closed = 2026-11-19
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/10334"
+pull = 10336
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-03: When a token is passed to config update, rclone should keep it rather than asking whether to replace it
+# and starting the OAuth flow.
+# issue opened 2026-10-29, fix opened 2026-10-29, squash (or single commit); source files: cmd/config/config.go,
+# fs/config/config.go (9 lines); request from body (never edited).
+# reading notes: text names the fix (set config_refresh_token=false in updateRemote when token given)
+[[situation]]
+id = "rclone-03"
+request = """
+config update: passing a token asks to replace it and starts the OAuth flow
+
+### Before you start
+
+- [x] I have searched the forum and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question.
+
+### What is the problem you are having with rclone?
+
+`rclone config update myremote token '<json>'` on an OAuth remote stores the token and then runs the backend's post config, which asks `config_refresh_token` ("Token already configured - replace it?", default yes) about the token it was just given.
+
+- Interactively (the plain CLI) `config update` auto-answers confirm questions with their default, so rclone goes straight into the browser OAuth flow (`Waiting for code...`) to replace the token that was passed on the command line. Completing that flow overwrites the token; the only way to keep it is to abort the command.
+- With `--non-interactive` the token is written, but the caller gets the `config_refresh_token` question back as a JSON blob and has to `--continue` with `false`. Answering with the default replaces the token.
+
+The documented way round this is to add `config_refresh_token=false`, which works. But a token passed explicitly can only mean "store this one", so asking whether to replace it, and interactively starting a browser flow to do so, is a footgun. I hit it while scripting a token re-seed and ended up editing `rclone.conf` instead; the forum thread https://forum.rclone.org/t/44932 shows another user needing the same `config_refresh_token=false` dance.
+
+Reproduce (scratch config, same on v1.60.1):
+
+```console
+$ rclone --config /tmp/t.conf config create t drive --non-interactive >/dev/null
+$ rclone --config /tmp/t.conf config update t token '{"access_token":"AAA","token_type":"Bearer","refresh_token":"RRR","expiry":"2030-01-01T00:00:00Z"}'
+2026/10/29 10:16:25 NOTICE: Make sure your Redirect URL is set to "http://127.0.0.1:53682/" in your custom config.
+2026/10/29 10:16:25 NOTICE: Log in and authorize rclone for access
+2026/10/29 10:16:25 NOTICE: Waiting for code...
+```
+
+Expected: the remote is shown with the given token and the command exits, the same as `config update t chunk_size=64M config_refresh_token=false` does today. Updating other parameters without passing a token should keep offering the refresh as documented.
+
+Proposed fix (small): in `fs/config.updateRemote`, when `token` is among the parameters and `config_refresh_token` is not, set the `config_refresh_token` choice to `false`. I have this with a unit test on a branch, happy to open the PR if you agree with the approach: https://github.com/wstock/rclone/tree/config-update-keep-given-token (diff: https://github.com/rclone/rclone/compare/master...wstock:rclone:config-update-keep-given-token). With it the command above exits immediately with the token stored, `config update t chunk_size=64M` on the same remote still starts the OAuth flow, and `make quicktest` passes apart from `cmd/gitannex` needing an rclone binary on the PATH.
+
+### rclone version
+
+```
+rclone v1.75.2
+- os/version: alpine 3.24.2 (64 bit)
+- os/kernel: 6.8.0-147-generic (x86_64)
+- os/type: linux
+- os/arch: amd64
+- go/version: go1.27.2
+- go/linking: static
+- go/tags: none
+```
+
+(`rclone/rclone:latest` docker image; also reproduced on v1.60.1.)
+
+### Operating system
+
+Linux
+
+### Which cloud storage system are you using?
+
+Google Drive (any OAuth backend behaves the same; the question is asked by `lib/oauthutil`).
+
+### Output of `rclone config redacted`
+
+```
+[t]
+type = drive
+token = XXX
+```
+
+### The command you were trying to run
+
+```
+rclone --config /tmp/t.conf config update t token '{"access_token":"AAA","token_type":"Bearer","refresh_token":"RRR","expiry":"2030-01-01T00:00:00Z"}'
+```
+
+### A log from the command with the `-vv` flag
+
+```
+2026/10/29 10:16:25 DEBUG : rclone: Version "v1.75.2" starting with parameters ["rclone" "-vv" "--config" "/cfg/t.conf" "config" "update" "t" "token" "{\\"access_token\\":\\"AAA\\",\\"token_type\\":\\"Bearer\\",\\"refresh_token\\":\\"RRR\\",\\"expiry\\":\\"2030-01-01T00:00:00Z\\"}"]
+2026/10/29 10:16:25 DEBUG : Using config file from "/cfg/t.conf"
+2026/10/29 10:16:25 DEBUG : Saving config "token" in section "t" of the config file
+2026/10/29 10:16:25 DEBUG : t: config in: state="", result=""
+2026/10/29 10:16:25 DEBUG : t: config out: out={State:"client_id" Result:""}, err=<nil>
+2026/10/29 10:16:25 DEBUG : t: config in: state="client_id", result=""
+2026/10/29 10:16:25 DEBUG : Auto confirm is set, choosing default "false" for state "client_id_warning", override by setting config parameter "config_shared_client_id"
+2026/10/29 10:16:25 DEBUG : t: config out: out={State:"client_id_warning" Result:XXX}, err=<nil>
+2026/10/29 10:16:25 DEBUG : t: config in: state="client_id_warning", result=XXX
+2026/10/29 10:16:25 DEBUG : Auto confirm is set, choosing default "" for state "client_id_set", override by setting config parameter "client_id"
+2026/10/29 10:16:25 DEBUG : t: config out: out={State:"client_id_set" Result:""}, err=<nil>
+2026/10/29 10:16:25 DEBUG : t: config in: state="client_id_set", result=""
+2026/10/29 10:16:25 DEBUG : Saving config "client_id" in section "t" of the config file
+2026/10/29 10:16:25 DEBUG : Auto confirm is set, choosing default "" for state "client_secret_set", override by setting config parameter "client_secret"
+2026/10/29 10:16:25 DEBUG : t: config out: out={State:"client_secret_set" Result:""}, err=<nil>
+2026/10/29 10:16:25 DEBUG : t: config in: state="client_secret_set", result=""
+2026/10/29 10:16:25 DEBUG : Saving config "client_secret" in section "t" of the config file
+2026/10/29 10:16:25 DEBUG : t: config out: out={State:"oauth" Result:""}, err=<nil>
+2026/10/29 10:16:25 DEBUG : t: config in: state="oauth", result=""
+2026/10/29 10:16:25 DEBUG : t: config out: out={State:"*oauth,teamdrive,oauth," Result:""}, err=<nil>
+2026/10/29 10:16:25 DEBUG : t: config in: state="*oauth,teamdrive,oauth,", result=""
+2026/10/29 10:16:25 DEBUG : Auto confirm is set, choosing default "true" for state "*oauth-confirm,teamdrive,oauth,", override by setting config parameter "config_refresh_token"
+2026/10/29 10:16:25 DEBUG : t: config out: out={State:"*oauth-confirm,teamdrive,oauth," Result:XXX}, err=<nil>
+2026/10/29 10:16:25 DEBUG : t: config in: state="*oauth-confirm,teamdrive,oauth,", result=XXX
+2026/10/29 10:16:25 DEBUG : Auto confirm is set, choosing default "true" for state "*oauth-islocal,teamdrive,oauth,", override by setting config parameter "config_is_local"
+2026/10/29 10:16:25 DEBUG : t: config out: out={State:"*oauth-islocal,teamdrive,oauth," Result:XXX}, err=<nil>
+2026/10/29 10:16:25 DEBUG : t: config in: state="*oauth-islocal,teamdrive,oauth,", result=XXX
+2026/10/29 10:16:25 DEBUG : t: config out: out={State:"*oauth-do,teamdrive,oauth," Result:""}, err=<nil>
+2026/10/29 10:16:25 DEBUG : t: config in: state="*oauth-do,teamdrive,oauth,", result=""
+2026/10/29 10:16:25 NOTICE: Make sure your Redirect URL is set to "http://127.0.0.1:53682/" in your custom config.
+2026/10/29 10:16:25 DEBUG : Starting auth server on 127.0.0.1:53682
+2026/10/29 10:16:25 ERROR : Failed to open browser automatically (exec: "xdg-open": executable file not found in $PATH) - please go to the following link: http://127.0.0.1:53682/auth?state=XXX
+2026/10/29 10:16:25 NOTICE: Log in and authorize rclone for access
+2026/10/29 10:16:25 NOTICE: Waiting for code...
+```
+
+### Anything else?
+
+Written up with AI assistance (Claude Code); the reproduction, fix and tests were run locally."""
+start = "41893f019f783241f3e28ab7128a9190cdd0fb6d"
+fix = "cdad8ce1f35345487d897f2f82339e8608fb7a65"
+hidden_tests = ["fs/config/config_test.go"]
+closed = 2026-11-11
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/10208"
+pull = 10209
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-04: SizeSuffix's string round trip should be exact so values written out and parsed back with Set do not
+# change.
+# issue opened 2026-10-28, fix opened 2026-10-29, squash (or single commit); source files: fs/sizesuffix.go (24
+# lines); request from body (never edited).
+# reading notes: filed by fixer; found by property-based testing; tests also require Set to parse large integer
+# strings exactly, which the issue's 123456789012345678 example implies
+[[situation]]
+id = "rclone-04"
+request = """
+fs: SizeSuffix serialisation round trip is lossy — values change when written out and read back (1046 becomes 1045)
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+_No response_
+
+### What is the problem you are having with rclone?
+
+`SizeSuffix.stringRoundTrip()` in `fs/sizesuffix.go` is documented as turning a SizeSuffix "into a string which Set parses back to the same value", but the underlying `string()` formats with `%.3f`, so the round trip is lossy for any value needing more than 3 decimal places in its scaled form.
+
+Reproduction (unit test in package `fs`):
+
+```go
+var y SizeSuffix
+_ = y.Set(SizeSuffix(1046).stringRoundTrip())
+// y == 1045, expected 1046
+
+var z SizeSuffix
+_ = z.Set(SizeSuffix(123456789012345678).stringRoundTrip())
+// z == 123457176585107408, drift of +387572761730 bytes
+```
+
+The scaled value is printed to 3 decimal places ("1.021Ki" for 1046) and `Set` then truncates, so the value silently changes. At larger scales the drift grows: 2^60+1 round trips with a delta of -1, and values near 2^60 + 2^40 drift by over 1 TiB.
+
+This serialisation is on real paths:
+- `fs/registry.go` `Option.String()` returns `x.stringRoundTrip()` for SizeSuffix options, so option values written out (config, `rclone config dump`, help defaults) and read back change value.
+- `fs/bwtimetable.go` `BwTimetable.String()` serialises Tx/Rx limits with `stringRoundTrip()`, so a reported bandwidth limit fed back in (the rc `core/bwlimit` pattern) changes: a 1046 B/s limit comes back as 1045 B/s.
+
+Expected: for every non-negative SizeSuffix, `Set(x.stringRoundTrip()) == x`, as the doc comment promises.
+Found with property-based testing (rapid) against master.
+
+### rclone version
+
+master (unreleased), commit 1053463755dea408a4abd42bf2ce917a3884a62a
+
+### Operating system
+
+Linux
+
+### Which cloud storage system are you using?
+
+None — library-level parsing bug, reproduces in a unit test
+
+### Output of `rclone config redacted`
+
+```ini
+None — library-level parsing bug, reproduces in a unit test
+```
+
+### The command you were trying to run
+
+```shell
+Unit test in package fs (see reproduction above); no rclone command is involved.
+```
+
+### A log from the command with the `-vv` flag
+
+```shell
+None — library-level parsing bug, reproduces in a unit test; no command log applies.
+```
+
+### Anything else?
+
+Expected: for every non-negative SizeSuffix, Set(x.stringRoundTrip()) == x, as the doc comment promises."""
+start = "95487b2ff953b28a98bdc9d387021a342c210279"
+fix = "41893f019f783241f3e28ab7128a9190cdd0fb6d"
+hidden_tests = ["fs/sizesuffix_test.go"]
+closed = 2026-11-11
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/10205"
+pull = 10206
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# rclone-05: The FTP read closer should mask a 425 reply to an early-closed RETR when nothing was read, never pool a
+# connection after QUIT, and make a second Close a no-op.
+# issue opened 2026-10-28, fix opened 2026-10-28, squash (or single commit); source files: backend/ftp/ftp.go (22
+# lines); request from body (never edited).
+# reading notes: filed by fixer; text names the fix (closed flag, f.c=nil, mask 425 only with 0 bytes read)
+[[situation]]
+id = "rclone-05"
+request = """
+ftp: early-closed RETR answered with 425 puts a QUIT connection back in the pool (serve s3 ranged GET fails)
+
+#### What is the problem you are having with rclone?
+
+`rclone serve s3` (VFS, `--vfs-cache-mode off`) on top of an FTPES remote (Egnyte) fails on ranged GETs under light parallel load. The client gets `500 InternalError`, sometimes `NoSuchBucket`, and the server log shows `425 "Can't open data connection."` followed by repeated `use of closed network connection`.
+
+What we see in the code and logs (v1.75.2):
+
+1. A ranged read through the VFS first opens the object at offset 0 (`openPending` → `chunkedreader.Open`), then seeks, so `openRange` opens a second `REST <off>` + `RETR` and only then closes the first one.
+2. The first `RETR` is closed before anything is read. jlaffaye/ftp does not send `ABOR`; Egnyte answers the close with `425` (sometimes `426`).
+3. `ftpReadCloser.Close` treats 425 as an error: it runs `Quit()` and `putFtpConnection(nil, nil)`, but keeps `f.c`. 425 is not in the masked codes (426, 550, 150, 250).
+4. `resetReader` returns the error before replacing the reader, so the VFS retries and closes the same `ftpReadCloser` again. The second `Response.Close()` returns nil, so `putFtpConnection(&f.c, nil)` puts the QUIT connection into the pool and returns the token a second time.
+5. Later operations take the dead connection; `use of closed network connection` is retried on it until low-level retries run out.
+
+The beta with #10102 (`ebfaae73c9`) helps (dead connections are dropped), but each incident still costs retries: 1 GB download in ~500 s with 134 `use of closed` lines, against ~77–300 s and 0 errors with the patch below.
+
+#### What is your rclone version (output from `rclone version`)
+
+rclone v1.75.2 (also checked v1.76.0-beta.10625.545b142ad)
+
+#### Which OS you are using and how many bits (e.g. Windows 7, 64 bit)
+
+linux/amd64 (Docker, rclone/rclone:1.75.2) and darwin/arm64
+
+#### Which cloud storage system are you using? (e.g. Google Drive)
+
+FTP with explicit TLS (Egnyte, `ftp-<domain>.egnyte.com`)
+
+#### The command you were trying to run (e.g. `rclone copy /tmp remote:tmp`)
+
+```
+rclone serve s3 egnyte:/Shared/S3 --vfs-cache-mode off --addr :8080 --auth-key KEY,SECRET
+# remote: type=ftp, explicit_tls=true, no_check_upload=true, concurrency=6
+aws s3 cp s3://bucket/big-1g.bin ./big-1g.bin   # classic transfer client, 4 parallel 16 MiB ranges
+```
+
+#### A log from the command with the `-vv` flag
+
+```
+DEBUG : FTP Tx: "REST 8388608"
+DEBUG : FTP Rx: "350 Restarting at 8388608. Send STORE or RETRIEVE to initiate transfer."
+DEBUG : FTP Tx: "RETR /Shared/S3/bucket/big-1g.bin"
+DEBUG : FTP Rx: "150 File status okay; about to open data connection."
+ERROR : bucket/big-1g.bin: ReadFileHandle.Read error: low level retry 1/10: 1 error occurred:
+	* 425 "Can't open data connection."
+DEBUG : pacer: low level retry 1/10 (error use of closed network connection)
+...
+DEBUG : pacer: low level retry 10/10 (error use of closed network connection)
+ERROR : serve s3: open: use of closed network connection
+```
+
+#### Proposed fix
+
+In `backend/ftp/ftp.go` `ftpReadCloser`:
+
+- a `closed` flag so a second `Close` does nothing (no pool put, no second token);
+- `f.c = nil` after `Quit()`;
+- count bytes returned by `Read` and mask `425` only when nothing was read (a transfer cut after data stays an error).
+
+With this patch on top of v1.75.2 + `ebfaae73c9`: 3/3 downloads of 1 GB with matching sha256, 0 errors, at most 6 FTP sessions; restic 10 GB backup, `check --read-data` and restore green. Happy to open a PR with unit tests (double `Close`, 425 with 0 and >0 bytes read).
+
+Related, not fixed by this: `openRange` opens the new `RETR` before closing the old one, so with `concurrency=N` and N parallel reads every reader holds one token and waits for a second (`TokenDispenser.Get` has no context), which can hang `serve s3`."""
+start = "a89766467ea3c1fab84f30da43b35f042af7a1c9"
+fix = "68906658fdd2dcac6e298bfa17333aab6c16215a"
+hidden_tests = ["backend/ftp/ftp_internal_test.go"]
+closed = 2026-10-31
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/10200"
+pull = 10202
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# rclone-06: When a multipart upload is rejected early by the server, the upload must stop reading the source so
+# closing it does not deadlock against the pump goroutine.
+# issue opened 2026-10-22, fix opened 2026-10-24, squash (or single commit); source files:
+# backend/imagekit/client/upload.go, backend/pcloud/pcloud.go, backend/pikpak/pikpak.go, backend/seafile/webapi.go,
+# backend/zoho/zoho.go (10 lines); request from body (never edited).
+# reading notes: test uses a local httptest server and a 10s deadlock timeout; issue suggests fixing in lib/rest, PR
+# fixed each backend; both satisfy the seafile test
+[[situation]]
+id = "rclone-06"
+request = """
+Transfers hang forever (0 B/s, no sockets) when a multipart upload fails: deadlock between AsyncReader.Abandon and lib/rest.MultipartUpload
+
+### Before you start
+
+- [x] I have searched the forum and the existing issues for this problem.
+- [x] I have tested with the latest stable release (v1.75.2) and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question.
+
+### What is the problem you are having with rclone?
+
+During a large `rclone copy` to Seafile, transfers stop forever: the stats show `0 B/s`, the files
+stay open at a fixed read position, the rclone process has **no open sockets** left, nothing is
+logged (no ERROR, no retry), and `--timeout` never fires. It happened many times during one copy of
+~1 TB, always on transfers of large files (hundreds of MB to several GB), several transfers of the
+same process at once.
+
+At the same time the server answered some of these multipart uploads with `HTTP 400` after 40–70 s
+(in our case the server's temporary upload storage ran full under several parallel multi-GB
+uploads). So the trigger is a server that rejects a multipart upload before it has read the whole
+body.
+
+A goroutine dump (`--rc`, `/debug/pprof/goroutine?debug=2`) of a stuck process shows the same
+pair for every stuck transfer (shortened, v1.75.2):
+
+```
+goroutine 77 [sync.Mutex.Lock, 9 minutes]:
+sync.(*Mutex).Lock(...)
+github.com/rclone/rclone/fs/asyncreader.(*AsyncReader).Abandon(...)        fs/asyncreader/asyncreader.go:290
+github.com/rclone/rclone/fs/asyncreader.(*AsyncReader).Close(...)          fs/asyncreader/asyncreader.go:305
+github.com/rclone/rclone/fs/accounting.(*Account).Close(...)               fs/accounting/accounting.go:579
+github.com/rclone/rclone/fs/operations.(*copy).updateOrPut(...)            fs/operations/copy.go:230
+github.com/rclone/rclone/fs/operations.(*copy).manualCopy(...)             fs/operations/copy.go:281
+github.com/rclone/rclone/fs/operations.(*copy).copy(...)                   fs/operations/copy.go:321
+github.com/rclone/rclone/fs/operations.Copy(...)                           fs/operations/copy.go:426
+github.com/rclone/rclone/fs/sync.(*syncCopyMove).pairCopyOrMove(...)       fs/sync/sync.go:518
+
+goroutine 1379 [select, 9 minutes]:
+io.(*pipe).write(...)                                                      io/pipe.go:86
+io.(*PipeWriter).Write(...)                                                io/pipe.go:161
+mime/multipart.(*part).Write(...)                                          mime/multipart/writer.go:209
+github.com/rclone/rclone/fs/accounting.(*accountWriteTo).Write(...)        fs/accounting/accounting.go:524
+github.com/rclone/rclone/fs/asyncreader.(*AsyncReader).WriteTo(...)        fs/asyncreader/asyncreader.go:179
+github.com/rclone/rclone/fs/accounting.(*Account).WriteTo(...)             fs/accounting/accounting.go:540
+io.Copy(...)
+github.com/rclone/rclone/lib/rest.MultipartUpload.func2()                  lib/rest/rest.go:613
+created by github.com/rclone/rclone/lib/rest.MultipartUpload in goroutine 77
+
+goroutine 1378 [select, 9 minutes]:
+github.com/rclone/rclone/lib/rest.MultipartUpload.func1()                  lib/rest/rest.go:582
+created by github.com/rclone/rclone/lib/rest.MultipartUpload in goroutine 77
+```
+
+My reading of it: the upload call has returned (with the error) and the transfer goroutine closes
+the source (`Account.Close` → `AsyncReader.Abandon`), which waits for `AsyncReader.mu`. That lock is
+held by `AsyncReader.WriteTo`, called from the pump goroutine of `lib/rest.MultipartUpload`, which is
+blocked writing into the `io.Pipe` that feeds the request body. Nothing reads from or closes the pipe
+reader any more after the request failed, and the context is not cancelled, so `func1` never closes
+the writer either. Both sides wait forever.
+
+The connection was HTTP/2 (TLS endpoint); I did not test whether HTTP/1.1 behaves differently.
+
+**Workaround:** `--buffer-size 0` (no AsyncReader). With it the same copy ran on without hangs,
+failed uploads are retried as expected.
+
+A possible fix might be closing the multipart body reader (the `io.ReadCloser` returned by
+`MultipartUpload`) when the request returns, or closing the pipe in `MultipartUpload` once the
+caller is done, so the pump goroutine gets `io.ErrClosedPipe` and releases the lock — but I have not
+tried this.
+
+I don't have a minimal stand-alone reproducer yet. It should be reproducible with any server that
+answers a multipart upload early with an error while the request body is still being sent, with the
+default `--buffer-size`.
+
+Note: the binary is v1.75.2 with the change from #10163 applied (Seafile `last_modify` on upload).
+That change only adds a form field; the code path above is unchanged from v1.75.2.
+
+### rclone version
+
+```
+rclone v1.75.2-seafile-mtime
+- os/arch: linux/amd64
+- go/version: go1.27.1
+```
+
+(v1.75.2 plus the change from #10163, built with `go build -trimpath`.)
+
+### Operating system
+
+Linux (Debian 12, amd64)
+
+### Which cloud storage system are you using?
+
+Seafile Server CE 13.0.28 (official docker image), source is the local disk.
+
+### Output of `rclone config redacted`
+
+```
+[sf]
+type = seafile
+url = https://seafile.example.com
+user = XXX
+auth_token = XXX
+create_library = true
+```
+
+### The command you were trying to run
+
+```
+rclone copy /source sf:Library --create-empty-src-dirs --transfers 3 --checkers 16 \\
+  --retries 5 --low-level-retries 20 --contimeout 30s --timeout 30m --log-level INFO
+```
+
+### A log from the command with the `-vv` flag
+
+No error is ever logged for the stuck transfers; the INFO log only repeats the stats line:
+
+```
+INFO  :     8.829 GiB / 14.644 GiB, 60%, 0 B/s, ETA -
+INFO  :     8.829 GiB / 14.644 GiB, 60%, 0 B/s, ETA -
+INFO  :     8.829 GiB / 14.644 GiB, 60%, 0 B/s, ETA -
+```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)"""
+start = "b2664e513aca72e74f026dc101933fcc7943f46b"
+fix = "f17291df258cdfc9c205015686d22aba4a68ad26"
+hidden_tests = ["backend/seafile/seafile_internal_test.go"]
+closed = 2026-10-31
+kind = "race"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/10168"
+pull = 10184
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-07: Chunker server-side copy or move over an existing file should remove the destination's leftover chunks so
+# the result stays readable.
+# issue opened 2026-10-18, fix opened 2026-10-18, squash (or single commit); source files: backend/chunker/chunker.go
+# (31 lines); request from body (never edited).
+# reading notes: text names the fix (remove stale chunks after new ones are in place, as put does)
+[[situation]]
+id = "rclone-07"
+request = """
+chunker: server-side copy over an existing file leaves its old chunks
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+_No response_
+
+### What is the problem you are having with rclone?
+
+When `chunker` server-side copies or moves a file over an existing one, it never removes the existing file's chunks beyond the new chunk count. The copy reports success, but the destination can no longer be read:
+
+- **A small (non-chunked) file over a chunked one:** the destination's metadata object is overwritten with the plain data, but its old chunks remain, so chunker reads the data as metadata and fails with `invalid metadata: invalid json`.
+- **Fewer chunks over more** (e.g. 6 bytes over 9 bytes with `chunk_size = 3b`): the old last chunk remains, and opening fails with `metadata doesn't match file size`.
+- **More or equal chunks over fewer:** fine.
+
+**Repro** (`memory` inside one `rcd`, so the wrapped backend has server-side `Copy`):
+
+```sh
+T=$(mktemp -d); printf hi > $T/small; printf HELLO2 > $T/big
+rclone rcd --rc-addr localhost:15572 --rc-no-auth & RCD=$!
+sleep 2
+C=':chunker,remote=":memory:base",chunk_size=3b:'
+RC="rclone rc --url http://localhost:15572/"
+$RC operations/copyfile srcFs=$T srcRemote=small dstFs="$C" dstRemote=a.txt
+$RC operations/copyfile srcFs=$T srcRemote=big dstFs="$C" dstRemote=b.txt
+$RC operations/copyfile srcFs="$C" srcRemote=a.txt dstFs="$C" dstRemote=b.txt
+$RC operations/list fs=:memory:base remote="" | grep '"Name"'
+$RC operations/copyfile srcFs="$C" srcRemote=b.txt dstFs=$T dstRemote=out
+kill $RCD
+```
+
+The third call succeeds. The listing then shows `b.txt` next to the old `b.txt.rclone_chunk.001` and `b.txt.rclone_chunk.002`, and the last call fails with `can't open: invalid metadata: invalid json`. `operations/movefile` gives the same results, and after a move the source is gone too.
+
+**Cause**
+
+[`copyOrMove`](https://github.com/rclone/rclone/blob/35a03a47e00e2cadec744f977e5fa9d851127016/backend/chunker/chunker.go#L1681) copies each source chunk straight to its final name and the metadata object over `remote`, but it never removes the destination's existing chunks. `put` does this cleanup with [`removeOldChunks`](https://github.com/rclone/rclone/blob/35a03a47e00e2cadec744f977e5fa9d851127016/backend/chunker/chunker.go#L1502):
+
+https://github.com/rclone/rclone/blob/35a03a47e00e2cadec744f977e5fa9d851127016/backend/chunker/chunker.go#L1294
+
+`copyOrMove` has no equivalent.
+
+This affects chunker over any backend whose server-side `Copy` overwrites (`memory`, `s3`, ...), on every platform. Over `local` on macOS it's currently hidden by #10117, because local's `Copy` fails when the destination exists. Once #10121 fixes that, chunker over `local` on macOS hits this too: the bisync integration tests on `TestChunkerChunk3bLocal` then fail `rclone_args`, `resync`, and `resync_modes` with `invalid metadata: invalid json`, which is how this was found.
+
+**Fix idea**
+
+When the destination object exists, remove its chunks that the copy didn't overwrite, as `put` does. Do it only after the new chunks and metadata are in place, so a failed copy doesn't destroy the old file. #10118 is about the same function's error handling, so the two fixes will touch the same code.
+
+**Workaround**
+
+Delete the destination before copying over it.
+
+### rclone version
+
+```
+rclone v1.76.0-DEV
+- os/version: darwin 26.6.2 (64 bit)
+- os/kernel: 25.6.0 (arm64)
+- os/type: darwin
+- os/arch: arm64 (ARMv8 compatible)
+- go/version: go1.27.2
+- go/linking: dynamic
+- go/tags: none
+```
+
+Built from master at 35a03a47e.
+
+### Operating system
+
+macOS
+
+### Which cloud storage system are you using?
+
+chunker over memory (any backend with server-side Copy)
+
+### Output of `rclone config redacted`
+
+```ini
+None needed: the repro uses connection-string remotes.
+```
+
+### The command you were trying to run
+
+```shell
+rclone rc --url http://localhost:15572/ operations/copyfile srcFs="$C" srcRemote=a.txt dstFs="$C" dstRemote=b.txt
+
+
+(the third call in the repro above)
+```
+
+### A log from the command with the `-vv` flag
+
+```shell
+"Name": "a.txt",
+"Name": "b.txt",
+"Name": "b.txt.rclone_chunk.001",
+"Name": "b.txt.rclone_chunk.002",
+ERROR : b.txt: Failed to copy: failed to open source object: can't open: invalid metadata: invalid json
+```
+
+### Anything else?
+
+Related: #10118 (same function), #10121."""
+start = "6e01cb6e22d598d97521bf75f8fc2ac106ff17ab"
+fix = "fe813c53f278b7d0aec3edbc6b72f012b9591355"
+hidden_tests = ["backend/chunker/chunker_internal_test.go"]
+closed = 2026-10-29
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/10123"
+pull = 10124
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-08: Uploads through the webdav tus path (owncloud infinite scale) leak a goroutine and the buffered file per
+# upload until the process is OOM-killed; the uploader should release them when Upload returns.
+# issue opened 2026-10-18, fix opened 2026-10-19, squash (or single commit); source files:
+# backend/webdav/tus-uploader.go (38 lines); request from oldest of 3 edit records.
+# reading notes: text names the fix (close notifyChan); that one-line fix would panic because the tests call Upload
+# again on the same uploader; GC-based weak-pointer check with Eventually; issue template has unfilled placeholders,
+# likely AI-drafted
+[[situation]]
+id = "rclone-08"
+request = """
+Rclone leaks memory with every file uploaded to Opencloud (Owncloud Infinite Scale) until it's killed by the kernel
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+_No response_
+
+### What is the problem you are having with rclone?
+
+Uploading many files to a WebDAV remote running OpenCloud (ownCloud Infinite
+Scale, configured with vendor `owncloud-infinite-scale`) makes rclone's memory
+usage grow by roughly the size of every uploaded file. The growth is strictly
+linear with the number of files copied and never shrinks, so after a few
+thousand files the process consumes several GB and is killed by the kernel's
+OOM killer. The transfers themselves all succeed; the only symptom is the
+memory growth.
+
+### What is your rclone version (output from `rclone version`)?
+
+rclone v1.75.2
+<exact `rclone version` output>
+
+### Which OS you are using and how many bits (eg Windows 10, 64 bit)
+
+<e.g. "Debian 12, 64 bit">
+
+### Which cloud storage system are you using? eg Google Drive
+
+- Source: `seafile` backend (Seafile server)
+- Destination: `webdav` backend with vendor `owncloud-infinite-scale`
+  (OpenCloud server)
+
+The destination backend is the relevant one. The seafile side was checked and
+is not involved.
+
+### The command you were trying to run (eg `rclone copy /tmp remote:tmp`)
+
+```console
+rclone copyto -P -c --multi-thread-streams 2 --max-backlog 1000 --max-buffer-memory 500M --max-connections 2 "SeafileZiba:Backup Laptop" "Opencloud:Ziba/Backup Laptop"
+```
+
+### A log from the command with the `-vv` flag (eg output from `rclone -vv copy /tmp remote:tmp`)
+
+The log looks completely normal - files are uploaded successfully one after
+another. The failure is only visible as RSS growth and eventually the kernel
+message `Out of memory: Killed process ... (rclone)`.
+
+### How to reproduce / confirm
+
+Run the copy with `--rc --rc-no-auth` and, while it runs, fetch the goroutine
+profile:
+
+```console
+curl -s 'http://127.0.0.1:5572/debug/pprof/goroutine?debug=1' | grep -c broadcastProgress
+```
+
+The number of goroutines parked in `webdav.(*Uploader).broadcastProgress`
+equals the number of files copied so far and grows by one per file.
+Alternatively run rclone with stderr captured and send `kill -QUIT <pid>`;
+the goroutine dump written to stderr shows the same picture.
+
+My counts on this setup: <fill in, e.g. "342 after copying 340 files">
+
+### Analysis
+
+Every upload to the `infinitescale` vendor goes through the tus protocol
+implementation in `backend/webdav/tus-upload.go` and `tus-uploader.go`:
+
+1. `tus-uploader.go` `NewUploader()` starts `go uploader.broadcastProgress()`.
+   `broadcastProgress()` waits forever on `for range u.notifyChan`, and
+   nothing in the code ever closes `u.notifyChan`, so exactly one goroutine
+   per uploaded file stays blocked forever.
+2. A goroutine blocked on a channel keeps every value it references alive, so
+   that goroutine pins the `Uploader` and its `*Upload`.
+3. `tus-upload.go` `NewUpload()` buffers the entire file into a `bytes.Buffer`
+   because the reader that `fs/operations` hands to `Update()`
+   (`tr.Account(...).WithBuffer()`) is not an `io.ReadSeeker`, and the tus
+   uploader `Seek`s in the stream for its chunked PATCH uploads.
+
+Together this retains a full in-memory copy of every file ever uploaded plus
+one goroutine each. A unit test against a local fake tus server reproduces
+this on v1.75.2 and current master:
+
+- 10 files x 1 MiB -> 10 leaked goroutines, ~20 MiB still on the heap after a
+  forced GC
+- 30 files x 1 MiB -> 30 leaked goroutines, ~60 MiB
+- 60 files x 1 MiB -> 60 leaked goroutines, ~120 MiB
+
+(The ~2x factor comes from `bytes.Buffer` capacity over-allocation.)
+
+This also means the peak memory for uploading a single large file through
+this path is unbounded, since the whole file is buffered in RAM before the
+first byte is sent.
+
+### Suggested fix
+
+Make the progress broadcasting goroutine exit when the upload is finished by
+closing the notification channel when `Uploader.Upload()` returns:
+
+```go
+func (u *Uploader) Upload(ctx context.Context, options ...fs.OpenOption) error {
+	defer close(u.notifyChan)
+	...
+}
+```
+
+I have a branch with tests that fail on v1.75.2 and current master and pass
+with this one-line fix; happy to send a pull request. Longer term it would
+also be worth streaming the chunks from the source reader directly instead of
+buffering the whole file (see analysis above).
+
+
+
+### rclone version
+
+# rclone version
+rclone v1.75.2
+- os/version: debian 13.7 (64 bit)
+- os/kernel: 6.12.111+deb13-amd64 (x86_64)
+- os/type: linux
+- os/arch: amd64
+- go/version: go1.26.9
+- go/linking: static
+- go/tags: none
+
+
+### Operating system
+
+Linux
+
+### Which cloud storage system are you using?
+
+Source: `seafile` backend (Seafile server), Destination: `webdav` backend with vendor `owncloud-infinite-scale`   (OpenCloud server)  The destination backend is the relevant one. The seafile side was checked and is not involved.
+
+### Output of `rclone config redacted`
+
+```ini
+[Opencloud]
+type = webdav
+url = https://opencloud.something.example/dav/spaces/12345/Foobar
+vendor = infinitescale
+user = XXX
+pass = XXX
+
+[Seafile]
+type = webdav
+url = https://cloud.something.example/seafdav
+vendor = other
+user = XXX
+pass = XXX
+
+[SeafileNative]
+type = seafile
+url = XXX
+user = XXX
+pass = XXX
+
+[SeafileUser]
+type = seafile
+url = XXX
+user = XXX
+pass = XXX
+### Double check the config for sensitive info before posting publicly
+```
+
+### The command you were trying to run
+
+```shell
+GOGC=20 rclone copyto -P -c --multi-thread-streams 2 --max-backlog 1000 --max-buffer-memory 500M  --max-connections 2  "SeafileUser:Downloads" "Opencloud:User/Downloads/"
+```
+
+### A log from the command with the `-vv` flag
+
+```shell
+The log is fine, when there are not too many files, everything works fine.
+```
+
+### Anything else?
+
+Run the copy with `--rc --rc-no-auth` and, while it runs, fetch the goroutine
+profile:
+
+```console
+curl -s 'http://127.0.0.1:5572/debug/pprof/goroutine?debug=1' | grep -c broadcastProgress
+```
+
+The number of goroutines parked in `webdav.(*Uploader).broadcastProgress`
+equals the number of files copied so far and grows by one per file.
+Alternatively run rclone with stderr captured and send `kill -QUIT <pid>`;
+the goroutine dump written to stderr shows the same picture.
+
+Every upload to the `infinitescale` vendor goes through the tus protocol
+implementation in `backend/webdav/tus-upload.go` and `tus-uploader.go`:
+
+1. `tus-uploader.go` `NewUploader()` starts `go uploader.broadcastProgress()`.
+   `broadcastProgress()` waits forever on `for range u.notifyChan`, and
+   nothing in the code ever closes `u.notifyChan`, so exactly one goroutine
+   per uploaded file stays blocked forever.
+2. A goroutine blocked on a channel keeps every value it references alive, so
+   that goroutine pins the `Uploader` and its `*Upload`.
+3. `tus-upload.go` `NewUpload()` buffers the entire file into a `bytes.Buffer`
+   because the reader that `fs/operations` hands to `Update()`
+   (`tr.Account(...).WithBuffer()`) is not an `io.ReadSeeker`, and the tus
+   uploader `Seek`s in the stream for its chunked PATCH uploads.
+
+Together this retains a full in-memory copy of every file ever uploaded plus
+one goroutine each. A unit test against a local fake tus server reproduces
+this on v1.75.2 and current master:
+
+- 10 files x 1 MiB -> 10 leaked goroutines, ~20 MiB still on the heap after a
+  forced GC
+- 30 files x 1 MiB -> 30 leaked goroutines, ~60 MiB
+- 60 files x 1 MiB -> 60 leaked goroutines, ~120 MiB
+
+(The ~2x factor comes from `bytes.Buffer` capacity over-allocation.)
+
+This also means the peak memory for uploading a single large file through
+this path is unbounded, since the whole file is buffered in RAM before the
+first byte is sent.
+
+### Suggested fix
+
+Make the progress broadcasting goroutine exit when the upload is finished by
+closing the notification channel when `Uploader.Upload()` returns:
+
+```go
+func (u *Uploader) Upload(ctx context.Context, options ...fs.OpenOption) error {
+	defer close(u.notifyChan)
+	...
+}
+```"""
+start = "e236d983a6365a8904980829e589f55d55d8d98c"
+fix = "6e01cb6e22d598d97521bf75f8fc2ac106ff17ab"
+hidden_tests = ["backend/webdav/tus-uploader_test.go"]
+closed = 2026-10-29
+kind = "crash"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/10131"
+pull = 10135
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-09: The pikpak download path should treat non-2xx responses as errors (retrying 5xx) instead of returning the
+# HTML error page as file data.
+# issue opened 2026-10-26, fix opened 2026-10-26, squash (or single commit); source files: backend/pikpak/pikpak.go (6
+# lines); request from body (never edited).
+# reading notes: text names the fix; test pins retry count via LowLevelRetries and that the error message contains 502
+# but not the HTML body (small doubt)
+[[situation]]
+id = "rclone-09"
+request = """
+pikpak: HTTP error status on download is not checked, 502 HTML body is returned as file data
+
+#### The associated forum post URL from `https://forum.rclone.org`
+
+None found. Related but not identical reports (0-byte / `sizes differ`):
+- https://forum.rclone.org/t/pikpak-copy-corrupted-on-transfer/46421
+- https://forum.rclone.org/t/errors-occurring-in-the-copy-and-mount-commands-in-pikpak/46837
+
+#### What is the problem you are having with rclone?
+
+When the PikPak download node answers a ranged GET with `502 Bad Gateway`, the pikpak backend does not treat it as an error. The 163-byte HTML error page is handed to the reader as file content and rclone exits 0.
+
+With `rclone mount --vfs-cache-mode full` the HTML bytes are written into the VFS cache and the range can be marked as downloaded, so the bad data is served again until the cache item is removed. Media files then fail to decode or contain an HTML page in the middle of the stream. The same range fetched a moment later from the same file returned correct bytes, so the cloud object itself was not corrupt.
+
+Code path (checked on v1.75.0, and the same functions are unchanged in v1.75.1, v1.75.2 and master at 81e7372f):
+- `backend/pikpak/pikpak.go` `open`: after `client.Do(req)` the response goes through `shouldRetry`, and no HTTP status check is made on the download response.
+- `shouldRetry`: when `err == nil` it returns success regardless of `resp.StatusCode`, so a 502 is never retried or turned into an error.
+
+The changelog fix for truncated PikPak uploads is about the upload input ending early and does not touch this path.
+
+Suggested fix: in the download path, treat a non-2xx status as an error (close the body and go through the retry logic, so 5xx is retried), and check that a 206 `Content-Range` matches the request.
+
+#### What is your rclone version (output of `rclone version`)
+
+v1.75.0 (linux/arm64) reproduced. Source of v1.75.1, v1.75.2 and master compared, not run.
+
+#### Which OS you are using and how many bits
+
+Ubuntu 24.04, arm64.
+
+#### Which cloud storage system are you using?
+
+PikPak (native `pikpak` backend)
+
+#### The command you were using and why
+
+Mount (long running):
+```
+rclone mount pik: ~/pik --vfs-cache-mode full ...
+```
+Direct reproduction of the response, ranged read through rclone with headers dumped:
+```
+rclone cat pik:path/to/file.mp4 --offset 0 --count 4096 -vv --dump headers
+```
+
+#### A log from the command with the `-vv` flag
+
+Trimmed headers from two consecutive ranged reads of different files on different nodes. File names removed.
+
+Good response:
+```
+Host: dl-a10b-0861.mypikpak.com
+Range: bytes=0-4095
+HTTP/1.1 206 Partial Content
+Content-Length: 4096
+Content-Range: bytes 0-4095/232551974
+Content-Type: application/octet-stream
+```
+Bad response, rclone exit code 0, 163 bytes written as the file content:
+```
+Host: dl-a10b-1533.mypikpak.com
+Range: bytes=0-4095
+HTTP/1.1 502 Bad Gateway
+Content-Length: 163
+Content-Type: text/html
+Server: openresty/1.21.4.1
+```
+
+#### How to reproduce
+
+The 502 comes from the PikPak side intermittently, so I cannot trigger it on demand. A test with an `httptest` server that returns 502 with a small HTML body for the download URL should show the body being returned by `open`, with no error.
+
+Additional observation: with the same account, copying files directly also failed intermittently with `corrupted on transfer: sizes differ` (destination 163 bytes), and the same files copied fine later.
+
+#### Impact
+
+In one affected library, 38 files showed HTML error pages inside their read results; this is a sample, not a full scan."""
+start = "81e7372f6fbedfa80592e9a564593d63a8dc32f3"
+fix = "c9f491800b7d424be89976b2a45493ce56825094"
+hidden_tests = ["backend/pikpak/pikpak_internal_test.go"]
+closed = 2026-10-26
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/10187"
+pull = 10188
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-10: serve restic should reply 500, not 404, to a DELETE when the object lookup fails with an error other than
+# not found.
+# issue opened 2026-10-16, fix opened 2026-10-17, squash (or single commit); source files: cmd/serve/restic/restic.go
+# (6 lines); request from body (never edited).
+# reading notes: text names the fix
+[[situation]]
+id = "rclone-10"
+request = """
+serve restic: DELETE replies 404 when the object lookup fails, so restic leaves its lock behind
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+_No response_
+
+### What is the problem you are having with rclone?
+
+When `rclone serve restic` receives a `DELETE` request and the lookup of the object fails with an error other than "not found", it replies `404 Not Found`. A `GET` request with the same lookup error replies `500 Internal Server Error`.
+
+restic treats a 404 on delete as final and does not retry. When this happens while restic removes its lock, the lock stays in the repository and the next exclusive operation (for example `forget --prune`) fails with "repository is already locked". The real error is logged only at debug level.
+
+We hit this in production with a Backblaze B2 remote: a temporary error from B2 while restic removed its lock made the following `forget --prune` fail. The steps below use a local remote and a permission error, to get the same lookup failure deterministically.
+
+In `cmd/serve/restic/restic.go`, `deleteObject()` replies 404 for any error returned by `s.newObject()`, while `serveObject()` replies 404 only for `fs.ErrorObjectNotFound` and 500 otherwise. Replying 500 for other errors in `deleteObject()` too would let restic retry.
+
+**Steps to reproduce** (run as root with Podman; rclone runs as uid 1000, so an unreadable `locks` directory gives a lookup error that is not "not found"):
+
+```bash
+D=/tmp/rclone-repro; URL=http://127.0.0.1:8080/repo
+mkdir -p $D/data && chown -R 1000:1000 $D
+podman run -d --name rclone-repro --user 1000:1000 --network host -v $D/data:/data:Z \\
+    docker.io/rclone/rclone:1.75.2 serve restic --addr 127.0.0.1:8080 --cache-objects=false -vv /data
+restic() { podman run --rm -i --network host -e RESTIC_REPOSITORY=rest:$URL -e RESTIC_PASSWORD=test \\
+    docker.io/restic/restic:0.19.1 "$@"; }
+restic init -q
+
+# 1. Same lookup error: GET replies 500, DELETE replies 404
+id=$(printf 'a%.0s' {1..64})
+curl -s -o /dev/null -w "POST %{http_code}\\n" --data-binary test -X POST $URL/locks/$id
+chmod 000 $D/data/repo/locks
+curl -s -o /dev/null -w "GET %{http_code}\\n" $URL/locks/$id
+curl -s -o /dev/null -w "DELETE %{http_code}\\n" -X DELETE $URL/locks/$id
+chmod 755 $D/data/repo/locks; ls $D/data/repo/locks; rm $D/data/repo/locks/$id
+
+# 2. restic loses its lock: make locks/ unreadable while a backup runs
+( sleep 10; echo hello ) | restic backup -q --stdin --stdin-filename hello.txt &
+sleep 5; chmod 000 $D/data/repo/locks; wait; chmod 755 $D/data/repo/locks
+restic list locks
+restic forget -q --keep-last 1 --prune
+```
+
+Output:
+
+```
+POST 200
+GET 500
+DELETE 404
+
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+Remove(<lock/4a01776535>) failed: <lock/4a01776535> does not exist
+error while unlocking: <lock/4a01776535> does not exist
+
+4a01776535f330e29acc9f000545d882751de8e1ec243a6736ced257db95b05b
+
+unable to create lock in backend: repository is already locked by PID 1 on rl2 by root (UID 0, GID 0)
+lock was created at 2026-10-16 09:30:28 (10.715321392s ago)
+storage ID 4a017765
+the `unlock` command can be used to remove stale locks
+```
+
+Expected: `DELETE` replies 500 like `GET`, restic retries the removal, and no lock is left behind.
+
+Actual: `DELETE` replies 404 while the file is still there, restic reports the lock as already gone ("does not exist") and the repository stays locked.
+
+### rclone version
+
+```
+rclone v1.75.2
+- os/version: alpine 3.24.2 (64 bit)
+- os/kernel: 5.14.0-687.49.1.el9_8.x86_64 (x86_64)
+- os/type: linux
+- os/arch: amd64
+- go/version: go1.27.2
+- go/linking: static
+- go/tags: none
+```
+
+### Operating system
+
+Linux
+
+### Which cloud storage system are you using?
+
+Backblaze B2 in production; local disk in the steps above
+
+### Output of `rclone config redacted`
+
+```ini
+; empty config
+```
+
+### The command you were trying to run
+
+```shell
+rclone serve restic --addr 127.0.0.1:8080 --cache-objects=false -vv /data
+```
+
+### A log from the command with the `-vv` flag
+
+```shell
+2026/10/16 09:30:25 DEBUG : rclone: Version "v1.75.2" starting with parameters ["rclone" "serve" "restic" "--addr" "127.0.0.1:8080" "--cache-objects=false" "-vv" "/data"]
+2026/10/16 09:30:25 DEBUG : Creating backend with remote "/data"
+2026/10/16 09:30:25 NOTICE: Config file "/data/.rclone.conf" not found - using defaults
+2026/10/16 09:30:25 NOTICE: Local file system at /data: Serving restic REST API on [http://127.0.0.1:8080/]
+2026/10/16 09:30:26 DEBUG : repo/config: HEAD request error: object not found
+2026/10/16 09:30:26 INFO  : repo: Creating repository
+2026/10/16 09:30:26 DEBUG : repo/config: HEAD request error: object not found
+2026/10/16 09:30:26 DEBUG : repo/keys: list request
+2026/10/16 09:30:26 DEBUG : repo/snapshots: list request
+2026/10/16 09:30:27 DEBUG : repo/keys/e87593295bb9acd0f0192857ff2f32f98f10ca6bafa799d5b83e8326e7d9e7a8: size = 440 OK
+2026/10/16 09:30:27 DEBUG : repo/config: size = 155 OK
+2026/10/16 09:30:27 DEBUG : repo/locks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: size = 4 OK
+2026/10/16 09:30:27 DEBUG : repo/locks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: GET request error: permission denied
+2026/10/16 09:30:27 DEBUG : repo/locks/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: Delete request error: permission denied
+2026/10/16 09:30:27 DEBUG : repo/keys: list request
+2026/10/16 09:30:28 DEBUG : repo/locks: list request
+2026/10/16 09:30:28 DEBUG : repo/locks/4a01776535f330e29acc9f000545d882751de8e1ec243a6736ced257db95b05b: size = 144 OK
+2026/10/16 09:30:28 DEBUG : repo/locks: list request
+2026/10/16 09:30:28 DEBUG : repo/index: list request
+2026/10/16 09:30:37 DEBUG : repo/data/50/50e066f2d11adaf2dadd787d83d61d80f4bb872b4eac63fd13dfb621982b0a5d: size = 290 OK
+2026/10/16 09:30:37 DEBUG : repo/data/c5/c5cbab08231ba67946df84a5849d7f838c21699b3799c24d7a79355ead74d473: size = 124 OK
+2026/10/16 09:30:37 DEBUG : repo/index/6670202d2d709a5f8b718c2a85ed5957cd3f0ef603eee2247acb852333bb7fe0: size = 309 OK
+2026/10/16 09:30:37 DEBUG : repo/snapshots/92c9f298223ca0ff9da1a1e31d9e7baf2a0ffb31a424c79bc30ddbe2ff99fd78: size = 347 OK
+2026/10/16 09:30:37 DEBUG : repo/locks/4a01776535f330e29acc9f000545d882751de8e1ec243a6736ced257db95b05b: Delete request error: permission denied
+2026/10/16 09:30:37 DEBUG : repo/keys: list request
+2026/10/16 09:30:38 DEBUG : repo/locks: list request
+2026/10/16 09:30:38 DEBUG : repo/keys: list request
+2026/10/16 09:30:38 DEBUG : repo/locks: list request
+2026/10/16 09:30:38 DEBUG : repo/locks: list request
+```
+
+### Anything else?
+
+Related: #8785 (locks through `serve restic`, but a different cause: eventual consistency of the Mega backend)."""
+start = "694dae2ed712dccac3b76b3aba6d078720ebce68"
+fix = "0677b0ca1eee360a79b772437fb6dbff911eaed4"
+hidden_tests = ["cmd/serve/restic/restic_test.go"]
+closed = 2026-10-18
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/10100"
+pull = 10109
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-11: Removing a directory's contents and then the directory leaves a virtual delete entry in the parent, which
+# stops vfs/forget from clearing the parent's directory cache.
+# issue opened 2026-10-13, fix opened 2026-10-13, squash (or single commit); source files: vfs/dir.go (9 lines);
+# request from body (never edited).
+# reading notes: filed by fixer; text short on cause but has a full repro
+[[situation]]
+id = "rclone-11"
+request = """
+vfs: vDel leaks prevent forgetting directory cache
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+_No response_
+
+### What is the problem you are having with rclone?
+
+After removing a directory's contents and then the directory itself, `vfs/forget` no longer clears the root's directory cache. Files added outside rclone stay invisible until the cache expires, or, for `vfs/forget` and the cache cleanup, until the removed directory's cleanup timer fires, 2 × `--dir-cache-time` later. The same applies to anything that relies on `ForgetAll`, e.g. `vfs/forget dir=...` on an ancestor.
+
+The problem is due to a leak of virtual directory entries `vDel`. Both deletion cause a `vDel` additions, but only one is removed. When forget is issued, the presence of this `vDel` prevents cache forgetting.
+
+
+### rclone version
+
+rclone v1.76.0-DEV
+- os/version: darwin 26.7 (64 bit)
+- os/kernel: 25.6.0 (arm64)
+- os/type: darwin
+- os/arch: arm64 (ARMv8 compatible)
+- go/version: go1.27.1
+- go/linking: dynamic
+- go/tags: none
+
+### Operating system
+
+macOS
+
+### Which cloud storage system are you using?
+
+local disk
+
+### Output of `rclone config redacted`
+
+```ini
+; empty config
+### Double check the config for sensitive info before posting publicly
+```
+
+### The command you were trying to run
+
+```shell
+rm -rf ./root serve.log
+
+mkdir -p root/dir && echo "to_delete" > root/dir/to_delete.txt
+
+./rclone serve webdav root --addr 127.0.0.1:18080 --dir-cache-time 1h \\
+    --rc --rc-addr 127.0.0.1:15572 --rc-no-auth -vv --log-file serve.log &
+SERVE=$!
+sleep 2
+R=":webdav,url='http://127.0.0.1:18080':"
+forget() { ./rclone rc --url http://127.0.0.1:15572/ vfs/forget >/dev/null; }
+
+./rclone lsf -R "$R"   # read root and dir into the VFS cache
+
+echo "file1-content" > root/file1.txt # add a file outside rclone
+forget                 # forget cache
+./rclone lsf "$R"      # lists file1.txt, as expected
+
+./rclone deletefile "${R}dir/to_delete.txt"  # delete dir's content
+./rclone rmdir "${R}dir"                     # delete dir itself
+
+echo "file2-content" > root/file2.txt # add another file outside rclone 
+forget                 # forget cache, but now it doesn't take effect!
+./rclone lsf "$R"      # lists file1.txt - expected: file1.txt and file2.txt
+
+kill $SERVE
+```
+
+### A log from the command with the `-vv` flag
+
+```shell
+2026/10/13 15:37:34 DEBUG : rclone: Version "v1.76.0-DEV" starting with parameters ["./rclone" "serve" "webdav" "root" "--addr" "127.0.0.1:18080" "--dir-cache-time" "1h" "--rc" "--rc-addr" "127.0.0.1:15572" "--rc-no-auth" "-vv" "--log-file" "serve.log"]
+2026/10/13 15:37:34 NOTICE: Serving remote control on http://127.0.0.1:15572/
+2026/10/13 15:37:34 DEBUG : Creating backend with remote "root"
+2026/10/13 15:37:34 NOTICE: Config file "/Users/biagio/.config/rclone/rclone.conf" not found - using defaults
+2026/10/13 15:37:34 INFO  : Local file system at root: poll-interval is not supported by this remote
+2026/10/13 15:37:34 NOTICE: Local file system at root: WebDav Server started on [http://127.0.0.1:18080/]
+2026/10/13 15:37:36 DEBUG : /: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:36 DEBUG : /: >OpenFile: fd=/ (r), err=<nil>
+2026/10/13 15:37:36 DEBUG : /: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:36 DEBUG : /: >OpenFile: fd=/ (r), err=<nil>
+2026/10/13 15:37:36 DEBUG : /dir: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:36 DEBUG : /dir: >OpenFile: fd=dir/ (r), err=<nil>
+2026/10/13 15:37:36 INFO  : //: PROPFIND from 127.0.0.1:51505
+2026/10/13 15:37:36 DEBUG : /dir/: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:36 DEBUG : /dir/: >OpenFile: fd=dir/ (r), err=<nil>
+2026/10/13 15:37:36 DEBUG : /dir/: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:36 DEBUG : /dir/: >OpenFile: fd=dir/ (r), err=<nil>
+2026/10/13 15:37:36 DEBUG : /dir/to_delete.txt: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:36 DEBUG : dir/to_delete.txt: Open: flags=O_RDONLY
+2026/10/13 15:37:36 DEBUG : dir/to_delete.txt: >Open: fd=dir/to_delete.txt (r), err=<nil>
+2026/10/13 15:37:36 DEBUG : /dir/to_delete.txt: >OpenFile: fd=dir/to_delete.txt (r), err=<nil>
+2026/10/13 15:37:36 INFO  : //dir/: PROPFIND from 127.0.0.1:51505
+2026/10/13 15:37:36 DEBUG : rclone: Version "v1.76.0-DEV" starting with parameters ["./rclone" "rc" "-vv" "--log-file" "serve.log" "--url" "http://127.0.0.1:15572/" "vfs/forget"]
+2026/10/13 15:37:36 DEBUG : rc: "vfs/forget": with parameters map[]
+2026/10/13 15:37:36 DEBUG : forgetting directory cache
+2026/10/13 15:37:36 DEBUG : dir: forgetting directory cache
+2026/10/13 15:37:36 DEBUG : rc: "vfs/forget": reply map[forgotten:[]]: <nil>
+2026/10/13 15:37:36 DEBUG : /: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:36 DEBUG : /: >OpenFile: fd=/ (r), err=<nil>
+2026/10/13 15:37:36 DEBUG : 6 go routines active
+2026/10/13 15:37:36 DEBUG : /: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:36 DEBUG : /: >OpenFile: fd=/ (r), err=<nil>
+2026/10/13 15:37:36 DEBUG : /dir: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:36 DEBUG : /dir: >OpenFile: fd=dir/ (r), err=<nil>
+2026/10/13 15:37:36 DEBUG : /file1.txt: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:36 DEBUG : file1.txt: Open: flags=O_RDONLY
+2026/10/13 15:37:36 DEBUG : file1.txt: >Open: fd=file1.txt (r), err=<nil>
+2026/10/13 15:37:36 DEBUG : /file1.txt: >OpenFile: fd=file1.txt (r), err=<nil>
+2026/10/13 15:37:36 INFO  : //: PROPFIND from 127.0.0.1:51507
+2026/10/13 15:37:36 DEBUG : /dir/to_delete.txt: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:36 DEBUG : dir/to_delete.txt: Open: flags=O_RDONLY
+2026/10/13 15:37:36 DEBUG : dir/to_delete.txt: >Open: fd=dir/to_delete.txt (r), err=<nil>
+2026/10/13 15:37:36 DEBUG : /dir/to_delete.txt: >OpenFile: fd=dir/to_delete.txt (r), err=<nil>
+2026/10/13 15:37:36 INFO  : //dir/to_delete.txt: PROPFIND from 127.0.0.1:51509
+2026/10/13 15:37:36 DEBUG : /dir/to_delete.txt: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:36 DEBUG : dir/to_delete.txt: Open: flags=O_RDONLY
+2026/10/13 15:37:36 DEBUG : dir/to_delete.txt: >Open: fd=dir/to_delete.txt (r), err=<nil>
+2026/10/13 15:37:36 DEBUG : /dir/to_delete.txt: >OpenFile: fd=dir/to_delete.txt (r), err=<nil>
+2026/10/13 15:37:36 INFO  : //dir/to_delete.txt: PROPFIND from 127.0.0.1:51509
+2026/10/13 15:37:36 DEBUG : dir/to_delete.txt: Remove:
+2026/10/13 15:37:36 DEBUG : dir: Added virtual directory entry vDel: "to_delete.txt"
+2026/10/13 15:37:36 DEBUG : dir/to_delete.txt: >Remove: err=<nil>
+2026/10/13 15:37:36 INFO  : //dir/to_delete.txt: DELETE from 127.0.0.1:51509
+2026/10/13 15:37:36 DEBUG : /dir: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:36 DEBUG : /dir: >OpenFile: fd=dir/ (r), err=<nil>
+2026/10/13 15:37:36 INFO  : //dir: PROPFIND from 127.0.0.1:51510
+2026/10/13 15:37:37 DEBUG : /dir/: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:37 DEBUG : /dir/: >OpenFile: fd=dir/ (r), err=<nil>
+2026/10/13 15:37:37 DEBUG : /dir/: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:37 DEBUG : /dir/: >OpenFile: fd=dir/ (r), err=<nil>
+2026/10/13 15:37:37 INFO  : //dir/: PROPFIND from 127.0.0.1:51510
+2026/10/13 15:37:37 DEBUG : Added virtual directory entry vDel: "dir"
+2026/10/13 15:37:37 INFO  : //dir/: DELETE from 127.0.0.1:51510
+2026/10/13 15:37:37 DEBUG : rclone: Version "v1.76.0-DEV" starting with parameters ["./rclone" "rc" "-vv" "--log-file" "serve.log" "--url" "http://127.0.0.1:15572/" "vfs/forget"]
+2026/10/13 15:37:37 DEBUG : rc: "vfs/forget": with parameters map[]
+2026/10/13 15:37:37 DEBUG : forgetting directory cache
+2026/10/13 15:37:37 DEBUG : Removed virtual directory entry vDel: "dir"
+2026/10/13 15:37:37 DEBUG : rc: "vfs/forget": reply map[forgotten:[]]: <nil>
+2026/10/13 15:37:37 DEBUG : /: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:37 DEBUG : 6 go routines active
+2026/10/13 15:37:37 DEBUG : /: >OpenFile: fd=/ (r), err=<nil>
+2026/10/13 15:37:37 DEBUG : /: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:37 DEBUG : /: >OpenFile: fd=/ (r), err=<nil>
+2026/10/13 15:37:37 DEBUG : /file1.txt: OpenFile: flags=O_RDONLY, perm=----------
+2026/10/13 15:37:37 DEBUG : file1.txt: Open: flags=O_RDONLY
+2026/10/13 15:37:37 DEBUG : file1.txt: >Open: fd=file1.txt (r), err=<nil>
+2026/10/13 15:37:37 DEBUG : /file1.txt: >OpenFile: fd=file1.txt (r), err=<nil>
+2026/10/13 15:37:37 INFO  : //: PROPFIND from 127.0.0.1:51512
+2026/10/13 15:37:37 INFO  : Signal received: terminated
+2026/10/13 15:37:37 DEBUG : 7 go routines active
+```
+
+### Anything else?
+
+Notice from the logs how two virtual directory entries vDel are added, but only one is removed. That leak prevents forget to be effective."""
+start = "36ce1a28fe8d0dfa6d9cd988cbd302921eeea23c"
+fix = "dcf34835130b6acfc1b8da37651bf7f3dc89b28f"
+hidden_tests = ["vfs/dir_test.go"]
+closed = 2026-10-15
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/10083"
+pull = 10084
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# rclone-12: A shrinking truncate of an uncached file in the VFS cache (writes/full mode) should persist instead of
+# being undone by re-downloading the full object on close.
+# issue opened 2026-10-05, fix opened 2026-10-10, squash (or single commit); source files: vfs/vfscache/item.go (18
+# lines); request from body (never edited).
+[[situation]]
+id = "rclone-12"
+request = """
+vfs: shrinking truncate of an uncached file is silently undone on close (--vfs-cache-mode writes/full)
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+_No response_
+
+### What is the problem you are having with rclone?
+
+Truncating an existing file to a smaller non-zero size through a mount returns
+success, and the mount briefly shows the new size, but on close the VFS cache
+re-downloads the whole object over the truncated cache file and uploads it at
+the original size. No error is reported. Truncate-then-write leaves a mixture
+of old and new bytes.
+
+### rclone version
+
+rclone v1.75.1 (official .deb, go1.26.8) and v1.76.0-beta.10454.3b9f0a05b
+Debian 13.6, kernel 6.12.101, fuse3 3.17.2. Local backend on ext4; also
+reproduced against a `serve webdav` remote.
+
+### Operating system
+
+Linux
+
+### Which cloud storage system are you using?
+
+local, webdav
+
+### Output of `rclone config redacted`
+
+```ini
+empty
+**see below**
+```
+
+### The command you were trying to run
+
+```shell
+**Steps to reproduce**
+    mkdir back mnt cache && touch empty.conf
+    printf 'line1\\nline2\\nline3\\n' > back/f            # 18 bytes
+    rclone mount back mnt --vfs-cache-mode writes --config empty.conf \\
+        --cache-dir cache --log-file mount.log -vv --daemon
+    truncate -s 5 mnt/f; echo $?                        # 0
+    stat -c %s mnt/f                                    # 5
+    sleep 10
+    stat -c %s back/f mnt/f                             # 18 and 18
+
+**Expected:** back/f is 5 bytes. **Actual:** 18 bytes, original MD5.
+```
+
+### A log from the command with the `-vv` flag
+
+```shell
+**Log**
+    f: Open: flags=O_WRONLY|0x800
+    f: Setattr: ... size=5
+    f: vfs cache: truncate to size=18
+    f: vfs cache: truncate to size=5
+    f: close:
+    f: ChunkedReader.openRange at 0 length 134217728
+    f: vfs cache: queuing for upload in 5s
+    f.13fc66f5.partial: size = 18 OK
+    f: Copied (replaced existing)
+```
+
+### Anything else?
+
+**Notes**
+- Same result with --vfs-cache-mode full unless the file was read first, in
+  which case the truncate is kept.
+- Under minimal, `truncate` (O_WRONLY) fails with EPERM, but ftruncate on an
+  O_RDWR handle is lost the same way.
+- Not affected: truncate to zero, extending, write-then-truncate, files
+  created in the same session."""
+start = "36febacabdd8d0e4d34dff788920a4ad69d08d70"
+fix = "78be7079b97dd693e68281a579cc7d309108b672"
+hidden_tests = ["vfs/read_write_test.go", "vfs/vfscache/item_test.go"]
+closed = 2026-10-15
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/10047"
+pull = 10063
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-13: Listing a Drime directory beyond the server's 20,000-entry paging limit loops forever requesting the same
+# page; it should stop.
+# issue opened 2026-10-04, fix opened 2026-10-05, squash (or single commit); source files: backend/drime/drime.go (10
+# lines); request from oldest of 3 edit records.
+# reading notes: filed by fixer; text names the fix (return an error at the limit) in its last paragraph; a test also
+# pins that getItem returns listing errors rather than not-found, which the issue only hints at via duplicate uploads
+# (small doubt)
+[[situation]]
+id = "rclone-13"
+request = """
+drime: listing a directory with more than 20,000 entries never finishes
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the [latest beta or stable](https://rclone.org/commands/rclone_selfupdate/) release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+_No response_
+
+### What is the problem you are having with rclone?
+
+Listing a Drime directory with more than 20,000 entries never finishes. rclone asks for the same page over and over and memory grows until the process is killed.
+
+Drime returns 250 entries per page to an `rclone/*` User-Agent and won't page past 20,000 entries. Asking for page 81 returns page 80 again with `current_page: 80` and `last_page: 81`. `listAll` only stops when `current_page == last_page` and asks for `current_page + 1` next, so it requests page 81 forever.
+
+On a Synology NAS a sync to a crypt remote on top of Drime made 1,108 identical requests in 4 minutes before it hit the 2G memory limit of its cgroup and was killed (exit 137).
+
+The loop came with #9391 (306fb0a30) in v1.74.0. Before that large listings stopped early without an error, so sync uploaded the files it couldn't see again and some directories ended up with up to 5 copies of a file. Uploads make duplicates on their own as well: before each upload rclone looks the file up by listing the whole directory, and it doesn't find a file past the limit.
+
+Steps to reproduce:
+
+1. Find a Drime directory with more than 20,000 entries. Other User-Agents get 100 entries per page and hit the limit at 2,500 entries, so a directory with a few thousand entries works too if you add `--user-agent=probe/1.0`.
+2. Run `rclone lsf -vv --dump headers --user-agent=probe/1.0 drime:dir`
+3. After page 25 every request asks for page 26 and gets page 25 back, and the command never returns.
+
+### rclone version
+
+```
+rclone v1.76.0-DEV
+- os/version: darwin 26.7.1 (64 bit)
+- os/kernel: 25.6.0 (arm64)
+- os/type: darwin
+- os/arch: arm64 (ARMv8 compatible)
+- go/version: go1.27.1
+- go/linking: dynamic
+- go/tags: none
+```
+
+This is master at a82c965ba, used for the log below. The NAS where it happened first runs v1.75.1 on linux/amd64.
+
+### Operating system
+
+macOS
+
+### Which cloud storage system are you using?
+
+Drime, with crypt on top
+
+### Output of `rclone config redacted`
+
+```ini
+[drime]
+type = drime
+access_token = XXX
+```
+
+### The command you were trying to run
+
+```shell
+rclone lsf -vv --dump headers --user-agent=probe/1.0 drime,root_folder_id=XXX:
+```
+
+### A log from the command with the `-vv` flag
+
+```shell
+2026/10/04 22:54:47 NOTICE: Automatically setting -vv as --dump is enabled
+2026/10/04 22:54:47 DEBUG : rclone: Version "v1.76.0-DEV" starting with parameters ["rclone" "lsf" "-vv" "--dump" "headers" "--user-agent=probe/1.0" "drime,root_folder_id=XXX:"]
+...
+2026/10/04 22:55:01 DEBUG : GET /api/v1/drive/file-entries?folderId=XXX&page=23&perPage=1000 HTTP/1.1
+2026/10/04 22:55:01 DEBUG : GET /api/v1/drive/file-entries?folderId=XXX&page=24&perPage=1000 HTTP/1.1
+2026/10/04 22:55:02 DEBUG : GET /api/v1/drive/file-entries?folderId=XXX&page=25&perPage=1000 HTTP/1.1
+2026/10/04 22:55:03 DEBUG : GET /api/v1/drive/file-entries?folderId=XXX&page=26&perPage=1000 HTTP/1.1
+2026/10/04 22:55:03 DEBUG : GET /api/v1/drive/file-entries?folderId=XXX&page=26&perPage=1000 HTTP/1.1
+2026/10/04 22:55:03 DEBUG : GET /api/v1/drive/file-entries?folderId=XXX&page=26&perPage=1000 HTTP/1.1
+2026/10/04 22:55:03 DEBUG : GET /api/v1/drive/file-entries?folderId=XXX&page=26&perPage=1000 HTTP/1.1
+2026/10/04 22:55:04 DEBUG : GET /api/v1/drive/file-entries?folderId=XXX&page=26&perPage=1000 HTTP/1.1
+...
+2026/10/04 22:56:57 DEBUG : GET /api/v1/drive/file-entries?folderId=XXX&page=26&perPage=1000 HTTP/1.1
+2026/10/04 22:56:57 DEBUG : GET /api/v1/drive/file-entries?folderId=XXX&page=26&perPage=1000 HTTP/1.1
+```
+
+Only the request lines are shown. Page 26 was requested 383 times in about 2 minutes before I stopped it. The directory has 2,762 entries.
+
+### Anything else?
+
+What I found out about the API while looking into this, with read-only requests:
+
+- `orderBy=created_at&orderDir=asc` and `desc` work. `orderBy=id` is ignored.
+- `filters` is ignored in every encoding I tried, so the `created_at` windowing Duplicati used doesn't work for us. `paginate=cursor` and the like make no difference either.
+- `known_total` in the listing response is the real number of entries in the directory and matches `GET /folders/{id}/count`. `total` and `last_page` are made up while paging.
+- `query=<name>` returns the direct children of `folderId` whose name contains it, including ones past the limit. Without `folderId` it searches the whole drive.
+- Entries created in the same second don't come back in the same order in `asc` and `desc`.
+
+Other clients have hit the same limit: duplicati/duplicati#7285 and essare/drime-s3#8. A Duplicati user also reported it in a comment on #9391.
+
+I have a fix ready: return an error at the limit instead of looping, look single files up with `query`, list oldest first and then newest first so directories with up to about 40,000 entries list completely, and set `DuplicateFiles` so `rclone dedupe` can clean up. I'll open a PR linked to this issue."""
+start = "af364f5468a29a816c6ad427585a7ee4c92cb9dc"
+fix = "ae39ec6f6459530ad183ec7149f88f2a307f8470"
+hidden_tests = ["backend/drime/drime_internal_test.go"]
+closed = 2026-10-14
+kind = "crash"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/10035"
+pull = 10037
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# rclone-14: Bandwidth limits below 1 KiB printed by BwTimetable.String lose their unit and are read back 1024 times
+# larger; the string form should round trip.
+# issue opened 2026-09-22, fix opened 2026-09-22, squash (or single commit); source files: fs/bwtimetable.go,
+# fs/registry.go, fs/sizesuffix.go (28 lines); request from body (never edited).
+# reading notes: filed by fixer; text names the fix (move B suffixing into a SizeSuffix method used by BwPair.String)
+[[situation]]
+id = "rclone-14"
+request = """
+rc core/bwlimit: sub-KiB rate is scaled by 1024 when the reported rate is fed back in
+
+#### What is the problem you are having with rclone?
+
+`BwPair.String()` prints a sub-KiB bandwidth without a unit, and `Set` reads a bare number as KiB, so a bandwidth below 1 KiB is multiplied by 1024 when it goes through a string.
+
+This is the same corruption as 63c4fef27 ("fs: fix corruption of SizeSuffix with `B` suffix in config"), which fixed it for `fs.Option` by suffixing bare numbers with `B`. `BwPair.String()` calls `SizeSuffix.String()` directly, so it never got that treatment.
+
+It shows up on `rc core/bwlimit`, which documents that the returned `rate` uses the same format as the `rate` parameter and as `--bwlimit`:
+
+```
+rclone rc core/bwlimit rate=500B
+{
+    "bytesPerSecond": 500,
+    "rate": "500"
+}
+```
+
+Feeding that `rate` back in gives a limit 1024 times larger:
+
+```
+rclone rc core/bwlimit rate=500
+{
+    "bytesPerSecond": 512000,
+    "rate": "500Ki"
+}
+```
+
+So anything that reads the current limit and writes it back, or restores a saved value, silently raises the limit.
+
+#### What is your rclone version?
+
+master at 4e7a21bea
+
+#### Which OS you are using and how many bits
+
+macOS 15.1, darwin/arm64
+
+#### How to replicate with a test
+
+```go
+var tt fs.BwTimetable
+tt.Set("500B")          // Tx: 500
+printed := tt.String()  // "500"
+
+var got fs.BwTimetable
+got.Set(printed)        // Tx: 512000
+```
+
+The same holds for `1B`, `1023B`, `1B:2B` and `Mon-10:00,500B`. Values of 1 KiB and above already round trip, because their suffix is not a digit.
+
+I have a fix that moves the `B` suffixing out of `Option.String()` into a `SizeSuffix` method and uses it from `BwPair.String()` too, with a round trip test. Happy to open a PR."""
+start = "14a1359c96b57c3aa675b6bf56925edcb8f384f0"
+fix = "60bdc6d4548f780833f7e26b3d9780316d021edf"
+hidden_tests = ["fs/bwtimetable_test.go"]
+closed = 2026-09-25
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/9958"
+pull = 9959
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# rclone-15: Running archive create without a destination crashes with a nil pointer instead of writing the archive to
+# stdout as intended.
+# issue opened 2026-09-12, fix opened 2026-09-12, squash (or single commit); source files:
+# cmd/archive/create/create.go (11 lines); request from body (never edited).
+[[situation]]
+id = "rclone-15"
+request = """
+Crash when running `rclone archive create` without destination
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+_No response_
+
+### What is the problem you are having with rclone?
+
+When I run `rclone archive create --format tar.gz remote:filepath`, rclone crashes on a nil pointer dereference.
+
+### rclone version
+
+rclone v1.75.1
+- os/version: arch (64 bit)
+- os/kernel: 7.2.4-arch1-2 (x86_64)
+- os/type: linux
+- os/arch: amd64
+- go/version: go1.27.0-X:nodwarf5
+- go/linking: dynamic
+- go/tags: none
+
+### Operating system
+
+Linux
+
+### Which cloud storage system are you using?
+
+Minio (S3 compatible)
+
+### Output of `rclone config redacted`
+
+```ini
+[gitlab-minio]
+type = s3
+provider = Minio
+access_key_id = XXX
+secret_access_key = XXX
+endpoint = https://redacted.endpoint
+list_url_encode = false
+```
+
+### The command you were trying to run
+
+```shell
+rclone archive create --format tar.gz gitlab-minio:gitlab-uploads
+```
+
+### A log from the command with the `-vv` flag
+
+```shell
+2026/09/12 14:38:30 DEBUG : rclone: Version "v1.75.1" starting with parameters ["rclone" "archive" "create" "--format" "tar.gz" "gitlab-minio:gitlab-uploads" "-vv"]
+2026/09/12 14:38:30 DEBUG : Creating backend with remote "gitlab-minio:gitlab-uploads"
+2026/09/12 14:38:30 DEBUG : Using config file from "/home/breigner01/.config/rclone/rclone.conf"
+dst=<nil>, dstFile="", src=S3 bucket gitlab-uploads, format="tar.gz", prefix=""
+panic: runtime error: invalid memory address or nil pointer dereference
+[signal SIGSEGV: segmentation violation code=0x1 addr=0x40 pc=0x56207ccb4fb1]
+
+goroutine 1 [running]:
+github.com/rclone/rclone/cmd/archive/create.CheckValidDestination({0x56207fa7c5b0?, 0x56207fed9a20?}, {0x0?, 0x0?}, {0x0?, 0x311e4364f200?})
+	github.com/rclone/rclone/cmd/archive/create/create.go:272 +0x31
+github.com/rclone/rclone/cmd/archive/create.ArchiveCreate({0x56207fa7c5b0, 0x56207fed9a20}, {0x0, 0x0}, {0x0, 0x0}, {0x56207fa8ebc0, 0x311e43a48708}, {0x7ffdfdfdb419, 0x6}, ...)
+	github.com/rclone/rclone/cmd/archive/create/create.go:305 +0xda
+github.com/rclone/rclone/cmd/archive/create.init.func1.1()
+	github.com/rclone/rclone/cmd/archive/create/create.go:127 +0x23c
+github.com/rclone/rclone/cmd.Run(0x0, 0x0, 0x56207faf1fe8, 0x311e43579b48)
+	github.com/rclone/rclone/cmd/cmd.go:255 +0x125
+github.com/rclone/rclone/cmd/archive/create.init.func1(0x56207faf1fe8, {0x311e43e14380?, 0x4?, 0x56207cfb8297?})
+	github.com/rclone/rclone/cmd/archive/create/create.go:120 +0x113
+github.com/spf13/cobra.(*Command).execute(0x56207faf1fe8, {0x311e43e14340, 0x4, 0x4})
+	github.com/spf13/cobra@v1.10.2/command.go:1015 +0xb3c
+github.com/spf13/cobra.(*Command).ExecuteC(0x56207faf0c00)
+	github.com/spf13/cobra@v1.10.2/command.go:1148 +0x450
+github.com/spf13/cobra.(*Command).Execute(...)
+	github.com/spf13/cobra@v1.10.2/command.go:1071
+github.com/rclone/rclone/cmd.Main()
+	github.com/rclone/rclone/cmd/cmd.go:539 +0x31
+main.main()
+	github.com/rclone/rclone/rclone.go:14 +0xf
+```
+
+### Anything else?
+
+My best guess would be that it always expects a destination and crashes because there aren't any.
+
+It is supposed to output to stdout when given no destination"""
+start = "0e19ed565fab73afcc463457d04339df63923518"
+fix = "3342e34f583d470136608e763e87f5fb9fc4ad60"
+hidden_tests = ["cmd/archive/archive_test.go"]
+closed = 2026-09-14
+kind = "crash"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/9910"
+pull = 9912
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-16: touch --timestamp should accept the documented formats (YYMMDD example, YYYY-MM-DD, RFC 3339 with Z)
+# instead of failing to parse them.
+# issue opened 2026-09-04, fix opened 2026-09-04, squash (or single commit); source files: cmd/touch/touch.go (34
+# lines); request from body (never edited).
+# reading notes: text names the fix (candidate layout list); test omits the dotted 17.10.30 form
+[[situation]]
+id = "rclone-16"
+request = """
+touch: --timestamp fails on documented example "17.10.30" and common date formats
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+_No response_
+
+### What is the problem you are having with rclone?
+
+The `rclone touch --timestamp` flag fails when using the format explicitly given as an example in the command help and documentation (`17.10.30`). It also fails on standard `YYYY-MM-DD` dates and RFC 3339 UTC timestamps ending in `Z`.
+
+In `cmd/touch/touch.go`, the help text states:
+```text
+Times may be specified as one of:
+
+- 'YYMMDD' - e.g. 17.10.30
+- 'YYYY-MM-DDTHH:MM:SS' - e.g. 2006-01-02T15:04:05
+- 'YYYY-MM-DDTHH:MM:SS.SSS' - e.g. 2006-01-02T15:04:05.123456789
+```
+
+In the implementation, `defaultLayout` is set to `"060102"` (without dots), and layout selection is determined strictly by string length:
+
+```go
+func parseTimeArgument(timeString string) (time.Time, error) {
+	layout := defaultLayout
+	if len(timeString) == len(layoutDateWithTime) {
+		layout = layoutDateWithTime
+	} else if len(timeString) > len(layoutDateWithTime) {
+		layout = layoutDateWithTimeNano
+	}
+	if localTime {
+		return time.ParseInLocation(layout, timeString, time.Local)
+	}
+	return time.Parse(layout, timeString)
+}
+```
+
+Because of this:
+1. The documented example `17.10.30` has length 8 (`< 19`), falling back to `defaultLayout` (`"060102"`). `time.Parse` errors with:
+   `parsing time "17.10.30" as "060102": cannot parse ".10.30" as "01"`
+2. Standard date inputs like `2024-05-01` have length 10 (`< 19`), falling back to `"060102"`. `time.Parse` errors with:
+   `parsing time "2024-05-01" as "060102": cannot parse "-05-01" as "01"`
+3. RFC 3339 timestamps ending with `Z` like `2024-05-01T12:00:00Z` have length 20 (`> 19`), which selects `layoutDateWithTimeNano` (`"2006-01-02T15:04:05.999999999"`), expecting a subsecond decimal `.` and erroring on `Z`.
+
+
+### rclone version
+
+```text
+rclone v1.69.0-DEV
+- os/version: Microsoft Windows 11 Home 24H2
+- os/arch: amd64
+- go/version: go1.24.0
+```
+
+### Operating system
+
+Windows
+
+### Which cloud storage system are you using?
+
+Local filesystem (reproduces on all backends)
+
+### Output of `rclone config redacted`
+
+```ini
+# No remote configuration needed; reproduces locally.
+```
+
+### The command you were trying to run
+
+```shell
+rclone touch testfile.txt --timestamp 17.10.30 -vv
+```
+
+### A log from the command with the `-vv` flag
+
+```shell
+2026/09/04 14:40:12 DEBUG : rclone: Version "v1.69.0-DEV" starting with parameters ["rclone" "touch" "testfile.txt" "--timestamp" "17.10.30" "-vv"]
+2026/09/04 14:40:12 ERROR : : Failed to touch: failed to parse timestamp argument: parsing time "17.10.30" as "060102": cannot parse ".10.30" as "01"
+2026/09/04 14:40:12 Fatal error: failed to parse timestamp argument: parsing time "17.10.30" as "060102": cannot parse ".10.30" as "01"
+```
+
+### Anything else?
+
+
+Existing tests in `cmd/touch/touch_test.go` only test `"060102"` and `"121212"`, which is why this was not caught by CI.
+
+Instead of selecting layouts by string length, `parseTimeArgument()` can iterate through a list of candidate layouts (similar to `parseTimeDates()` in `fs/parseduration.go`):
+
+```go
+var touchTimeLayouts = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02T15:04:05.999999999",
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05",
+	"2006-01-02",
+	"060102",
+	"06.01.02",
+}
+```"""
+start = "ea589de9415703d63a956d7059848cc377fcdeb6"
+fix = "e45210765c1c0d00eccea3f3df973a95b6ec13cc"
+hidden_tests = ["cmd/touch/touch_test.go"]
+closed = 2026-09-09
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/9861"
+pull = 9863
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-17: The Yandex backend should support tokens with only the app-folder scope by addressing paths under app:/
+# instead of disk:/, including in directory creation.
+# issue opened 2026-09-01, fix opened 2026-09-02, squash (or single commit); source files: backend/yandex/yandex.go
+# (62 lines); request from oldest of 2 edit records.
+# reading notes: option name app_folder only appears in passing in the issue's notes; tests build Fs{opt:
+# Options{AppFolder}} directly and check setRoot/filePath/CreateDir paths, so the prefix must be derived from opt
+# there
+[[situation]]
+id = "rclone-17"
+request = """
+yandex: 403 Forbidden when OAuth token only has cloud_api:disk.app_folder scope
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+_No response_
+
+### What is the problem you are having with rclone?
+
+The Yandex Disk backend always builds API paths with the `disk:/` prefix (see `setRoot()` in `backend/yandex/yandex.go`). That is correct when the OAuth application has full-disk permissions (`cloud_api:disk.read` / `cloud_api:disk.write`).
+
+Many users register their own OAuth application on [Yandex OAuth](https://oauth.yandex.ru/) with only the **application folder** permission (`cloud_api:disk.app_folder`). For that scope the Yandex Disk REST API requires paths under `app:/`, not `disk:/`.
+
+With such a token, any operation against the remote root fails immediately:
+
+```text
+ERROR : error reading destination root directory: [403 - ForbiddenError] Forbidden
+(Доступ запрещён. Возможно, у приложения недостаточно прав для данного действия.)
+```
+
+After switching paths manually to `app:/`, list/upload works with the same token.
+
+Google Drive already supports an analogous case via the `drive.appfolder` scope and `appDataFolder` root. Yandex has the same concept (`app:/`) but it seems rclone does not expose it now.
+
+### rclone version
+
+rclone v1.75.0
+- os/version: debian 13.3 (64 bit)
+- os/kernel: 6.12.63+deb13-amd64 (x86_64)
+- os/type: linux
+- os/arch: amd64
+
+### Operating system
+
+Linux
+
+### Which cloud storage system are you using?
+
+Yandex Disk
+
+### Output of `rclone config redacted`
+
+```ini
+[yadisk]
+type = yandex
+client_id = <redacted_client_id>
+client_secret = <redacted_client_secret>
+token = <redacted_token>
+spoof_ua = true
+upload_wait = 2s
+hard_delete = true
+```
+
+### The command you were trying to run
+
+```shell
+rclone sync /backups yadisk:backups --metadata --max-age 21d --delete-excluded --delete-before --bwlimit=100M --timeout 60m --transfers 2 --tpslimit 8
+```
+
+### A log from the command with the `-vv` flag
+
+```shell
+2026/08/31 19:53:58 ERROR : Yandex backups: error reading destination root directory: [403 - ForbiddenError] Forbidden (Доступ запрещён. Возможно, у приложения недостаточно прав для данного действия.)
+2026/08/31 19:53:58 NOTICE: Failed to lsd with 2 errors: last error was: [403 - ForbiddenError] Forbidden (...)
+```
+
+### Anything else?
+
+With a locally patched binary using `app:/` paths and `app_folder = true`, the 403 disappears. Without fixing `CreateDir`, uploads to `yadisk:backups` then fail with:
+
+```text
+ERROR : file.tar.gz: Failed to copy: [409 - DiskPathDoesntExistsError] Specified path "app:/backups/file.tar.gz" doesn't exists.
+```
+
+Direct API check (works with the same token):
+
+```console
+curl -s -H "Authorization: OAuth TOKEN" \\
+  "https://cloud-api.yandex.net/v1/disk/resources?path=app:/"
+```
+
+```console
+curl -s -H "Authorization: OAuth TOKEN" \\
+  "https://cloud-api.yandex.net/v1/disk/resources?path=disk:/"
+# → 403 Forbidden
+```"""
+start = "2cec6065d3dcd6370ceb2a454729929424e334de"
+fix = "13084df67c7ef96eba20eefb628af39b170fdcd0"
+hidden_tests = ["backend/yandex/yandex_internal_test.go"]
+closed = 2026-09-08
+kind = "missing-behaviour"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/9848"
+pull = 9850
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-18: Directory walks should stop promptly and return context canceled when the job's context is cancelled,
+# instead of listing the whole tree.
+# issue opened 2026-08-17, fix opened 2026-08-17, squash (or single commit); source files: backend/local/local.go,
+# fs/walk/walk.go (10 lines); request from oldest of 2 edit records.
+# reading notes: filed by fixer; text names the cause; test uses a 10s safety timeout only
+[[situation]]
+id = "rclone-18"
+request = """
+walk: directory traversal ignores context cancellation - rc job/stop on operations/size has no effect
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+None — I searched the forum and existing issues and found no report of this (see "Prior art" below).
+
+### What is the problem you are having with rclone?
+
+Cancelling an async RC job that walks a directory tree has no effect on the traversal itself. `job/stop` cancels the job's context and returns immediately, but the concurrent walkers created by `walk()` keep pulling list jobs from the channel and keep listing the entire tree until it is exhausted, at full CPU.
+
+Measured with the official `v1.75.0` binary on macOS arm64 against a local tree of 1,260,000 files (6000 directories × 210 files): after `job/stop` is acknowledged, the `rclone rcd` process keeps burning ~570% CPU for ~4 more seconds and the job eventually finishes with `success=true`. The cancellation is effectively ignored.
+
+Reproducer:
+
+```bash
+# build a big local tree
+mkdir -p bigtree; for i in $(seq 1 6000); do mkdir -p bigtree/d$i; for j in $(seq 1 210); do printf x > bigtree/d$i/f$j.txt; done; done
+
+rclone rcd --rc-addr 127.0.0.1:5571 --rc-user probe --rc-pass probe &
+sleep 1
+JOB=$(curl -sf -u probe:probe -X POST http://127.0.0.1:5571/operations/size -d fs=bigtree -d _async=true | jq -r .jobid)
+sleep 2
+curl -sf -u probe:probe -X POST http://127.0.0.1:5571/job/stop -d "jobid=$JOB"
+# watch the rcd process keep burning CPU, then finish with success=true
+```
+
+Root cause: the checker loop inside `walk()` (`fs/walk/walk.go`, the `walkN` path used when the backend has no native `ListR`, e.g. local/alias) only selects on the `in` channel and the internal `quit` signal. Nothing observes `ctx.Done()`. The context-propagation effort (#3257) added a `ctx` parameter to `walk()`, but the checkers never watch it, so any cancellation arriving mid-walk is invisible to them.
+
+Additionally, the local backend's `List` never checks its context, so once a single huge directory (millions of entries) is being enumerated, cancellation cannot take effect until that enumeration completes.
+
+Expected: after `job/stop`, the walk stops promptly and the job finishes with `error=context canceled`.
+
+The same blind spot affects `operations/list` with `recurse=true` and any other RC command that goes through `walk()` against a backend without native `ListR`. With `--use-listr`-style paths on backends that have `ListR`, cancellation works because the context is propagated to the backend.
+
+### Prior art
+
+I searched the tracker and the forum before filing:
+
+- #3257 is the completed context-propagation effort; this gap looks like a leftover from it — `walk()` received a `ctx` parameter but its checkers never observe `ctx.Done()`.
+- The 2020 forum report of `job/stop` not stopping an sftp transfer is a different mechanism (backend-level cancellation, pre-#3257).
+- #9416 is a channel deadlock in `fs/walk` under `--fast-list` — same file, distinct bug (deadlock during normal operation, not ignored cancellation).
+
+No existing issue or PR reports the walker ignoring context cancellation.
+
+### rclone version
+
+```
+rclone v1.75.0
+- os/version: darwin 27.0 (64 bit)
+- os/kernel: 27.0.0 (arm64)
+- os/type: darwin
+- os/arch: arm64
+- go/version: go1.26.2
+- go/linking: dynamic
+- go/tags: none
+```
+
+I also checked current master (`fs/walk/walk.go`): the checker loop still has no `ctx.Done()` observation, so the bug is present in master.
+
+### Which OS you are using
+
+macOS 27.0 (arm64). The repro is OS-independent — the affected code is pure Go concurrency logic with no platform-specific path.
+
+### Which cloud storage system are you using? (eg Google Drive)
+
+Local filesystem (no `ListR` implementation, which is what routes `operations/size` through the affected `walkN` path).
+
+### The command you were trying to run (eg `rclone copy /tmp remote:tmp`)
+
+Async RC `operations/size` against a local remote, cancelled via `job/stop` (see reproducer above).
+
+### A log from the command with the `-vv` flag
+
+From the reproducer above, polling `job/status` every second after `job/stop`: the job stays `finished=false` with the process at ~570% CPU for ~4 s, then reports `finished=true, success=true` — the walk ran to completion despite the acknowledged cancellation. No error or suspicious entry appears in the log at any point, which is likely why this has gone unnoticed: the cancelled job looks successful, it just keeps burning CPU in silence.
+
+#### How to use GitHub
+
+* Please use buttons (not links) in the toolbar to upload files, and copy/paste logs into fenced code blocks (triple backticks) instead of screenshots of text — thank you!*"""
+start = "1128693468851f38de801a4627f759cbec3a28b9"
+fix = "5eb5c01e36de8f4518f7fa58f71ba236c22c6e18"
+hidden_tests = ["fs/walk/walk_context_cancel_test.go"]
+closed = 2026-08-21
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/9788"
+pull = 9789
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# rclone-19: A VFS cache reader waiting for a range beyond the shrunk item size but within the source size should be
+# released instead of blocking forever.
+# issue opened 2026-08-14, fix opened 2026-08-14, squash (or single commit); source files:
+# vfs/vfscache/downloaders/downloaders.go (6 lines); request from body (never edited).
+# reading notes: filed by fixer; issue already contains the downloaders test and a suggested fix (text names the fix);
+# deadlock tests use 30s safety timeouts
+[[situation]]
+id = "rclone-19"
+request = """
+vfs/vfscache: reader deadlocks forever when item size drops below the read offset
+
+#### The associated forum post URL from `https://forum.rclone.org`
+
+Not posted to the forum: this is a reproducible deadlock with a unit test, so filing directly.
+
+#### What is the problem you are having with rclone?
+
+With `--vfs-cache-mode full`, a reader can block forever inside `Downloaders.Download`. No downloader is started, no request is made to the backend, no error is produced and nothing is logged at any log level, including `-vv`. On a mount the reading process sits in uninterruptible sleep (`D` state) and cannot be killed.
+
+The cause is that two halves of the waiter machinery decide "is this waiter satisfied" and "should we download" using two different file sizes.
+
+`_dispatchWaiters` clips the waiter range against `dls.src.Size()`, the size of the `fs.Object` snapshot taken when the `Downloaders` was constructed:
+
+```go
+r := waiter.r
+r.Clip(dls.src.Size())
+if dls.item.HasRange(r) {
+```
+
+`_ensureDownloader` decides whether to start a downloader from `dls.item.FindMissing(r)`, and `Item.FindMissing` clips against `item.info.Size` instead:
+
+```go
+outr = item.info.Rs.FindMissing(r)
+outr.Clip(item.info.Size)
+```
+
+`Range.Clip` collapses a range to `{0, 0}` when the clip point is below `r.Pos`, and `Ranges.Present` returns true for an empty range. So when
+
+```
+item.info.Size < readOffset <= dls.src.Size()
+```
+
+the download side collapses the range to empty, concludes there is nothing to fetch and returns without starting a downloader, while the wake side does not collapse it and concludes the waiter is not satisfied. The waiter stays queued forever:
+
+- no downloader runs, so no bytes ever arrive
+- no error is ever produced, so `errorCount` never moves and the `maxErrorCount` breaker never trips and never calls `_closeWaiters`
+- the 5s background kicker re-evaluates both predicates every 5s and changes nothing
+
+`item.info.Size` and `dls.src.Size()` drift apart because `dls.src` is frozen at construction while `item.info.Size` is re-derived afterwards, notably by the shrink check in `Item.readAt` which calls `_truncate(item.o.Size())`, and by `_checkObject` plus `_getSize` on reopen. `Item.open` calls `_checkObject` before the `item.opens != 1` early return, but only rebuilds `item.downloaders` when `opens == 1`, so a second open of an already open file refreshes `item.o` and `item.info.Size` while leaving the old frozen `dls.src` in place.
+
+This was introduced by f3f743c3f "vfs: fix download loop when file size shrunk", which added both halves of the asymmetry in the same commit: the `r.Size == 0` early return in `_ensureDownloader` and the `r.Clip(dls.src.Size())` in `_dispatchWaiters`. That commit correctly fixed the case where `src` itself shrinks, and opened this one.
+
+#### What is your rclone version (output from `rclone version`)
+
+rclone v1.74.4, and current master (387b4b5e1).
+
+#### Which OS you are using and how many bits (e.g. Windows 7, 64 bit)
+
+Linux 6.12 x86_64. The bug is platform independent and reproduces in a unit test on any platform.
+
+#### Which cloud storage system are you using? (e.g. Google Drive)
+
+Originally seen on a WebDAV remote, but the reproducers below use the local backend only. Nothing about this is backend specific.
+
+#### The command you were trying to run (e.g. `rclone copy /tmp remote:tmp`)
+
+```
+rclone mount remote: /mnt/point --allow-other --vfs-cache-mode full
+```
+
+The reader was a media scanner reading near the end of a large file.
+
+#### A log from the command with the `-vv` flag
+
+There is no log to attach, and that is part of the report: the deadlocked state is completely silent at every level. The only nearby debug line is in `Item._ensure`, emitted once per call and logged against `nil` rather than the object, so it is not even attributable to the file.
+
+#### How to replicate the issue
+
+Two failing tests, both on the local backend, no special remote needed.
+
+`vfs/vfscache/downloaders/downloaders_test.go`, inside `TestDownloaders`:
+
+```go
+	t.Run("DownloadBeyondItemSize", func(t *testing.T) {
+		item := &testItem{
+			t:    t,
+			size: 1024 * 1024,
+		}
+		opt := vfscommon.Opt
+		dls := New(ctx, item, &opt, remote, src)
+		defer cancel(dls)
+
+		done := make(chan error, 1)
+		go func() {
+			done <- dls.Download(ranges.Range{Pos: 40 * 1024 * 1024, Size: 250})
+		}()
+
+		select {
+		case err := <-done:
+			assert.NoError(t, err)
+		case <-time.After(30 * time.Second):
+			t.Fatal("Download did not return: the waiter was never dispatched")
+		}
+	})
+```
+
+On master this fails with `Download did not return: the waiter was never dispatched`.
+
+I also have an item level test that drives the real `vfscache.Item` through the whole lifecycle (open at full size, cache the head, shrink `info.Size` via `_truncate`, park a reader on a tail range, observe the deadlock) which fails the same way. Both are in the PR.
+
+#### Suggested fix
+
+Wake a waiter when `FindMissing` reports nothing left to download for it, in addition to the existing check. `_ensureDownloader` starts a downloader only when `FindMissing` is non empty, so a waiter with nothing missing has nothing that could ever wake it. This is purely additive to the existing condition, so it cannot regress the shrink case that f3f743c3f fixed. PR attached."""
+start = "bb7c081ec520aa5f3feff22a731082f3483766d6"
+fix = "6e0c71bd276bd587403fd00e88ef195aa6996789"
+hidden_tests = ["vfs/vfscache/downloaders/downloaders_test.go", "vfs/vfscache/item_waiter_test.go"]
+closed = 2026-08-14
+kind = "race"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/9769"
+pull = 9770
+self_filed = true
+bot_filed = false
+security_trap = false
+
+# rclone-20: rclone checksum without --download should compute backend hashes concurrently, limited by --checkers.
+# issue opened 2026-08-04, fix opened 2026-08-08, squash (or single commit); source files: fs/operations/check.go (23
+# lines); request from body (never edited).
+# reading notes: concurrency probe with 10s fallback deadline; asserts max in flight equals --checkers
+[[situation]]
+id = "rclone-20"
+request = """
+checksum: parallelize non-download hash checks using --checkers
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues and this hasn't already been requested.
+- [x] I have checked the latest beta and this feature doesn't already exist.
+
+### Associated forum post URL
+
+_No response_
+
+### rclone version
+
+rclone v1.75.0
+- os/version: fedora 41 (64 bit)
+- os/kernel: 6.13.5-102.bazzite.fc41.x86_64 (x86_64)
+- os/type: linux
+- os/arch: amd64
+- go/version: go1.26.5
+- go/linking: dynamic
+- go/tags: none
+
+### What problem are you trying to solve?
+
+When verifying a checksum manifest against the local backend, `rclone checksum` appears to hash only one file at a time unless `--download` is specified.
+
+For example:
+
+```sh
+rclone checksum sha256 manifest.txt . --one-way --progress
+```
+
+uses the normal backend `Hash()` path, but in rclone v1.75.0 that path is handled synchronously inside `operations.CheckSum()`.
+
+Adding:
+
+```sh
+--download
+```
+
+causes the file-content hashing to run concurrently, limited by `--checkers`.
+
+This is unintuitive for the local backend. In both cases, rclone ultimately needs to read and hash local file contents, but concurrency is only enabled when `--download` is used.
+
+It also means `rclone checksum` can be substantially slower than necessary on fast local storage.
+
+The same behavior affects:
+
+```sh
+rclone check manifest.txt . --checkfile sha256
+```
+
+because it uses the same `operations.CheckSum()` implementation.
+
+### How do you think rclone should be changed to solve that?
+
+Please make the non-`--download` path in `operations.CheckSum()` perform `obj.Hash()` calls concurrently, limited by `--checkers`.
+
+Currently, the non-download branch calls `obj.Hash()` synchronously, while the download branch already uses goroutines and the existing checker token pool.
+
+Ideally:
+
+```sh
+rclone checksum sha256 manifest.txt . --checkers 8
+```
+
+would perform up to eight backend hash operations concurrently without requiring:
+
+```sh
+--download
+```
+
+This would make the behavior more consistent with the meaning of `--checkers`, improve local checksum verification performance, and also benefit `rclone check --checkfile`.
+
+This would make the behavior more consistent with the meaning of `--checkers`, improve local checksum verification performance, and also benefit `rclone check --checkfile`.
+
+### Getting involved
+
+- [x] I'm willing to help implement, test or fund this feature."""
+start = "fc348fcb0bb866bd401266a248c45536bb768ed7"
+fix = "a182fcbce8b7baa987c4819f3b76986517281cf5"
+hidden_tests = ["fs/operations/check_test.go"]
+closed = 2026-08-13
+kind = "missing-behaviour"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/9727"
+pull = 9752
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-21: Dropbox backend calls should use the SDK's context-aware clients and methods so caller cancellation
+# aborts in-flight requests.
+# issue opened 2026-07-28, fix opened 2026-07-31, squash (or single commit); source files: backend/dropbox/batcher.go,
+# backend/dropbox/dropbox.go (104 lines); request from body (never edited).
+# reading notes: AI-drafted source-review report (GPT agent), question-framed, not reproduced live; test needs Fs.srv
+# to be files.ContextClient, which the issue states
+[[situation]]
+id = "rclone-21"
+request = """
+dropbox: backend SDK calls do not propagate caller cancellation
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues and this hasn't already been requested.
+- [x] I have checked the latest beta and this feature doesn't already exist.
+
+### Associated forum post URL
+
+None. I searched the relevant forum discussions directly.
+
+### rclone version
+
+```console
+rclone v1.75.0-beta.9999.17629d67b
+- os/version: ubuntu 24.04 (64 bit)
+- os/kernel: 6.8.0-107-generic (x86_64)
+- os/type: linux
+- os/arch: amd64
+- go/version: go1.26.5
+- go/linking: static
+- go/tags: none
+```
+
+### What problem are you trying to solve?
+
+#### Summary
+
+Dropbox backend operations receive a caller `context.Context`, but the backend stores the SDK's non-context client interfaces and calls their non-context methods. In the pinned SDK, those wrappers execute requests with `context.Background()`, so cancellation of the rclone caller context does not cancel an in-flight Dropbox request. This is source-proven; user-visible cancellation delay has not been reproduced.
+
+#### Evidence
+
+- [`backend/dropbox/dropbox.go:383-400`](https://github.com/rclone/rclone/blob/master/backend/dropbox/dropbox.go#L383-L400) stores `files.Client`, `sharing.Client`, `users.Client`, and `team.Client`, rather than their context-aware interfaces.
+- The backend calls non-context SDK methods throughout. For example, [`backend/dropbox/dropbox.go:2022-2024`](https://github.com/rclone/rclone/blob/master/backend/dropbox/dropbox.go#L2022-L2024) calls `UploadSessionStart`, and [`backend/dropbox/dropbox.go:2055-2060`](https://github.com/rclone/rclone/blob/master/backend/dropbox/dropbox.go#L2055-L2060) calls `UploadSessionAppendV2`, although `uploadChunked` has the caller context.
+- rclone pins `github.com/dropbox/dropbox-sdk-go-unofficial/v6` v6.4.0. In that SDK, `UploadSessionAppendV2` delegates to `UploadSessionAppendV2Context(context.Background(), ...)` ([source](https://github.com/dropbox/dropbox-sdk-go-unofficial/blob/v6.4.0/dropbox/files/client.go#L3771-L3772)); the SDK also exposes context-aware client interfaces and methods.
+- [`backend/dropbox/dropbox.go:448-475`](https://github.com/rclone/rclone/blob/master/backend/dropbox/dropbox.go#L448-L475) checks the caller context during retry classification, which occurs only after the SDK call returns.
+- Closed tracker [#3257](https://github.com/rclone/rclone/issues/3257) established the context-propagation goal, listed Dropbox as unfinished, and closed with the maintainer noting that remaining work should happen in backend-specific issues.
+
+#### Impact
+
+The absence of caller cancellation from the in-flight HTTP request is source-proven. The resulting shutdown delay, stalled-request duration, and transfer impact have not been measured. Batcher finalization has a separate lifecycle and is not part of this report.
+
+#### Question
+
+Would it make sense for caller-scoped Dropbox operations to use the SDK's context-aware interfaces and `*Context` methods, while preserving independently owned batch-finalization contexts?
+
+I checked all relevant issues, comments, pull requests, and forum threads; this report is not a duplicate.
+
+### How do you think rclone should be changed to solve that?
+
+Store the SDK's context-aware client interfaces and call the corresponding `*Context` methods with each operation's caller context. Keep batcher-owned contexts where work intentionally outlives an individual call.
+
+### Getting involved
+
+- [ ] I'm willing to help implement, test or fund this feature.
+
+I am reporting this finding only and am not currently proposing a pull request.
+
+Investigated extensively with GPT-5.6 Sol (xhigh reasoning effort), using [Oh My Pi](https://github.com/can1357/oh-my-pi) as the agent framework."""
+start = "1d03a771727b6b158d4675442c41d3280d9eee88"
+fix = "c97ab80ca1c803db47bda45d1b02736a44010245"
+hidden_tests = ["backend/dropbox/dropbox_internal_test.go"]
+closed = 2026-08-02
+kind = "missing-behaviour"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/9688"
+pull = 9712
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-22: Drive permission fetches should not hold the permission-cache mutex across the API request, so they can
+# run concurrently.
+# issue opened 2026-07-28, fix opened 2026-07-31, squash (or single commit); source files: backend/drive/metadata.go
+# (6 lines); request from body (never edited).
+# reading notes: AI-drafted source-review report (GPT agent), question-framed, not reproduced live; tests use existing
+# getPermission and a 1s arrival timeout
+[[situation]]
+id = "rclone-22"
+request = """
+drive: permission metadata fetches are serialized by the cache mutex
+
+### Before you start
+
+- [x] I have searched the forum and the existing issues and this hasn't already been requested.
+- [x] I have checked the latest beta and this feature doesn't already exist.
+
+### Associated forum post URL
+
+No associated forum post; no matching discussion owns this behavior.
+
+### rclone version
+
+```text
+rclone v1.74.4
+- os/version: ubuntu 24.04 (64 bit)
+- os/kernel: 6.8.0-107-generic (x86_64)
+- os/type: linux
+- os/arch: amd64
+- go/version: go1.26.5
+- go/linking: static
+- go/tags: none
+```
+
+### What problem are you trying to solve?
+
+## Summary
+
+The Drive metadata path starts bounded concurrent permission fetches, but `getPermission` holds the global permission-cache mutex across each Drive API request.
+
+## Evidence
+
+- [`backend/drive/metadata.go:108-136`](https://github.com/rclone/rclone/blob/17629d67b26904d102d9072c66ba95cf08a51316/backend/drive/metadata.go#L108-L136) and [`metadata.go:384-410`](https://github.com/rclone/rclone/blob/17629d67b26904d102d9072c66ba95cf08a51316/backend/drive/metadata.go#L384-L410): `parseMetadata` creates bounded tasks, while `permissionsMu` remains locked through `Permissions.Get(...).Do()`.
+- [Commit `9fdf3d54`](https://github.com/rclone/rclone/commit/9fdf3d548a9d7b98a33492107b41cafc01276ce6) introduced both this lock scope and the stated behavior “fetch permissions in parallel.”
+
+## Impact
+
+The serialization is source-proven for permission IDs reaching `getPermission`. Permission cardinality, request concurrency, latency, and retry impact have not been measured.
+
+### How do you think rclone should be changed to solve that?
+
+Cache synchronization should preserve safe lookup and update behavior without serializing unrelated API calls. Cache-disabled fetches should not require the cache lock across network I/O.
+
+## Question
+
+Would it make sense to narrow `permissionsMu` so the existing bounded concurrency can take effect?
+
+I checked all relevant issues, comments, pull requests, and forum threads; this report is not a duplicate.
+
+### Getting involved
+
+- [ ] I'm willing to help implement, test or fund this feature.
+
+I am reporting this finding only and am not currently proposing a pull request.
+
+Investigated extensively with GPT-5.6 Sol (xhigh reasoning effort), using [Oh My Pi](https://github.com/can1357/oh-my-pi) as the agent framework."""
+start = "8c8062da782e7cb5e6dca977736350aee6b5a7be"
+fix = "f4e231b094f9bb26b2d8cc3c081c8601ab4fa8fd"
+hidden_tests = ["backend/drive/drive_internal_test.go"]
+closed = 2026-08-01
+kind = "missing-behaviour"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/9682"
+pull = 9710
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-23: A direct NewObject lookup of an exported Dropbox Paper path like foo.md should return remote foo.md, not
+# foo.md.md.
+# issue opened 2026-07-28, fix opened 2026-07-30, squash (or single commit); source files: backend/dropbox/dropbox.go
+# (42 lines); request from body (never edited).
+# reading notes: AI-drafted source-review report (GPT agent), question-framed, not reproduced live
+[[situation]]
+id = "rclone-23"
+request = """
+dropbox: direct lookup of an exported Paper file duplicates its extension
+
+## Summary
+
+A direct lookup such as `NewObject("foo.md")` can resolve the underlying Dropbox Paper object but return an object whose remote name is `foo.md.md`. The lookup preserves the caller-visible export path, after which export metadata handling appends the selected extension again.
+
+## Evidence
+
+- **Source-proven:** `backend/dropbox/dropbox.go:790-823` removes the caller-visible extension while searching for plausible underlying Dropbox metadata.
+- **Source-proven:** `backend/dropbox/dropbox.go:876-899` constructs the object using the original caller-visible remote.
+- **Source-proven:** `backend/dropbox/dropbox.go:1847-1870` appends the selected export extension to that remote.
+- Historical [PR #8371](https://github.com/rclone/rclone/pull/8371) introduced Dropbox Paper export-path mapping and the direct metadata lookup through caller-visible extensions.
+- **Not observed:** the resulting remote name has not been captured against a current Dropbox Paper document on the latest rclone version.
+
+Source review environment:
+
+```text
+rclone v1.75.0-DEV
+- os/version: ubuntu 24.04 (64 bit)
+- os/kernel: 6.8.0-107-generic (x86_64)
+- os/type: linux
+- os/arch: amd64
+- go/version: go1.26.5
+- go/linking: dynamic
+- go/tags: none
+```
+
+## Impact
+
+Commands or APIs that directly resolve an exported Paper path may receive an object identity different from the requested and listed path. The downstream effect has not been measured.
+
+## Question
+
+Should export metadata handling preserve an already normalized caller-visible export path instead of appending the selected extension a second time?
+
+I checked all relevant issues, comments, pull requests, and forum threads; this report is not a duplicate.
+
+## Involvement
+
+I am reporting this finding only and am not currently proposing a pull request.
+
+Investigated extensively with GPT-5.6 Sol (xhigh reasoning effort), using [Oh My Pi](https://github.com/can1357/oh-my-pi) as the agent framework."""
+start = "7f6207fae2386d747347199936d56a105cbdf557"
+fix = "8c8062da782e7cb5e6dca977736350aee6b5a7be"
+hidden_tests = ["backend/dropbox/dropbox_internal_test.go"]
+closed = 2026-08-01
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/9691"
+pull = 9700
+self_filed = false
+bot_filed = false
+security_trap = false
+
+# rclone-24: Creating a stats group per rc sync/move call should not leak an averageLoop goroutine when the job does
+# no transfers.
+# issue opened 2026-07-01, fix opened 2026-07-02, squash (or single commit); source files:
+# fs/accounting/stats_groups.go (9 lines); request from body (never edited).
+# reading notes: test reads internal stats.average.started, which existed before the fix
+[[situation]]
+id = "rclone-24"
+request = """
+Goroutine leak in accounting.(*StatsInfo).averageLoop when a new stats group is created per rc sync/move call
+
+### Before you start
+
+- [x] I have searched the [forum](https://forum.rclone.org/) and the existing issues for this problem.
+- [x] I have tested with the latest beta or stable release and can still reproduce the problem.
+- [x] This is a reproducible bug, not a usage question (questions belong on the forum).
+
+### Associated forum post URL
+
+https://forum.rclone.org/t/goroutine-leak-in-accounting-statsinfo-averageloop/51321
+
+### What is the problem you are having with rclone?
+
+A long-running `rclone rcd` daemon leaks one `accounting.(*StatsInfo).averageLoop` goroutine per `rc sync/move` call, growing unbounded until the process is OOM-killed.
+
+We run `rclone rcd` as a persistent daemon and a systemd timer fires `rclone rc sync/move` once per minute per mapping (6 mappings) to flush local spool directories to S3. Because each rc call gets a **new stats group** (`job/N`), and that group's `averageLoop` goroutine is **never stopped**, goroutines accumulate 1:1 with the number of calls.
+
+After ~7 days of uptime the daemon held **~61k goroutines / ~640 MB RSS**, while the actual work in that period was only **7 transfers / 4.7 MB** — i.e. the memory is almost entirely leaked accounting state, not working set.
+
+The three numbers all converge on the call count, which pins it to "one leak per rc call":
+
+```
+uptime / interval * mappings = 611046s / 60 * 6  ≈ 61,100 calls
+latest job id                                     = 61,143
+go_goroutines                                     = 61,128
+```
+
+The pprof goroutine profile shows essentially all of them stuck in a single stack:
+
+```
+$ curl -s "http://127.0.0.1:5572/debug/pprof/goroutine?debug=1" | head
+goroutine profile: total 61155
+61147 @ 0x48e6ce 0x46a665 0xa26325 0x496bc1
+#    0xa26324    github.com/rclone/rclone/fs/accounting.(*StatsInfo).averageLoop+0x144    fs/accounting/stats.go:352
+```
+
+`core/memstats` confirms it is live, retained memory (not runtime high-water mark — `HeapReleased` is tiny):
+
+```
+$ rclone rc --url http://127.0.0.1:5572 core/memstats
+HeapAlloc   : 437,477,392   (~437 MB live)
+HeapObjects : 3,759,816
+StackInuse  : 126,648,320   (~126 MB, i.e. the 61k goroutine stacks)
+Sys         : 686,316,968
+```
+
+`core/group-list` keeps growing with `job/N` groups, and `go_goroutines` grows ~1 per call and never drops, even across the rc job-expiry window.
+
+**This looks like the same leak as #8571** (fixed 2025-06-04), which stopped `averageLoop` from auto-starting in `NewStats`. We are running a version that already contains that change, yet the leak still reproduces — so either #8571 does not cover the "create a fresh stats group per rc `sync/move` call" path, or it has regressed. The trigger here is repeated rc calls that each create a new group whose `averageLoop` is started (at group creation) but, because the job does no transfers (empty spool most of the time), `transferring`/`checking` never go non-empty→empty and `_stopAverageLoop()` is never reached.
+
+
+### rclone version
+
+rclone v1.74.1
+- os/version: rocky8 x86_64
+- os/kernel: 
+- os/type: linux
+- os/arch: x86_64
+- go/version: <fill in>
+- go/linking: dynamic
+- go/tags: none
+
+### Operating system
+
+Linux
+
+### Which cloud storage system are you using?
+
+S3
+
+### Output of `rclone config redacted`
+
+```ini
+[s3remote]
+type = s3
+provider = AWS
+env_auth = true
+region = ap-northeast-1
+profile = default
+```
+
+### The command you were trying to run
+
+```shell
+# Daemon (long-running):
+rclone rcd \\
+  --config /etc/rclone/rclone.conf \\
+  --rc-addr 127.0.0.1:5572 \\
+  --rc-no-auth \\
+  --rc-enable-metrics \\
+  --use-json-log \\
+  --log-level INFO
+
+# Fired once per minute per mapping by a systemd timer (no _group):
+rclone rc --url http://127.0.0.1:5572 sync/move \\
+  srcFs=/data/spool dstFs=s3remote:mybucket/prefix \\
+  deleteEmptySrcDirs=true _async=false \\
+  _config='{"MinAge":"30s","Transfers":16,"Checkers":8,"UseServerModTime":true,"Update":true}'
+```
+
+### A log from the command with the `-vv` flag
+
+```shell
+$ curl -s "http://127.0.0.1:5572/debug/pprof/goroutine?debug=1" | head -40
+  goroutine profile: total 61155
+  61147 @ 0x48e6ce 0x46a665 0xa26325 0x496bc1
+  #    0xa26324    github.com/rclone/rclone/fs/accounting.(*StatsInfo).averageLoop+0x144github.com/rclone/rclone/fs/accounting/stats.go:352
+```
+
+### Anything else?
+
+- Related: #8571 (previous averageLoop leak fix), forum thread #51321.
+- The leak reproduces even when every job transfers nothing (empty source), which suggests the `averageLoop` started at stats-group creation is never stopped for zero-transfer rc jobs, and that abandoned per-`job/N` groups keep their goroutine.
+- Impact scales with rc call frequency on a long-lived `rcd`; a per-minute timer over multiple mappings makes it OOM within days."""
+start = "c1b5756eec76b9f0f7ee4da43fdbcae9cb73a2db"
+fix = "c91c4cbbffdf34c62fc91d8bfda7c3d315d415e9"
+hidden_tests = ["fs/accounting/stats_groups_test.go"]
+closed = 2026-07-02
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/rclone/rclone/issues/9567"
+pull = 9568
+self_filed = false
+bot_filed = false
+security_trap = false
