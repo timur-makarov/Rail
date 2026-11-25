@@ -10,6 +10,17 @@ import unittest
 
 RAIL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "rail")
 
+# The repository's engine, the one bin/rail runs. A test that imports an engine module in-process imports it from
+# here, never from a fixture's .rail/engine: that copy is deleted with the fixture, and the `rail` package stays in
+# sys.modules pointing at the deleted folder, so every later in-process import in the same worker fails.
+ENGINE = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(RAIL))), "engine")
+
+
+def engine():
+    """Put the repository's engine on sys.path, so that `from rail import ...` works in the test process."""
+    if ENGINE not in sys.path:
+        sys.path.insert(0, ENGINE)
+
 FAKE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_reviewer.py")
 FAKE_GH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_gh.py")
 GITHUB_URL = "https://github.com/acme/app.git"

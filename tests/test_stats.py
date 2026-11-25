@@ -5,7 +5,7 @@ import sys
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import ARCHITECTURE, CONFIG, RailTest, ticket
+from railtest import ARCHITECTURE, CONFIG, RailTest, engine, ticket
 
 BLOCKING = {"severity": "blocking", "file": "src/calc.py", "line": 1, "claim": "add breaks on None."}
 ADVISORY = {"severity": "advisory", "file": "src/calc.py", "claim": "add has no docstring."}
@@ -140,10 +140,7 @@ class Stats(RailTest):
 
 def engine_stats():
     """The stats module of the engine the launcher under test runs."""
-    import railtest
-    engine = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(railtest.RAIL))), "engine")
-    if engine not in sys.path:
-        sys.path.insert(0, engine)
+    engine()
     from rail import stats
     return stats
 
