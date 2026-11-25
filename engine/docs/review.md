@@ -56,8 +56,8 @@ command the reviewer ran and its output.
 - `parked`: a real problem this change didn't cause.
 
 Answer every blocking finding. An advisory finding doesn't hold the ticket: fix and answer it in the same
-round, or leave it open; it is listed in the pull request, and [the sweep](sweep.md) gathers it after the
-merge.
+round, or leave it unanswered; it is listed in the pull request, and [the sweep](sweep.md) gathers it after
+the merge.
 
 ```text
 rail answer NN F1 fixed "what you changed"
