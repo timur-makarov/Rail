@@ -1,0 +1,6 @@
+# The bench's own settings (bench/common.py reads them). BENCH_CONFIG names another file.
+
+store = ""             # sealed copies, runs and results; empty: $BENCH_STORE, else ~/.rail-bench
+oracle_runs = 10       # admission: the hidden tests pass this many times in a row with the fix
+grade_rounds = 3       # a change is right only when every round passes: hidden tests and touched packages
+command_minutes = 30   # one setup or test command, wall clock, when the project names no timeout
