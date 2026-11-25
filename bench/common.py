@@ -21,6 +21,14 @@ DEFAULTS = {
     "oracle_runs": 10,
     "grade_rounds": 3,
     "command_minutes": 30,
+    "run_minutes": 120,
+    "worker_minutes": 60,
+    "budget_usd": 10,
+    "tools": "Bash,Read,Edit,Write,Glob,Grep,Skill",
+    "piece_mb": 90,
+    "pass_env": ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "USER", "LOGNAME", "SHELL",
+                 "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
+                 "CLAUDE_SESSION_INGRESS_TOKEN_FILE", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"],
 }
 
 
@@ -38,7 +46,7 @@ def settings(path=None):
         for key, value in raw.items():
             if key not in DEFAULTS:
                 raise BenchError(f"{path}: unknown key '{key}'")
-            if type(value) is not type(DEFAULTS[key]):
+            if type(value) is not type(DEFAULTS[key]) and not (type(value) is float and type(DEFAULTS[key]) is int):
                 raise BenchError(f"{path}: {key} must be {type(DEFAULTS[key]).__name__}")
             found[key] = value
     return found

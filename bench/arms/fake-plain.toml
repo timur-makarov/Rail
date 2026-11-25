@@ -1,0 +1,6 @@
+description = "The fake agent as a plain arm, for the suite"
+plain = true
+
+[worker]
+command = "python3 {bench}/fake_agent.py --plain"
+env = { BENCH_FAKE_PLAN = "{run}/fake-plan.json" }

@@ -61,3 +61,70 @@ applies the change to a new copy, sets aside the change's test files that clash 
 with `clash = "dir"`, as for Go, any test file in a hidden test's folder), puts the hidden tests in place, and runs
 three rounds. A round passes when the hidden tests pass and every package the change touches passes. Tests already
 red on the start commit are left out. The change is right only when all three rounds pass.
+
+## Add an arm
+
+An arm is `bench/arms/NAME.toml`. It says, per role, the command, the model and the effort:
+
+```toml
+description = "What the arm is"
+
+[worker]      # the agent that writes the change; Rail runs it through rail work
+command = "claude -p --output-format stream-json --verbose ... --tools {tools} --max-budget-usd {budget}"
+model = "claude-sonnet-5-5"
+effort = "medium"
+
+[contract]    # Rail's contract writer: a model and effort only; it runs through the worker's command
+[review]      # Rail's reviewer: command and model
+[consult]     # Rail's consult: command and model
+
+[files]       # files put in place of the copy's, such as ".claude/skills/x/SKILL.md" = "x.md"
+```
+
+A role left out keeps what Rail's seed config says. The bench fills `{model}`, `{effort}`, `{budget}` (the same
+budget flag for every arm), `{tools}` (the fixed tool list, no web tools), `{bench}` and, in `env`, `{run}`.
+
+A plain arm has `plain = true` and only a worker command. It gets the request, one fixed sentence and the
+project's commands, once.
+
+No arm resumes a worker session: a command with `--resume`, `--continue` or `RAIL_SESSION` is refused, so a run
+restarted from a saved stage starts every worker fresh.
+
+Before an arm joins a run, check it: `bench/bench check-arm NAME`. It runs one trivial situation end to end.
+
+The arms here: `rail` (Rail as the pinned commit has it), `plain-sonnet`, `plain-opus`, `plain-haiku`, and the fake
+arms `fake` and `fake-plain` the suite uses.
+
+## Run
+
+`bench/bench run PROJECT.toml --id ID --arm ARM [--runs N]` runs an arm on a situation N times. Each run has its own
+folder, `store/runs/PROJECT.ID.ARM.N/`, with its own HOME and TMPDIR. A child gets only the variables `pass_env`
+names, so no forge token reaches it. The driver ends a run after `run_minutes`.
+
+A Rail run installs Rail with no agent, files the request as `rail intake` does, and follows `rail next --json` as
+a script. A PERSON ticket's wait for a person is answered with `rail accept` and counted. Any other wait ends the
+run, and its code says how.
+
+A plain run counts as merged when the agent exits 0 with a success result whose last line is DONE.
+
+When a run ends, the bench searches its streams for a leak (the issue's URL, the fix's pull request or commit, a
+`gh` command, a fetch of the project) and grades it. A run that ended on a rate-limit or overload error is "to run
+again": it is not graded, and the next `bench run` sets it aside and runs it afresh.
+
+## Saved stages and restart
+
+A Rail run saves a stage after intake, after the contract is accepted, after each worker run, after each review
+round, and at the end. A stage holds the whole copy: every ref, the worktrees and `.git/rail/`. Build folders are
+left out and come back from the sealed copy. A stage is packed in pieces under `piece_mb`.
+
+A killed driver loses nothing: run the same `bench run` again and it goes on from the last stage. It never grades a
+half run.
+
+`bench/bench run --from RUN --stage NAME --arm ARM` starts a new run from the state saved before stage NAME of RUN,
+and goes on with ARM's roles. So two arms can be compared from the same contract.
+
+## Not built yet
+
+- Planted faults and invited vulnerabilities: a situation's `extra` key, refused until they are built (`bench/sets.py`).
+- The chain run and other vendors' arms: a new driver beside `drive_rail` and `drive_plain` in `bench/driver.py`.
+- Mining issues into situations: a tool that writes `[[situation]]` tables for `bench admit` to check.
