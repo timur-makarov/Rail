@@ -39,7 +39,7 @@ for what a revert doesn't undo.
 | From the trace | Goes into the ticket as |
 |---|---|
 | The paths the change must edit | `scope_paths`, as narrow as the trace allows |
-| A kind in `rail docs kinds` | tier `PERSON`, `person_reason` naming it; for a migration, `reversibility` and `rollback` |
+| A kind in `rail docs kinds` | tier `PERSON`, `person_reason` naming it (several separated by `; `); for a migration, `reversibility` and `rollback` |
 | Each untested neighbour | a `Check:` line that exercises it, or a ticket that adds the test first (`after`) |
 | A contract something outside relies on | a line in `## Out of scope` saying it does not change, or a `Check:` that it still holds |
 | An expected size over the cap | a split into several tickets (`rail-slice`) |

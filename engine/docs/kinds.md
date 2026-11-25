@@ -41,12 +41,14 @@ tier (`rail docs loop`).
   ```
 
 - **The author.** A ticket written `PERSON` names its kind in `person_reason`: the id, a colon, and where, such
-  as `person_reason = "access: src/auth/session.py"`. Ticket lint fails a PERSON ticket without one, or with an
-  id not in the list. A change with none of these kinds is AUTO, however large or new.
+  as `person_reason = "access: src/auth/session.py"`. Separate several with `"; "`, such as
+  `"external-effect: emails each customer; data-shape: db/schema/orders.sql"`. Ticket lint fails a PERSON
+  ticket without one, or with a part whose id is not in the list. A change with none of these kinds is AUTO,
+  however large or new.
 - **The reviewer.** It asks for a person with `needs_person` (`rail docs review`).
 
-The `accepted` event records the ticket's kinds: its `person_reason`'s and those its scope's paths reach
-(`rail docs journal`).
+The `accepted` event records the ticket's kinds: its `person_reason`'s, in the order written, and those its
+scope's paths reach (`rail docs journal`).
 
 ## `runs-with-secrets` at push: a known gap
 

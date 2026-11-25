@@ -54,8 +54,8 @@ def raised_tier(project, files):
 
 
 def ticket_kinds(project, ticket):
-    """The kinds a ticket holds as filed: the one its person_reason names, and those its scope's paths reach."""
-    return list(dict.fromkeys(([ticket.kind] if ticket.kind else []) + [k for k, _, _ in floor(project, ticket.scope)[1]]))
+    """The kinds a ticket holds as filed: those its person_reason names, in order, and those its scope's paths reach."""
+    return list(dict.fromkeys(ticket.kinds + [k for k, _, _ in floor(project, ticket.scope)[1]]))
 
 
 class Facts:

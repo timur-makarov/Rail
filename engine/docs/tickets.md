@@ -12,7 +12,8 @@ Ticket lint requires the front matter, `## Why` and `## Done Contract`. Every ot
 +++
 title = "Rotate refresh tokens on use"
 tier = "AUTO"                      # AUTO or PERSON; the engine may only raise it
-person_reason = ""                 # on PERSON: a kind's id and where, such as "access: auth/refresh.py"
+person_reason = ""                 # on PERSON: a kind's id and where, such as "access: auth/refresh.py";
+                                   # separate several with "; "
 scope_paths = ["auth/**", "tests/auth/**"]
 after = ["12"]                     # waits for 12 to merge
 caused_by = ""                     # on a fix ticket
@@ -44,8 +45,8 @@ external_id = "github#123"
 - **The tier** says who accepts the contract and who merges. On `AUTO` the engine does both, after the
   checks and the review. On `PERSON` a person approves the contract and merges. A person is asked only about
   what a revert doesn't undo: write `PERSON` when the change does something of a kind in `rail docs kinds`, and
-  name it in `person_reason`: the kind's id, a colon, and where, such as `"access: auth/refresh.py"`. Ticket
-  lint fails a PERSON ticket without one. The engine makes a ticket PERSON by itself in three cases: its
+  name it in `person_reason`: the kind's id, a colon, and where, such as `"access: auth/refresh.py"`, with
+  `"; "` between several. Ticket lint fails a PERSON ticket without one, or with a part that names no kind. The engine makes a ticket PERSON by itself in three cases: its
   `scope_paths` reach the paths of a kind, which are `[kinds]`, `person_paths` (`controls`) and
   `migration_paths` (`data-loss`), at add or amend, where it writes the tier and `person_reason` into the
   ticket; it changes a file on those paths (at ship); or the reviewer asks for a person (at review). Size raises

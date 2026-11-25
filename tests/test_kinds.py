@@ -43,6 +43,26 @@ class Kinds(RailTest):
         self.assertIn('person_reason = "data-exposure: logs the session"', meta)
         self.assertEqual(meta.count("person_reason"), 1)
 
+    def test_a_reason_naming_several_kinds_records_each_in_the_order_written(self):
+        p = self.fixture(config=ACCESS + CONFIG, files=AUTH)
+        reason = "external-effect: emails each customer; data-shape: src/calc.py; external-effect: the receipt"
+        p.add(ticket(title="Check the role", tier="PERSON", scope=("src/auth/**",),
+                     front=(f'person_reason = "{reason}"',)))
+        self.assertIn(f'person_reason = "{reason}"', front(p, "1-check-the-role"))
+        p.rail("accept", "1")
+        accepted = events(p, "1-check-the-role", "accepted")[-1]
+        self.assertEqual((accepted["tier"], accepted["kinds"]), ("PERSON", ["external-effect", "data-shape", "access"]))
+
+    def test_one_unknown_id_among_several_fails_lint(self):
+        p = self.fixture()
+        two = 'person_reason = "money: a new plan; big: it is large"'
+        refused = p.add(ticket(tier="PERSON", front=(two,)), expect=3)
+        self.assertEqual(refused["reason"]["code"], "TICKET_LINT")
+        self.assertIn("person_reason must start with a kind's id", refused["action"]["brief"])
+        self.assertIn("got 'big: it is large'", refused["action"]["brief"])
+        refused = p.add(ticket(tier="PERSON", front=('person_reason = "money: a new plan; src/billing.py"',)), expect=3)
+        self.assertIn("got 'src/billing.py'", refused["action"]["brief"])
+
     def test_an_auto_ticket_records_no_kinds(self):
         p = self.fixture(config=ACCESS + CONFIG, files=AUTH)
         p.add(ticket(scope=("src/calc.py",)))
@@ -105,8 +125,11 @@ class Kinds(RailTest):
         refused = p.add(ticket(tier="PERSON", front=('person_reason = "big: it is large"',)), expect=3)
         self.assertEqual(refused["reason"]["code"], "TICKET_LINT")
         self.assertIn("person_reason must start with a kind's id", refused["action"]["brief"])
+        self.assertIn("got 'big: it is large'", refused["action"]["brief"])
         self.assertEqual(p.add(ticket(tier="PERSON", front=('person_reason = "money: a new paid plan"',)))["tier"],
                          "PERSON")
+        p.rail("accept", "1")
+        self.assertEqual(events(p, "1-fix-add", "accepted")[-1]["kinds"], ["money"])
 
     def test_an_unknown_kind_in_the_config_is_refused(self):
         p = self.fixture(config='[kinds]\nacess = ["src/auth/**"]\n\n' + CONFIG)
