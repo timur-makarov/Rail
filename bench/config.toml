@@ -14,3 +14,12 @@ piece_mb = 90          # a saved stage is packed in pieces under this, so a git 
 pass_env = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "USER", "LOGNAME", "SHELL",
             "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
             "CLAUDE_SESSION_INGRESS_TOKEN_FILE", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"]
+proxy = true           # a cost proxy per role (worker, contract, review, consult): it logs path, status and tokens
+upstream = ""          # where the proxies send requests; empty: $BENCH_UPSTREAM, else $ANTHROPIC_BASE_URL, else the API
+# Lock each child's network to the proxies (Linux as root: unshare -n). auto: lock where the machine can, else run
+# unlocked and mark the results so; required: refuse to run unlocked; off: never lock.
+network_lock = "auto"
+
+# The training cutoff of each model, for the report: a situation closed before the cutoff of an arm's newest model is
+# left out for that arm. Fill in from the models' published cutoffs.
+[cutoffs]

@@ -21,10 +21,11 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 
 from . import arms as armsmod
 from . import grade as grademod
-from . import rail_install, runs, sealed, taint, tomlw
+from . import netlock, proxy, rail_install, runs, sealed, taint, tomlw
 from .common import BENCH, BenchError, Clock, git, kill, now_iso, run, write
 
 WORK_CODES = ("TICKET_LINT", "VERIFY_ASSUMPTIONS", "IMPLEMENT", "STEP_FAILED", "RED_CHECK", "ANSWER_FINDINGS", "CONFLICT",
@@ -40,6 +41,10 @@ PLAIN_SENTENCE = ("Make the change this issue asks for in this repository, with 
                   " not.")
 
 STREAM_TEE = ' | tee -a "${BENCH_STREAM:-/dev/null}"'
+# Rail runs the reviewer inside `rail advance`, whose ANTHROPIC_BASE_URL is the consult role's proxy: this prefix points
+# the reviewer at its own. With no proxy, BENCH_URL_REVIEW is unset and the prefix is a bare `env`.
+REVIEW_URL = 'env ${BENCH_URL_REVIEW:+ANTHROPIC_BASE_URL="$BENCH_URL_REVIEW"} '
+ROLES = ("worker", "contract", "review", "consult")
 
 
 class Ended(Exception):
@@ -145,7 +150,19 @@ def rail_config(project, arm, conf):
         raise BenchError("the project's [worker] command resumes a session; no bench arm resumes a worker session")
     worker["command"] = worker["command"] + STREAM_TEE
     worker["timeout_minutes"] = conf["worker_minutes"]
+    review = config.setdefault("review", {})
+    review["command"] = REVIEW_URL + (review.get("command") or engine_default("review", "command"))
     return config
+
+
+def engine_default(table, key):
+    """A default of the engine's config, read from the engine the copy gets."""
+    sys.path.insert(0, os.path.join(BENCH, os.pardir, "engine"))
+    try:
+        from rail import config as engine_config
+    finally:
+        sys.path.pop(0)
+    return engine_config.DEFAULTS[table][key]
 
 
 class RailDriver:
@@ -165,7 +182,7 @@ class RailDriver:
     def rail(self, args, roles=(), extra=None):
         self.ctx.check_clock()
         launcher = os.path.join(self.r.copy, ".rail", "bin", "rail")
-        proc = subprocess.Popen([sys.executable, launcher, *args, "--json"], cwd=self.r.copy, stdout=subprocess.PIPE,
+        proc = subprocess.Popen(self.ctx.locked([sys.executable, launcher, *args, "--json"]), cwd=self.r.copy, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True, env=self.env(roles, extra),
                                 start_new_session=True)
         try:
@@ -241,7 +258,11 @@ class RailDriver:
         args = words[1:]
         reviews = args[:1] in (["advance"], ["sweep"])  # the commands that run the reviewer and consult
         roles = ("review", "consult") if reviews else ()
-        extra = self.ctx.role_url("consult") if reviews else {}
+        extra = {}
+        if reviews:
+            extra.update(self.ctx.role_url("consult"))
+            if self.ctx.proxies.get("review"):
+                extra["BENCH_URL_REVIEW"] = self.ctx.proxies["review"]
         answer = self.rail(args, roles=roles, extra=extra)
         self.state["pending"] = None
         if args[:1] == ["advance"] and any(s["step"] in REVIEW_STEPS and s["status"] == "ran"
@@ -314,12 +335,18 @@ class RailDriver:
 class Context:
     """What a run needs: the bench config, the store, the situation, the arm, the run, and its clock."""
 
-    def __init__(self, conf, store, situation, arm, run_, proxies=None):
+    def __init__(self, conf, store, situation, arm, run_, proxies=None, lock=None):
         self.conf, self.store, self.situation, self.arm, self.run = conf, store, situation, arm, run_
         self.project = situation.project
         self.clock = Clock()
         self.before = 0.0
         self.proxies = proxies or {}  # {role: url}
+        self.lock = lock  # {port: unix socket} when the children's network is locked, else None
+        self.sock_dir = None
+
+    def locked(self, argv):
+        """argv, run in a network of its own when the run is locked."""
+        return netlock.wrap(argv, self.lock) if self.lock is not None else argv
 
     def elapsed(self):
         return self.before + self.clock.seconds()
@@ -495,6 +522,8 @@ def drive_plain(ctx):
     timeout = min(60 * ctx.conf["worker_minutes"], ctx.remaining())
     r.log("plain", command=ctx.arm.command("worker", ctx.conf))
     command = ctx.arm.command("worker", ctx.conf)
+    if ctx.lock is not None:
+        command = shlex.join(ctx.locked(["bash", "-c", command]))
     with open(stream, "w") as out:
         code, _ = run(command, r.copy, env, timeout, stdin=plain_prompt(ctx.situation), stdout=out)
     result = read_stream(stream)
@@ -525,8 +554,42 @@ def go(ctx, plan=None):
     if r.result:
         return r.result
     if not r.ended:
-        drive(ctx)
+        servers = start_network(ctx)
+        try:
+            drive(ctx)
+        finally:
+            for server in servers.values():
+                server.close()
+            if ctx.sock_dir:
+                os.rmdir(ctx.sock_dir)
     return grade_ended(ctx)
+
+
+def start_network(ctx):
+    """Start a cost proxy per role and decide the lock; note in run.toml whether every part of the run was locked.
+    Returns {role: Proxy}."""
+    conf, r = ctx.conf, ctx.run
+    can_lock = netlock.available() and conf["network_lock"] != "off"
+    if conf["network_lock"] == "required" and not can_lock:
+        raise BenchError("network_lock = 'required', but this machine can't lock a child's network (it needs Linux, "
+                         "root and unshare)")
+    servers = {}
+    if conf["proxy"]:
+        # the Unix sockets the lock's relays reach, in /tmp: a socket's path must be short
+        folder = ctx.sock_dir = tempfile.mkdtemp(prefix="bench-sock-", dir="/tmp") if can_lock else None
+        upstream = conf["upstream"] or proxy.default_upstream()
+        for role in ROLES:
+            sock = os.path.join(folder, role) if folder else None
+            servers[role] = proxy.Proxy(role, os.path.join(r.path, f"proxy-{role}.jsonl"), upstream, sock)
+        ctx.proxies = {role: s.url for role, s in servers.items()}
+    if can_lock:
+        ctx.lock = {s.port: s.sock for s in servers.values()}
+    source_locked = True
+    if r.meta.get("origin"):
+        source_locked = runs.Run(r.meta["origin"]["path"]).meta.get("locked", False)
+    set_meta(r, locked=bool(can_lock and source_locked and r.meta.get("locked", True)))
+    r.log("network", locked=can_lock, proxies=sorted(servers))
+    return servers
 
 
 def drive(ctx):
@@ -550,6 +613,11 @@ def drive(ctx):
         end, d = drive_rail(ctx, resume)
         state = d.state if d else fresh_state()
     end.update(minutes=round(ctx.elapsed() / 60, 2), ended=now_iso())
+    if not end["merged"] and end["end"] != "AGAIN":
+        limited = {role: code for role, code in proxy.last_statuses(r.path, ROLES).items() if code in (429, 529)}
+        if limited:
+            end.update(end="AGAIN", detail=f"the last request of {', '.join(sorted(limited))} got "
+                                           f"{', '.join(str(c) for c in sorted(set(limited.values())))}")
     r.write_ended({"end": end, "state": state})
     r.log("ended", **end)
 
@@ -577,6 +645,12 @@ def grade_ended(ctx):
     if hits:
         result["taint"] = hits[:20]
     result["unsearched"] = ["review", "consult"] if not ctx.arm.plain else []
+    result["locked"] = bool(r.meta.get("locked"))
+    result["models"] = sorted({m for m in (ctx.arm.roles[role].get("model") for role in armsmod.ROLES) if m}
+                              | {w["model"] for w in state["worked"] if w.get("model")})
+    used = proxy.usage(r.path, ROLES)
+    if used:
+        result["usage"] = used
     if not result["again"]:
         result.update(grade_run(ctx, end, state))
     r.write_result(result)

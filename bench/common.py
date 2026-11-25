@@ -29,7 +29,12 @@ DEFAULTS = {
     "pass_env": ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "USER", "LOGNAME", "SHELL",
                  "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
                  "CLAUDE_SESSION_INGRESS_TOKEN_FILE", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"],
+    "proxy": True,
+    "upstream": "",
+    "network_lock": "auto",
+    "cutoffs": {},
 }
+LOCKS = ("auto", "off", "required")
 
 
 class BenchError(Exception):
@@ -49,6 +54,8 @@ def settings(path=None):
             if type(value) is not type(DEFAULTS[key]) and not (type(value) is float and type(DEFAULTS[key]) is int):
                 raise BenchError(f"{path}: {key} must be {type(DEFAULTS[key]).__name__}")
             found[key] = value
+    if found["network_lock"] not in LOCKS:
+        raise BenchError(f"{path}: network_lock must be one of {', '.join(LOCKS)}")
     return found
 
 

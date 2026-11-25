@@ -68,6 +68,8 @@ def summary(result):
                                                                   else "")]
     if result["person_acts"]:
         words.append(f"{len(result['person_acts'])} person acts stood in for")
+    if not result.get("locked"):
+        words.append("unlocked")
     if result["tainted"]:
         words.append("TAINTED: " + ", ".join(sorted({h["term"] for h in result["taint"]})))
     return f"{result['run']}: " + "; ".join(words)
@@ -140,6 +142,16 @@ def cmd_check_arm(args, conf):
     return 0 if ok else 1
 
 
+def cmd_report(args, conf):
+    """The numbers of PLAN section 5 per arm, from every result in the store."""
+    from . import report
+    arms = args.arms.split(",") if args.arms else None
+    rep = report.from_store(store(conf), conf, arms=arms, held=args.held, seed=args.seed, resamples=args.resamples,
+                            any_situation=args.any_situation)
+    print(report.dumps(rep) if args.json else report.render(rep), end="" if not args.json else "\n")
+    return 0
+
+
 def parser():
     p = argparse.ArgumentParser(prog="bench", description="Rail's bench: situations, sealed copies, runs and grades.")
     sub = p.add_subparsers(dest="verb", required=True)
@@ -168,6 +180,12 @@ def parser():
     r.add_argument("--plan", help="the fake agent's plan, for the fake arms")
     c = verb("check-arm", "run one trivial situation of the fixture project end to end with an arm")
     c.add_argument("name")
+    rp = verb("report", "the numbers per arm on the situations every compared arm may be scored on")
+    rp.add_argument("--arms", help="the arms to compare, comma-separated; all with results when left out")
+    rp.add_argument("--held", action="store_true", help="the held-out half instead of the working half")
+    rp.add_argument("--any-situation", action="store_true", help="also situations that were not admitted (the suite)")
+    rp.add_argument("--seed", type=int, default=7, help="the seed of the resampling, stated in the report")
+    rp.add_argument("--resamples", type=int, default=2000)
     return p
 
 
