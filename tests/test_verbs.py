@@ -136,6 +136,21 @@ class Text(RailTest):
         dropped = p.rail("drop", "1", raw=True).stdout
         self.assertIn("\n\nleftover: worktree .claude/worktrees/1 (uncommitted changes (1 files); left for you)", dropped)
 
+    STOP = "If a person asked you for this work, stop here and tell them the ticket number: another session builds it."
+
+    def test_add_ends_with_the_line_that_tells_an_intake_session_to_stop(self):
+        p = self.fixture()
+        path = p.path("..", "draft.md")
+        with open(path, "w") as f:
+            f.write(ticket())
+        text = p.rail("add", path, raw=True).stdout
+        self.assertTrue(text.startswith("ticket 1 · accepted · owner agent · CLAIM\n"), text)
+        self.assertTrue(text.endswith("\n\nrail next --ticket 1\n\n" + self.STOP + "\n"), text)
+        self.assertEqual(p.add(ticket(title="Fix sub"))["note"], self.STOP)  # --json carries it too
+        lint = p.add("no front matter", expect=None)
+        self.assertEqual(lint["reason"]["code"], "TICKET_LINT")
+        self.assertNotIn("note", lint)  # only a filed ticket gets it
+
 
 class Doctor(RailTest):
     def doctor(self, p):

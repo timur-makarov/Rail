@@ -473,6 +473,11 @@ def create_ticket(project, text, via="add", channel="session", parent=None, key=
     return nn, branch, pushed
 
 
+# The last line of `rail add`'s answer. Its move is CLAIM, and a session that filed a person's request would go on and
+# build it in the same turn.
+STOP_LINE = "If a person asked you for this work, stop here and tell them the ticket number: another session builds it."
+
+
 def cmd_add(project, args):
     if args.file == "-":
         text = sys.stdin.read()
@@ -500,7 +505,7 @@ def cmd_add(project, args):
     if ensure_pr(project, f, receipts):
         tickets, facts = load(project)
         f = facts[nn]
-    return from_facts(f, receipts, branch=branch)
+    return from_facts(f, receipts, branch=branch) | {"note": STOP_LINE}
 
 
 def cmd_adopt(project, args):
@@ -1793,6 +1798,8 @@ def render(result):
         lines += ["", result["action"]["brief"]]
     for i, l in enumerate(result.get("leftovers") or []):
         lines.append(f"{'' if i else chr(10)}leftover: {l['kind']} {l['ref']} ({l['reason']})")
+    if result.get("note"):
+        lines += ["", result["note"]]
     return "\n".join(lines)
 
 
