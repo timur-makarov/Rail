@@ -37,6 +37,8 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
 - `steps` lists what the command ran: `ran` with `pass` or `fail`, `could_not_run` with `fail` (the shell
   couldn't start the command: it isn't on the machine, or isn't executable), `not_run`, or `unavailable`. A
   skipped step never looks like a pass, and a step that couldn't start never looks like a check that ran.
+- `note` is on `rail add`'s answer only, and the text form prints it last: a session that filed a person's
+  request stops there and tells them the ticket number, since another session builds it.
 - Exit codes: 0 when the command worked, 2 for a usage error, 3 when a step failed.
 
 ## What next does

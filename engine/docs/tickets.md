@@ -2,9 +2,11 @@
 
 A ticket is a markdown file with TOML front matter between `+++` lines. Write a draft like
 `.rail/tickets/TEMPLATE.md` anywhere outside the repository (a temp file is fine), then run `rail add <file>`:
-it sets the ID and commits the ticket on its own branch, so the draft can go. `## Request` and `## Split` are
-optional sections. A ticket made from a GitHub issue closes the issue when it merges; with a `## Split`
-section it is one part of the issue, and its pull request says `Part of #N` and leaves the issue open.
+it sets the ID and commits the ticket on its own branch, so the draft can go. Its answer ends with a line for a
+session that filed a person's request: stop there and tell them the ticket number, since another session builds
+it. `## Request` and `## Split` are optional sections. A ticket made from a GitHub issue closes the issue when
+it merges; with a `## Split` section it is one part of the issue, and its pull request says `Part of #N` and
+leaves the issue open.
 
 Ticket lint requires the front matter, `## Why` and `## Done Contract`. Every other section may be left out.
 
