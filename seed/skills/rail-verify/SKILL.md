@@ -47,5 +47,6 @@ gap, so the next ticket can close it.
 
 ## 5. Keep it fast enough to run every time
 
-`verify` runs at every ship and in CI. Keep it under `[commands] timeout_secs`. When the full suite is too
-slow, put the fast part in `verify` and name the slow part in a `Check:` line of the tickets that need it.
+`verify` runs at every ship and in CI. Keep it under `[commands] verify_timeout_secs` (`timeout_secs` when that
+is 0). When the full suite is too slow, put the fast part in `verify` and name the slow part in a `Check:` line
+of the tickets that need it.

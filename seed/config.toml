@@ -17,6 +17,10 @@ timeout_secs = 900                        # reader: every command run: setup, ve
                                           # Every command runs through bash -o pipefail: a failure anywhere in a pipe
                                           # fails it, so `pytest | tail -20` fails with pytest. A tool the shell can't
                                           # find (exit 127) is recorded as could not run, not as a failure
+setup_timeout_secs = 0                    # reader: claim, adopt and CI; setup's own limit, such as for a cold build
+                                          # in a new worktree. 0: timeout_secs
+verify_timeout_secs = 0                   # reader: ship and CI; verify's own limit. 0: timeout_secs. A check
+                                          # or a review run still stops at timeout_secs
 base_checks = true                        # reader: next, at a ticket's first claim; runs each Check: once on the
                                           # untouched base and records red or green; never a gate
 
@@ -57,7 +61,7 @@ skip_paths = []                           # an AUTO change gets no reviewer when
 
 [claim]
 stale_minutes = 30                        # reader: next; another session's work with no journal event for this long is
-                                          # resumed. Keep it above your longest command (timeout_secs)
+                                          # resumed. Keep it above your longest command's limit plus save_minutes
 save_minutes = 10                         # reader: advance and rail save; a ticket with nothing to save and no pushed
                                           # event for this long gets a saved event, the sign that a session is at work
                                           # on it. How often the save hook runs is the -mmin number in its command in
