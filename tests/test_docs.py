@@ -4,13 +4,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import RailTest
+from railtest import RailTest, engine
 
 
 class Reference(RailTest):
     def test_the_config_reference_names_every_field_and_its_reader(self):
         p = self.fixture()
-        sys.path.insert(0, p.path(".rail", "engine"))
+        engine()
         from rail import config, docs
         names = [name for name, _ in docs._fields(config.DEFAULTS)]
         self.assertEqual(sorted(set(names) - set(docs.READERS)), [])
