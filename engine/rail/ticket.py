@@ -8,9 +8,12 @@ import tomllib
 
 # AUTO: the engine accepts the contract and merges. PERSON: a person approves the contract and merges.
 TIERS = ("AUTO", "PERSON")
+# What a revert doesn't undo (rail docs kinds). A ticket is PERSON when its change does something of one of these kinds.
+KINDS = ("data-loss", "data-shape", "data-exposure", "external-effect", "access", "runs-with-secrets", "controls",
+         "infrastructure", "money", "licence", "public-release")
 FIELDS = {
     "id": str, "title": str, "tier": str, "scope_paths": list, "after": list,
-    "caused_by": str, "external_id": str, "reversibility": str, "rollback": str,
+    "caused_by": str, "external_id": str, "reversibility": str, "rollback": str, "person_reason": str,
 }
 # The `## Grilling` record a bot or a session writes when it questioned the person who asked for the ticket.
 TOPICS = ("scope", "done", "behaviour", "tier", "out-of-scope", "other")
@@ -78,6 +81,13 @@ class Ticket:
     @property
     def scope(self):
         return [p for p in self.get("scope_paths", []) if isinstance(p, str)]
+
+    @property
+    def kind(self):
+        """The kind `person_reason` names, or None."""
+        reason = self.get("person_reason", "")
+        kind = reason.partition(":")[0].strip() if isinstance(reason, str) and ":" in reason else ""
+        return kind if kind in KINDS else None
 
     @property
     def after(self):
@@ -189,6 +199,12 @@ def lint(ticket, expect_id=None):
         errors.append("title is empty")
     if ticket.tier not in TIERS:
         errors.append(f"tier must be one of {', '.join(TIERS)}")
+    reason = ticket.get("person_reason", "")
+    if isinstance(reason, str) and (reason.strip() or ticket.tier == "PERSON") and not ticket.kind:
+        errors.append("a PERSON ticket needs person_reason: the id of what in the change can't be undone (rail docs"
+                      " kinds), a colon, and where, such as person_reason = \"access: src/auth/session.py\". A change"
+                      " with none of those kinds is AUTO" if not reason.strip() else
+                      f"person_reason must start with a kind's id and a colon ({', '.join(KINDS)}); got '{reason}'")
     scope = ticket.get("scope_paths", [])
     if not scope or not all(isinstance(p, str) and p.strip() for p in scope):
         errors.append("scope_paths must list at least one path glob")

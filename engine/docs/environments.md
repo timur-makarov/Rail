@@ -10,6 +10,6 @@ Environments belong to the project. Rail touches each at one named point.
 | Prod | Nothing. Releasing is a person's act, through the project's CD gate |
 
 - The machine the agent runs on holds local and dev secrets only.
-- A change to `person_paths` or `migration_paths` is a PERSON ticket, so a person sees it before it reaches
-  dev.
+- A change to `person_paths` or `migration_paths`, or a change of a kind in `rail docs kinds`, is a PERSON
+  ticket, so a person sees it before it reaches dev.
 - People keep four acts: merging a PERSON ticket, deleting data, handling credentials, and releasing to prod.

@@ -41,8 +41,10 @@ CHECK_ADD = "python3 -c \"import sys; sys.path.insert(0, 'src'); import calc; as
 
 
 def ticket(title="Fix add", tier="AUTO", scope=("src/**",), check=CHECK_ADD, front=(), body=""):
-    """A ticket file, in the format rail add reads."""
+    """A ticket file, in the format rail add reads. A PERSON ticket names a kind, as lint requires."""
     scope_list = ", ".join(f'"{s}"' for s in scope)
+    if tier == "PERSON" and not any(line.startswith("person_reason") for line in front):
+        front = (*front, f'person_reason = "data-shape: {scope[0]}"')
     lines = ["+++", f'title = "{title}"', f'tier = "{tier}"', f"scope_paths = [{scope_list}]", *front, "+++", "",
              "## Why", "add subtracts instead of adding.", "",
              "## Done Contract", f"- Check: `{check}`", ""]

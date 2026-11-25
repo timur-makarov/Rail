@@ -12,6 +12,7 @@ Ticket lint requires the front matter, `## Why` and `## Done Contract`. Every ot
 +++
 title = "Rotate refresh tokens on use"
 tier = "AUTO"                      # AUTO or PERSON; the engine may only raise it
+person_reason = ""                 # on PERSON: a kind's id and where, such as "access: auth/refresh.py"
 scope_paths = ["auth/**", "tests/auth/**"]
 after = ["12"]                     # waits for 12 to merge
 caused_by = ""                     # on a fix ticket
@@ -41,11 +42,15 @@ external_id = "github#123"
   Look at) never fails the scope check. That holds for the ticket's own file only. Another ticket's file on
   its branch fails the scope check: a new ticket comes in through `rail add`, on its own branch.
 - **The tier** says who accepts the contract and who merges. On `AUTO` the engine does both, after the
-  checks and the review. On `PERSON` a person approves the contract and merges. Write `PERSON` when a person
-  should see this change. The engine makes a ticket PERSON by itself in four cases: its `scope_paths` reach
-  `person_paths` or `migration_paths` (at add), it changes a file on those paths (at ship), it changes
-  more lines than `[size] cap` (at ship), or the reviewer asks for a person (at review). Over the cap, the
-  first ship offers a split instead (`rail docs loop`); only the next ship over the cap raises the tier. A tier never goes down.
+  checks and the review. On `PERSON` a person approves the contract and merges. A person is asked only about
+  what a revert doesn't undo: write `PERSON` when the change does something of a kind in `rail docs kinds`, and
+  name it in `person_reason`: the kind's id, a colon, and where, such as `"access: auth/refresh.py"`. Ticket
+  lint fails a PERSON ticket without one. The engine makes a ticket PERSON by itself in three cases: its
+  `scope_paths` reach the paths of a kind, which are `[kinds]`, `person_paths` (`controls`) and
+  `migration_paths` (`data-loss`), at add or amend, where it writes the tier and `person_reason` into the
+  ticket; it changes a file on those paths (at ship); or the reviewer asks for a person (at review). Size raises
+  no tier: over `[size] cap`, the first ship offers a split (`rail docs loop`), and the next goes on to review.
+  A tier never goes down.
 - **A migration ticket**, one whose change touches `migration_paths`, sets two more keys in the front
   matter, each a sentence: `reversibility` (how old and new code both run against the change, such as expand
   then contract) and `rollback` (the down step, and what it loses). Ship fails at `migration` without them,

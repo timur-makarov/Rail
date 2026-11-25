@@ -12,9 +12,9 @@ import sys
 
 from . import areas, gitx, guard, hooks, rules, steps
 from .project import Project, event, events_path, ticket_path
-from .state import OPEN, derive, floor
+from .state import OPEN, derive, floor, ticket_kinds
 from .table import TRANSITIONS, first_match
-from .ticket import Ticket, branch_name, highest, lint, rank, with_field, with_id, with_tier
+from .ticket import TIERS, Ticket, branch_name, highest, lint, rank, with_field, with_id, with_tier
 from .forge import ENGINE_MARK, TRUSTED, ForgeError
 from .util import RailError, age, cloud, could_not_run, disposable, match_any, session_url, shell
 
@@ -294,7 +294,7 @@ def transition(project, f, code):
     project.busy(t.id, wait=True)  # no save while the engine moves the ticket's branch or worktree
     if code == "ACCEPT_AUTO":
         ensure_local(project, t)
-        project.append_events(t, [accepted_event(t.id, f.ticket, f.tier, "engine", "lint")], "accept")
+        project.append_events(t, [accepted_event(project, t.id, f.ticket, f.tier, "engine", "lint")], "accept")
     elif code == "CONSULT":
         from . import consult
         ensure_local(project, t)
@@ -318,7 +318,7 @@ def transition(project, f, code):
             t.branch, t.ref = name, f"refs/heads/{name}"
         ensure_local(project, t)
         restart_on_base(project, f, run)
-        run.events.append(accepted_event(t.id, f.ticket, f.tier, "person", "merge"))
+        run.events.append(accepted_event(project, t.id, f.ticket, f.tier, "person", "merge"))
         project.append_events(t, run.events, "accept: the contract was merged")
         run.events = []
         run.steps.append({"step": "contract", "status": "ran", "result": "pass",
@@ -329,7 +329,7 @@ def transition(project, f, code):
         ensure_local(project, t)
         waited = answers_wait(f)
         if f.state == "new" or f.amend_pending:
-            record = accepted_event(t.id, f.ticket, f.tier, "person", "label", note)
+            record = accepted_event(project, t.id, f.ticket, f.tier, "person", "label", note)
         else:
             record = event(t.id, "continued", via="label", **({"note": note} if note else {}))
         project.append_events(t, [record], "continue")
@@ -435,6 +435,23 @@ def requested_event(nn, ticket, via, channel, **extra):
     return event(nn, "requested", **fields)
 
 
+def with_kinds(project, text):
+    """The ticket text with the tier its scope's paths set, and, when they set one, a person_reason naming the first
+    kind they reach, unless the ticket has one already. Text whose front matter or tier is malformed is left to lint."""
+    ticket = Ticket(text)
+    if ticket.errors or ticket.tier not in TIERS:
+        return text
+    tier, found = floor(project, ticket.scope)
+    if not found:
+        return text
+    if tier != ticket.tier:
+        text = with_tier(text, tier)
+    if not ticket.get("person_reason"):
+        kind, path, _ = found[0]
+        text = with_field(text, "person_reason", f"{kind}: {path}")
+    return text
+
+
 def create_ticket(project, text, via="add", channel="session", parent=None, key=None, **extra):
     """Take the next ID and make the ticket's branch with the ticket file, without touching any checkout. The
     journal starts with a `requested` event; an AUTO ticket that passes lint is accepted at once. The branch starts
@@ -445,18 +462,13 @@ def create_ticket(project, text, via="add", channel="session", parent=None, key=
     tickets = project.tickets()
 
     def build(nn):
-        body = with_id(text, nn)
+        # A kind's paths raise the tier: the ticket says so, with the kind in person_reason, and that tier freezes.
+        body = with_kinds(project, with_id(text, nn))
         ticket = Ticket(body)
         files = {ticket_path(nn): body}
         events = []
-        if not lint(ticket):
-            tier = highest(ticket.tier, floor(project, ticket.scope)[0])
-            if tier != ticket.tier:  # a person or migration path raised it: the ticket says so, and that tier freezes
-                body = with_tier(body, tier)
-                ticket = Ticket(body)
-                files[ticket_path(nn)] = body
-            if tier == "AUTO":
-                events.append(accepted_event(nn, ticket, tier, "engine", "lint"))
+        if not lint(ticket) and ticket.tier == "AUTO":
+            events.append(accepted_event(project, nn, ticket, "AUTO", "engine", "lint"))
         events.insert(0, requested_event(nn, ticket, via, channel, **extra))
         files[events_path(nn)] = "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events)
         return gitx.commit_files(project.root, parent or base_tip, files, f"{nn}: add ticket: {ticket.title}")
@@ -479,6 +491,7 @@ def cmd_add(project, args):
     else:
         with open(args.file) as f:
             text = f.read()
+    text = with_kinds(project, text)
     errors = lint(Ticket(text))
     if errors:
         return answer(owner="agent", code="TICKET_LINT",
@@ -524,7 +537,7 @@ def cmd_adopt(project, args):
                       action={"kind": "agent_task", "brief": adopt.brief(project, branch, head, rows, size, tier, why,
                                                                          path)})
     with open(args.file) as f:
-        text = f.read()
+        text = with_kinds(project, f.read())
     errors = lint(Ticket(text))
     if errors:
         return answer(owner="agent", code="TICKET_LINT", action={"kind": "agent_task", "brief": (
@@ -601,7 +614,7 @@ def intake_one(project, facts, title, request, external_id, channel, trusted=Fal
     if request.lstrip().startswith("+++"):
         text = request.lstrip()
         try:
-            text = with_field(text, "external_id", external_id)
+            text = with_kinds(project, with_field(text, "external_id", external_id))
             errors = lint(Ticket(text)) if trusted else ["the issue's author can't push to the repository"]
         except StopIteration:
             errors = ["the front matter has no closing '+++' line"]
@@ -653,10 +666,11 @@ def cmd_intake(project, args):
                           **({"command": "rail next"} if created else {})}, created=created, skipped=skipped)
 
 
-def accepted_event(nn, ticket, tier, by, via, note=None):
-    """An accepted event. It also keeps the scope and the Done Contract's own hash, so amend can say what changed."""
+def accepted_event(project, nn, ticket, tier, by, via, note=None):
+    """An accepted event. It also keeps the scope and the Done Contract's own hash, so amend can say what changed,
+    and the kinds the ticket holds (rail docs kinds)."""
     fields = {"by": by, "via": via, "tier": tier, "contract": ticket.contract_hash(), "done": ticket.done_hash(),
-              "scope_paths": sorted(ticket.scope)}
+              "scope_paths": sorted(ticket.scope), "kinds": ticket_kinds(project, ticket)}
     if note:
         fields["note"] = note
     return event(nn, "accepted", **fields)
@@ -672,9 +686,9 @@ def cmd_accept(project, args):
     if f.state == "new":
         if f.lint_errors:
             raise RailError(f"ticket {nn} fails ticket lint: {'; '.join(f.lint_errors)}", code="TICKET_LINT")
-        events = [accepted_event(nn, f.ticket, f.tier, "person", "accept", note)]
+        events = [accepted_event(project, nn, f.ticket, f.tier, "person", "accept", note)]
     elif f.amend_pending:
-        events = [accepted_event(nn, f.ticket, f.tier, "person", "accept", note)]
+        events = [accepted_event(project, nn, f.ticket, f.tier, "person", "accept", note)]
     elif f.state in OPEN and (first_match(f)[1] == "human" or answers_wait(f)):
         # With a rail:go already on the pull request the table reads that label first: it is the same answer.
         events = [event(nn, "continued", via="accept", **({"note": note} if note else {}))]
@@ -735,6 +749,7 @@ def cmd_amend(project, args):
         raise RailError("edit the ticket in its worktree, or pass the new ticket with --file")
     if Ticket(text).id != t.id and not Ticket(text).errors:
         text = with_id(text, t.id)  # the engine owns the id, as at add
+    text = with_kinds(project, text)  # a kind's paths the new scope reaches raise the tier, as at add
     new = Ticket(text)
     errors = lint(new, expect_id=t.id)
     if errors:
@@ -752,16 +767,13 @@ def cmd_amend(project, args):
         if not changed:
             raise RailError(f"the contract of ticket {t.id} matches the accepted one; there is nothing to amend",
                             code="NOTHING_TO_AMEND")
-        tier = highest(new.tier, last.get("tier"), floor(project, new.scope)[0])
-        if tier != new.tier:
-            text = with_tier(text, tier)
-            new = Ticket(text)
+        tier = new.tier
         needs = "done_contract" in changed and tier != "AUTO"  # a person approved the old one, so approves the new
         added_paths = [p for p in new.scope if p not in (last.get("scope_paths") or [])]
         events.append(event(t.id, "amended", contract=new.contract_hash(), changed=changed, added_paths=added_paths,
                             needs_approval=needs, **({"reason": args.reason} if args.reason else {})))
         if not needs:
-            events.append(accepted_event(t.id, new, tier, "engine", "amend"))
+            events.append(accepted_event(project, t.id, new, tier, "engine", "amend"))
     ensure_local(project, t)
     if path:
         with open(path, "w") as fh:
@@ -1401,7 +1413,7 @@ def cmd_init(args):
             except forge.ForgeError as e:
                 receipts.append({"step": "labels", "status": "unavailable", "detail": str(e)})
     brief = ("Rail is installed. Next: rail next, which returns the init task: the project's commands, ## Areas,"
-             " person_paths and rules. " + ("In this cloud session you set them up and the person confirms by merging one"
+             " [kinds] and rules. " + ("In this cloud session you set them up and the person confirms by merging one"
                                           " pull request." if cloud() else "You propose each and the person confirms."))
     return answer(code="INITIALISED", owner="agent", action={"kind": "script", "brief": brief, "command": "rail next"},
                   steps_=receipts, root=root)

@@ -206,6 +206,11 @@ def collect(project, tickets, since=None, states=None):
     base = {"tickets": 0, "all_green": 0}  # tickets whose Check: lines ran on the base before the work
     raised, consults, adopted, steps, roles, models = Counter(), 0, 0, {}, {}, {}
     split = {"offered": 0, "auto": 0, "person": 0}  # AUTO changes over [size] cap offered a split, and what came of it
+    # Merged AUTO tickets over [size] cap and under it, by the size they last shipped with, and how many of each were
+    # reverted afterwards or named in a later ticket's caused_by: size raises no tier, so this shows what it costs.
+    cap = project.config["size"]["cap"]
+    sizes = {side: {"merged": 0, "reverted_or_fixed": 0} for side in ("over", "under")}
+    caused = {str(t.ticket.get("caused_by")) for t in tickets.values() if t.ticket and t.ticket.get("caused_by")}
     blocking, advisory, parked, disputes = Counter(), Counter(), 0, Counter()
     rounds, evidence, by_reason = [], Counter(), {}  # review runs per reviewed ticket; blocking evidence re-run; PERSON
     situations = Counter()
@@ -234,6 +239,10 @@ def collect(project, tickets, since=None, states=None):
         row["no_person"] += tier == "AUTO" and not person
         row["first_try"] += _first_try(t, ships)
         row["reverted"] += nn in reverted
+        if tier == "AUTO" and ships and isinstance(ships[-1].get("size"), int):
+            side = sizes["over" if ships[-1]["size"] > cap else "under"]
+            side["merged"] += 1
+            side["reverted_or_fixed"] += nn in reverted or nn in caused
         adopted += t.last("adopted") is not None  # work that came in on a branch with no ticket: rail adopt
         found = t.last("base_checks")
         if found and found.get("checks"):
@@ -301,7 +310,7 @@ def collect(project, tickets, since=None, states=None):
     overturned, disputed = disputes["dismissed"] + disputes["parked"], sum(disputes.values())
     return {
         "since": since, "merged": merged, "left_out": len(tickets) - merged, "tiers": tiers, "raised": dict(raised),
-        "base_checks": base, "adopted": adopted, "split": split,
+        "base_checks": base, "adopted": adopted, "split": split, "size": {"cap": cap, **sizes},
         "guides": {"situations": dict(sorted(situations.items()))},
         "grilling": grilling(tickets, states or {}, merged_at, start),
         "sources": by_source(project, tickets, states or {}, merged_at, reverted, start),
@@ -439,8 +448,13 @@ def render(data):
         lines.append(f"Became PERSON at ship or review: {sum(data['raised'].values())} ({reasons}).")
     if data["split"]["offered"]:
         split = data["split"]
-        lines.append(f"Offered a split over [size] cap: {split['offered']}. Shipped AUTO afterwards: {split['auto']};"
-                     f" became PERSON for size: {split['person']}.")
+        lines.append(f"Offered a split over [size] cap: {split['offered']}. Shipped AUTO afterwards: {split['auto']}."
+                     + (f" Became PERSON for size, under an older engine: {split['person']}." if split["person"] else ""))
+    over, under = data["size"]["over"], data["size"]["under"]
+    if over["merged"]:
+        lines.append(f"AUTO tickets over [size] cap of {data['size']['cap']}: {over['merged']} merged,"
+                     f" {over['reverted_or_fixed']} reverted or named in a later ticket's caused_by. Under it:"
+                     f" {under['merged']} merged, {under['reverted_or_fixed']}.")
     failed = [[name, s["runs"], s["failed"], s["could_not_run"]] for name, s in data["steps"].items()
               if s["failed"] or s["could_not_run"]]
     lines.append("")

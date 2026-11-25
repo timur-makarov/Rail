@@ -13,7 +13,8 @@ Clone the repository, or use the checkout you are in. Read:
 
 - `AGENTS.md`, and `ARCHITECTURE.md` with its `## Areas` table;
 - `.rail/tickets/TEMPLATE.md`, the shape of a ticket (`rail docs tickets` explains each part);
-- `.rail/config.toml`: `person_paths`, `migration_paths` and `[size] cap`, which decide the tier;
+- `.rail/config.toml`: `[kinds]`, `person_paths` and `migration_paths`, which decide the tier (`rail docs
+  kinds`), and `[size] cap`, over which the first ship offers a split;
 - the code the request touches, and its tests.
 
 Never ask what the code answers: where a thing lives, what it does today, which test covers it.

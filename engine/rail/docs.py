@@ -8,15 +8,19 @@ import os
 import re
 
 from . import config as configmod
+from .ticket import KINDS
 
 DOCS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs")
 
 # Every config field names its reader. A test checks this covers config.DEFAULTS.
 READERS = {
     "base_branch": "claim, ship, CI and the merge: the branch tickets start from and merge into",
-    "person_paths": "add (matched against scope_paths) and ship (changed files): a ticket that touches one is"
-                    " PERSON, so a person approves its contract and merges it",
-    "migration_paths": "add and ship: PERSON as well; tickets touching them need reversibility and rollback",
+    "person_paths": "add and amend (matched against scope_paths) and ship (changed files): the kind `controls`, so a"
+                    " ticket that touches one is PERSON: a person approves its contract and merges it",
+    "migration_paths": "add, amend and ship: the kind `data-loss`, PERSON as well; tickets touching them need"
+                       " reversibility and rollback",
+    **{f"kinds.{kind}": f"add, amend and ship: paths that hold the kind `{kind}` (rail docs kinds); a ticket whose"
+                        f" scope or changed files match one is PERSON" for kind in KINDS},
     "commands.setup": "the claim: runs in each new ticket worktree, with RAIL_TICKET set; rail adopt: runs in the"
                       " throwaway worktrees on the base and the branch before its checks",
     "commands.verify": "ship and CI: the whole project's checks, scanners included",
@@ -26,8 +30,8 @@ READERS = {
     "commands.base_checks": "next, at a ticket's first claim: runs each Check: line once on the untouched base and"
                             " records red or green in a base_checks event. Never a gate: it fails nothing. When every"
                             " check was green, the IMPLEMENT brief asks for a check that fails now (rail amend)",
-    "size.cap": "ship and CI: an AUTO change with more changed lines than this is offered a split at its first ship"
-                " (no attempt spent); the next ship over it, and CI, make it PERSON",
+    "size.cap": "ship: an AUTO change with more changed lines than this is offered a split at its first ship (no"
+                " attempt spent); the next ship goes on to review as AUTO. Size raises no tier",
     "size.exclude": "ship and CI: globs left out of the size count, besides generated files and lockfiles",
     "review.command": "advance: the reviewer, run in the ticket's worktree with the brief on stdin",
     "review.model": "advance and sweep: the model the reviewer runs on (ANTHROPIC_MODEL and RAIL_MODEL for the"
