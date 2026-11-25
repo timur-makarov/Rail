@@ -93,5 +93,6 @@ rule on `.rail/journal/**` otherwise forbids to every sandboxed command, the eng
 that `verify`, the checks and the engine's re-run of a reviewer's evidence commands, which `rail advance`
 starts, run outside the sandbox in such a call.
 `api.anthropic.com` is an allowed domain, so the reviewer, which is a `claude -p` process the engine starts,
-can answer when `rail advance` is one command of a longer call and stays sandboxed. Add the hosts your own
-`verify` needs to `sandbox.network.allowedDomains`.
+can answer when `rail advance` is one command of a longer call and stays sandboxed. `rail init` adds the
+package registries of the languages it finds (`rail docs languages`). Add the other hosts your own `verify`
+needs to `sandbox.network.allowedDomains`.

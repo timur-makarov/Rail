@@ -24,6 +24,10 @@ base_checks = true                        # reader: next, at a ticket's first cl
 cap = 600                                 # an AUTO change over this is offered a split once, then becomes PERSON
 exclude = []
 
+[tests]                                   # reader: nothing yet. Globs of the files that hold tests and their runner's
+                                          # settings; rail init fills it from the language profiles (rail docs languages)
+paths = []
+
 [retry]
 budget = 2                                # reader: next and advance; the same failure in a row at one step, then
                                           # consult, then a person

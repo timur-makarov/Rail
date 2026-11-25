@@ -1,0 +1,15 @@
+# The Rust profile. rail init reads it when a tracked manifest below marks Rust, and writes what it holds into the
+# project's own files (rail docs languages). After init the project's files are the project's.
+
+manifests = ["Cargo.toml"]                                 # file names, matched in any folder
+domains = ["index.crates.io", "static.crates.io"]          # crates.io's index and downloads
+generated = []                                             # build output is in target/, which is untracked
+migration_paths = []
+tests = ["**/tests/**", "**/benches/**"]                   # unit tests inside src/ files can't be told by path
+
+[[rules]]
+id = "no-new-rust-suppressions"
+files = "**/*.rs"
+forbid = ["#[allow(", "#![allow(", "#[ignore"]
+fix = "Fix the cause instead of silencing the check."
+why = "the Rust profile: a lint allowed, or a test ignored"

@@ -29,14 +29,19 @@ DEFAULTS = {
                "contract": "claude-opus-5-5:high"},
     "sweep": {"after": 20, "every": 20},
     "map": {"depth": 1, "ignore": []},
+    "tests": {"paths": []},
     # A page named in the brief when its situation applies. The pages come with the seed config only: a project
     # whose config has no [guides] table gets no guide.
     "guides": {key: "" for key in ("start", "stuck", "findings", "conflict", "contract", "split", "setup")},
     "rules": [],
+    "profiles": [],
 }
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 RULE_KEYS = {"id": str, "files": str, "forbid": list, "only_in": str, "allow": list, "fix": str, "why": str}
+PROFILE_KEYS = {"name": str, "paths": str}
+# Arrays of tables: each item's keys and types, and the key every item needs.
+TABLE_ARRAYS = {"rules": (RULE_KEYS, "id"), "profiles": (PROFILE_KEYS, "name")}
 
 
 def _suggest(key, known):
@@ -62,17 +67,19 @@ def _check(value, default, where):
     return value
 
 
-def _check_rule(rule, n):
-    if not isinstance(rule, dict):
-        raise RailError(f"config: rules[{n}] must be a table")
-    for key, value in rule.items():
-        if key not in RULE_KEYS:
-            raise RailError(f"config: unknown key 'rules[{n}].{key}'{_suggest(key, RULE_KEYS)}")
-        if not isinstance(value, RULE_KEYS[key]):
-            raise RailError(f"config: rules[{n}].{key} must be {RULE_KEYS[key].__name__}")
-    if "id" not in rule:
-        raise RailError(f"config: rules[{n}] needs an id")
-    return rule
+def _check_item(name, item, n):
+    """One table of an array of tables, such as a [[rules]] entry."""
+    keys, needed = TABLE_ARRAYS[name]
+    if not isinstance(item, dict):
+        raise RailError(f"config: {name}[{n}] must be a table")
+    for key, value in item.items():
+        if key not in keys:
+            raise RailError(f"config: unknown key '{name}[{n}].{key}'{_suggest(key, keys)}")
+        if not isinstance(value, keys[key]):
+            raise RailError(f"config: {name}[{n}].{key} must be {keys[key].__name__}")
+    if needed not in item:
+        raise RailError(f"config: {name}[{n}] needs {'an' if needed[0] in 'aeiou' else 'a'} {needed}")
+    return item
 
 
 def _check_ladder(config):
@@ -100,10 +107,10 @@ def load(root):
     packs_dir = os.path.join(root, ".rail", "packs")
     config = copy.deepcopy(DEFAULTS)
     for key, value in raw.items():
-        if key == "rules":
+        if key in TABLE_ARRAYS:
             if not isinstance(value, list):
-                raise RailError("config: rules must be an array of tables ([[rules]])")
-            config["rules"] = [_check_rule(r, n) for n, r in enumerate(value)]
+                raise RailError(f"config: {key} must be an array of tables ([[{key}]])")
+            config[key] = [_check_item(key, item, n) for n, item in enumerate(value)]
         elif key in DEFAULTS:
             config[key] = _check(value, DEFAULTS[key], key)
         elif isinstance(value, dict) and os.path.isdir(os.path.join(packs_dir, key)):
