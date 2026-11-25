@@ -31,9 +31,14 @@ report it with its id in `repeats` and keep its severity.
 List in `kinds` each thing in the change that can't be undone, whatever the ticket's
 tier. The kinds are in `rail docs kinds`: data-loss, data-shape, data-exposure,
 external-effect, access, runs-with-secrets, controls, infrastructure, money, licence. For
-each, give the id, the file and line, and one sentence on what the change does. A change
-that is large, new, or risky in a way a revert undoes is not one of these: report its
-problems as findings. An empty list is the usual answer.
+each, give the id, the file and line, and one sentence on what the change does. Among
+them: a renamed or removed key, column or format of stored or shared data (data-shape); a
+message to a real person, a charge, or a call that changes a third party (external-effect);
+production data copied into a log, a fixture or a third party (data-exposure); a dependency
+the project did not have (licence); a new paid service (money); a credential, or a
+permission check that now lets in a caller it did not (access). A change that is large,
+new, or risky in a way a revert undoes is not one of these: report its problems as
+findings.
 
 Return only JSON matching the schema. `summary` says what you checked and how. An empty
 list is a valid review.

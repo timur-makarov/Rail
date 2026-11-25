@@ -88,6 +88,11 @@ recorded. Either way they are kept with the run and shown in the pull request's 
 wait for a person. A refuter's are ignored. A change that is large or new but can be reverted is not a
 kind: the reviewer reports its problems as findings.
 
+The reviewer's prompt says what the common kinds look like, not only their ids. In a test of 136 model runs,
+a prompt with the ids alone listed a permission check the ticket asked to widen (`access`) in 1 of 4 runs;
+the prompt as it is listed each of six planted kinds in 4 of 4 runs, and 20 of 20 runs on changes with no
+kind listed none.
+
 Don't rely on it for a path you already know holds a kind. The reviewer reads the diff and can miss one; put
 such paths in `[kinds]` under their kind (the auth code under `access`, the dependency manifests under
 `licence`): that rule is a path match and always fires.
