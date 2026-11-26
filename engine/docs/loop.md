@@ -27,7 +27,8 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   `ANSWER_FINDINGS`, `REBASING` and `CONFLICT`, `SPLIT`, `RED_BASE` (the base branch fails `verify`),
   `WAITING_AFTER` and `SCOPE_OVERLAP` (another ticket goes first), `AFTER_DROPPED` on an AUTO ticket (decide
   whether it stands without the dropped one), `STUCK` (an AUTO ticket at the retry cap: `rail next` drops it),
-  `DROP_PENDING`, `CI_WAIT`, `NO_WORK`. A person's turn is `APPROVE_CONTRACT`, `APPROVE_AMEND`,
+  `DROP_PENDING`, `CI_WAIT`, `GITHUB_LIMIT` (GitHub's rate limit is used up: sleep as the script says, or come
+  back at the time the brief names), `NO_WORK`. A person's turn is `APPROVE_CONTRACT`, `APPROVE_AMEND`,
   `MERGE_BY_PERSON`, and on a PERSON ticket `RETRY_CAP` (the retry budget or the cap), `FINDING_UPHELD` and
   `AFTER_DROPPED`; `STUCK_REVIEW`, `HOLD` or `MERGE_FAILED`. Act on `owner` and `action`; the code is for
   logs and for telling two briefs apart.

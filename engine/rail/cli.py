@@ -15,7 +15,7 @@ from .project import Project, event, events_path, ticket_path
 from .state import OPEN, derive, floor, ticket_kinds
 from .table import TRANSITIONS, first_match
 from .ticket import TIERS, Ticket, branch_name, highest, lint, rank, with_field, with_id, with_tier
-from .forge import ENGINE_MARK, TRUSTED, ForgeError
+from .forge import ENGINE_MARK, TRUSTED, ForgeError, RateLimited
 from .util import RailError, age, cloud, could_not_run, disposable, match_any, session_url, shell
 
 VERBS = ("init", "add", "adopt", "accept", "amend", "answer", "next", "advance", "status", "context", "drop", "doctor", "ci",
@@ -29,6 +29,27 @@ def answer(ticket=None, state=None, owner="none", action=None, code="NO_WORK", s
         "action": action or {"kind": "rest", "brief": ""}, "reason": {"code": code}, "steps": steps_ or [],
     }
     result.update(extra)
+    return result
+
+
+LIMIT_SLEEP = 300  # a rate limit that lifts sooner than this many seconds is slept through; a longer one ends the run
+
+
+def github_limit(e):
+    """GitHub's rate limit is used up: a rest, not an outage and not a failure. The command stopped where the limit
+    hit, no attempt is counted, and rail next goes on from the journal once the limit lifts."""
+    import time
+
+    wait = int(e.wait) + 1
+    if wait < LIMIT_SLEEP:
+        command = f"sleep {wait}; rail next"
+        result = answer(owner="agent", code="GITHUB_LIMIT", action={"kind": "script", "brief": command, "command": command})
+    else:
+        back = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(time.time() + wait))
+        result = answer(code="GITHUB_LIMIT", action={"kind": "rest", "brief": (
+            f"GitHub's rate limit is used up until {back}. Nothing is lost: run rail next after that.")})
+    result["reason"]["message"] = str(e)
+    result["wait_secs"] = wait
     return result
 
 
@@ -1005,6 +1026,9 @@ def cmd_next(project, args):
     # A person's inbox is the label: every wait gets it now, not only when the agent runs dry.
     for f in facts.values():
         code, owner, _ = first_match(f)
+        # A ship whose pull request GitHub didn't let it write (a rate limit, an outage) left the old title and
+        # description there, and a person's merge squashes with what the pull request says.
+        update_pr(project, f, took_in)
         if owner == "human" or person_next(f):
             label_wait(project, f, code)
         elif owner == "agent" and f.pr_open and "rail:needs-you" in f.labels:
@@ -2073,5 +2097,7 @@ def main(argv=None):
     except RailError as e:
         result = {"schema_version": 1, "ok": False, "reason": {"code": e.code, "message": str(e)}}
         code = 2
+    except RateLimited as e:
+        result, code = github_limit(e), 0
     print(json.dumps(result, indent=2) if as_json else render(result))
     return code

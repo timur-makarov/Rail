@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from railtest import CONFIG, RailTest, ticket
@@ -546,6 +547,109 @@ class Desk(RailTest):
         self.assertEqual(stub["steps"][0], {"step": "intake", "status": "ran", "result": "pass",
                                             "detail": "ticket 1 from github#12"})
         self.assertEqual(a.rail("next")["steps"], [])  # once: the issue has its ticket now
+
+
+class Scale(RailTest):
+    """GitHub past its first page and at its limits."""
+
+    def dummies(self, github, count):
+        """`count` closed pull requests from other branches, all newer than the ticket's."""
+        def change(s):
+            first = s.get("next_number", 1)
+            s["pulls"] += [{"number": n, "title": f"other {n}", "body": "", "head": f"other-{n}", "base": "main",
+                            "state": "closed", "merged": False, "labels": []} for n in range(first, first + count)]
+            s["next_number"] = first + count
+        github.update(change)
+
+    def test_a_pull_request_older_than_the_100_newest_is_found_by_its_branch(self):
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        a.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
+        a.rail("next")  # ticket 1 is claimed and has pull request #1; ticket 2 has no pull request yet
+        self.dummies(github, 150)
+        a.fix_calc("1")
+        shipped = a.rail("advance", "1")
+        self.assertEqual((shipped["state"], shipped["reason"]["code"]), ("in-ci", "CI_WAIT"))
+        self.assertEqual([s for s in shipped["steps"] if s["step"] == "pr"], [])  # no second pull request was tried
+        self.assertEqual(github.pr(1)["title"], "1: fix add")  # the ticket's own was found, and written at ship
+        asked = [c["query"].get("head") for c in github.read()["log"] if c["path"] == "pulls" and c["method"] == "GET"]
+        self.assertIn("acme:1-fix-add", asked)
+        # A ticket nobody claimed has no pull request to find: it costs no call of its own.
+        self.assertFalse([h for h in asked if h and h.startswith("acme:2-")], asked)
+
+    def test_a_contract_pull_request_older_than_the_100_newest_still_reads_its_rail_go(self):
+        a, b, github = self.github_pair()
+        a.add(ticket(tier="PERSON"))
+        self.assertEqual(a.rail("next")["reason"]["code"], "WAITING_HUMAN")
+        self.dummies(github, 120)
+        github.label(1, "rail:go")
+        self.assertEqual(a.rail("next")["reason"]["code"], "IMPLEMENT")
+
+    def test_issues_on_a_later_page_are_taken_in(self):
+        a, b, github = self.github_pair()
+        github.update(lambda s: (s.__setitem__("max_per_page", 2), s["issues"].extend(
+            {"number": n, "title": f"Request {n}", "body": "Please.", "labels": ["rail"], "state": "open"}
+            for n in (11, 12, 13))))
+        took = [s["detail"] for s in a.rail("next")["steps"] if s["step"] == "intake"]
+        self.assertEqual(took, ["ticket 1 from github#11", "ticket 2 from github#12", "ticket 3 from github#13"])
+
+    def test_a_rate_limit_is_a_rest_that_changes_nothing_and_counts_no_attempt(self):
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        a.rail("next")
+        a.fix_calc("1")
+        before = events(a)
+        github.update(lambda s: s.__setitem__("limit", {"status": 429, "retry_after": 30,
+                                                        "message": "You have exceeded a secondary rate limit."}))
+        for verb in (("next",), ("advance", "1"), ("status",)):
+            limited = a.rail(*verb)
+            self.assertEqual((limited["owner"], limited["reason"]["code"], limited["action"]["kind"],
+                              limited["action"]["command"]), ("agent", "GITHUB_LIMIT", "script", "sleep 31; rail next"))
+            self.assertIn("secondary rate limit", limited["reason"]["message"])
+        self.assertEqual(events(a), before)
+        # The primary limit: 403, nothing left, and the time it resets. Too long to sleep through: the run ends.
+        github.update(lambda s: s.__setitem__("limit", {"status": 403, "remaining": 0, "reset": int(time.time()) + 1800}))
+        limited = a.rail("next")
+        self.assertEqual((limited["owner"], limited["reason"]["code"], limited["action"]["kind"]),
+                         ("none", "GITHUB_LIMIT", "rest"))
+        self.assertIn("used up until 20", limited["action"]["brief"])
+        self.assertTrue(1700 < limited["wait_secs"] <= 1801, limited["wait_secs"])
+        self.assertEqual(events(a), before)
+        github.update(lambda s: s.pop("limit"))
+        shipped = a.rail("advance", "1")
+        self.assertEqual((shipped["state"], shipped["reason"]["code"]), ("in-ci", "CI_WAIT"))
+        self.assertEqual(len([e for e in events(a) if e["event"] == "shipped"]), 1)
+
+    def test_a_limit_that_hits_a_write_after_the_ship_leaves_the_ship_done(self):
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        a.rail("next")
+        a.fix_calc("1")
+        github.update(lambda s: s.__setitem__("limit", {"status": 429, "retry_after": 5, "methods": ["PATCH", "POST"]}))
+        limited = a.rail("advance", "1")
+        self.assertEqual((limited["reason"]["code"], limited["action"]["command"]), ("GITHUB_LIMIT", "sleep 6; rail next"))
+        github.update(lambda s: s.pop("limit"))
+        again = a.rail("next")
+        self.assertEqual((again["state"], again["reason"]["code"]), ("in-ci", "CI_WAIT"))
+        self.assertEqual(github.pr(1)["title"], "1: fix add")
+        steps_ = [e for e in events(a) if e["event"] == "step"]
+        self.assertFalse([e for e in steps_ if e["result"] == "fail"], steps_)
+        self.assertEqual(len([e for e in events(a) if e["event"] == "shipped"]), 1)
+
+    def test_a_refusal_that_is_no_rate_limit_is_not_a_rest(self):
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        github.update(lambda s: s.__setitem__("limit", {"status": 403, "message": "Resource not accessible by integration"}))
+        offline = a.rail("next")
+        self.assertNotEqual(offline["reason"]["code"], "GITHUB_LIMIT")
+
+    def test_two_writes_in_one_command_are_a_second_apart(self):
+        a, b, github = self.github_pair()
+        a.add(ticket(tier="PERSON"))
+        a.rail("next")  # opens the contract pull request, then labels it for the person
+        writes = [c["at"] for c in github.read()["log"] if c["method"] != "GET"]
+        self.assertGreaterEqual(len(writes), 2)
+        self.assertTrue(all(later - earlier >= 0.99 for earlier, later in zip(writes, writes[1:])), writes)
 
 
 class Doctor(RailTest):

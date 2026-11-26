@@ -92,12 +92,6 @@ class Facts:
         # The forge's side: the ticket's PR, its labels, CI on its head, and a merge the engine requested.
         forge = getattr(project, "forge", None)
         self.forge = forge if forge is not None and forge.ok else None
-        self.pr = self.forge.pr(t.name) if self.forge and t.name else None
-        if self.forge and not t.name and t.on_base:
-            # Its branch is gone. Only a merged pull request from that branch shows the ticket reached the base
-            # branch by its own pull request, and not inside another ticket's merge.
-            self.pr = self.forge.merged_from(t.id)
-        self.labels = self.forge.labels(self.pr) if self.pr else set()
         self.ci, self.ci_failing, self.conflict, self.behind, self.pushed = None, [], False, False, None
         self.merge_note = project.cache_read("merge", t.id)
         self.red_base = None
@@ -117,6 +111,14 @@ class Facts:
         else:
             self.tier = author
         self.auto = self.tier == "AUTO"  # the engine accepts its contract and merges it; a person does both for PERSON
+        # A pull request is opened at the claim, or at add for a PERSON ticket's contract: only then is one that the
+        # list of the newest pull requests lacks worth a call of its own.
+        self.pr = self.forge.pr(t.name, expected=bool(claims) or not self.auto) if self.forge and t.name else None
+        if self.forge and not t.name and t.on_base:
+            # Its branch is gone. Only a merged pull request from that branch shows the ticket reached the base
+            # branch by its own pull request, and not inside another ticket's merge.
+            self.pr = self.forge.merged_from(t.id)
+        self.labels = self.forge.labels(self.pr) if self.pr else set()
         self._needs_review = None
         self.state = self._state()
 

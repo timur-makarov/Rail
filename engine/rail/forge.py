@@ -6,6 +6,7 @@
 import json
 import re
 import subprocess
+import time
 
 from . import gitx, util
 
@@ -42,6 +43,16 @@ class ForgeError(Exception):
         self.status = status
 
 
+class RateLimited(Exception):
+    """GitHub refused a call because a rate limit is used up. `wait` is the seconds until it lifts. Not a
+    ForgeError: nothing that treats GitHub as out of reach may catch it, since the command would go on and make
+    more calls. It ends the command, and the answer says when to come back."""
+
+    def __init__(self, wait, message):
+        super().__init__(message)
+        self.wait = wait
+
+
 def github_repo(project):
     """'owner/name' from the origin remote's URL, or None when it isn't on GitHub."""
     url = gitx.git(["config", "--get", f"remote.{project.remote}.url"], project.root, check=False).stdout.strip()
@@ -49,31 +60,83 @@ def github_repo(project):
     return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
-def api(method, path, body=None):
-    """One REST call. Returns the decoded JSON, or None for an empty body. Raises ForgeError.
+PAGE = 100          # the most GitHub gives in one page of a list
+MAX_PAGES = 20      # of one list: a list longer than this is read no further
+WRITE_GAP = 1.0     # seconds between two writes, as GitHub's guide to its REST API asks
+_last_write = None
 
-    Lists are read one page of 100, which is enough for labels, check runs and a ticket's comments.
-    """
+
+def _limit_wait(status, headers, message):
+    """Seconds to wait when this refusal is a rate limit, else None. GitHub answers 403 or 429 with `retry-after`, or
+    with `x-ratelimit-remaining: 0` and the time the limit resets; with neither, its docs say to wait a minute."""
+    if status not in (403, 429):
+        return None
+    after, reset = headers.get("retry-after", ""), headers.get("x-ratelimit-reset", "")
+    used_up = headers.get("x-ratelimit-remaining") == "0"
+    if not (after.isdigit() or used_up or "rate limit" in message.lower()):
+        return None
+    if after.isdigit():
+        return max(1, int(after))
+    if used_up and reset.isdigit():
+        return max(1, int(reset) - int(time.time()))
+    return 60
+
+
+def call(method, path, body=None):
+    """One REST call. Returns (the decoded JSON or None for an empty body, the response's headers by lower-case
+    name). Raises ForgeError, or RateLimited when a rate limit refused it."""
+    global _last_write
     args = ["gh", "api", "--method", method, path, "-H", "Accept: application/vnd.github+json", "--include"]
     if body is not None:
         args += ["--input", "-"]
+    if method != "GET" and _last_write is not None:
+        time.sleep(max(0.0, WRITE_GAP - (time.monotonic() - _last_write)))
     try:
         result = subprocess.run(args, input=json.dumps(body) if body is not None else None,
                                 capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise ForgeError(None, f"gh api {path}: {e}")
+    finally:
+        if method != "GET":
+            _last_write = time.monotonic()
     head, _, payload = result.stdout.partition("\r\n\r\n") if "\r\n\r\n" in result.stdout else result.stdout.partition("\n\n")
     m = re.match(r"HTTP/[\d.]+ (\d+)", head)
     status = int(m.group(1)) if m else None
+    headers = {name.strip().lower(): value.strip() for name, _, value in
+               (line.partition(":") for line in head.splitlines()[1:]) if value}
     if result.returncode != 0 or (status and status >= 400):
         message = payload.strip() or result.stderr.strip()
         try:
             message = json.loads(payload).get("message", message)
-        except ValueError:
+        except (ValueError, AttributeError):
             pass
+        wait = _limit_wait(status, headers, message)
+        if wait is not None:
+            raise RateLimited(wait, f"gh api {method} {path}: {status} {message}".strip())
         raise ForgeError(status, f"gh api {method} {path}: {status or ''} {message}".strip())
     payload = payload.strip()
-    return json.loads(payload) if payload else None
+    return (json.loads(payload) if payload else None), headers
+
+
+def api(method, path, body=None):
+    """One REST call. Returns the decoded JSON, or None for an empty body. Raises ForgeError or RateLimited.
+
+    A list read this way is one page of 100, which is enough for labels, check runs and a ticket's comments.
+    """
+    return call(method, path, body)[0]
+
+
+def pages(path):
+    """A whole list: every page, following the `Link` header's rel="next"."""
+    found = []
+    for _ in range(MAX_PAGES):
+        rows, headers = call("GET", path)
+        found += rows or []
+        m = re.search(r'<([^>]+)>;\s*rel="next"', headers.get("link", ""))
+        if not m:
+            break
+        path = m.group(1)
+    return found
 
 
 def raw(path):
@@ -178,6 +241,8 @@ class Forge:
         self.ok = bool(self.repo) and project.online
         self.epoch = _epoch
         self._pulls = None
+        self._more = False   # the list of pull requests filled its page: older ones exist that it doesn't hold
+        self._by_branch = {}
         self._full = {}
         self._checks = {}
         self._required = earlier._required if earlier else None  # the base branch's rules don't change mid-command
@@ -193,31 +258,48 @@ class Forge:
 
     # --- pull requests ----------------------------------------------------------
 
+    def _own(self, pr):
+        """Not from a fork: anyone can name a branch there like a ticket's. Such a pull request is not the ticket's,
+        and what is written on it is not the owner's word."""
+        head = pr["head"]
+        return "repo" not in head or ((head["repo"] or {}).get("full_name") or "").lower() == self.repo.lower()
+
     def pulls(self):
-        """{head branch: the newest PR from it}."""
+        """{head branch: the newest PR from it}, from the 100 newest pull requests."""
         if self._pulls is None:
             self._pulls = {}
             try:
-                for pr in self.call("GET", "pulls?state=all&per_page=100&sort=created&direction=desc") or []:
-                    head = pr["head"]
-                    if "repo" in head and ((head["repo"] or {}).get("full_name") or "").lower() != self.repo.lower():
-                        # From a fork: anyone can name a branch there like a ticket's. Its pull request is not
-                        # the ticket's, and what is written on it is not the owner's word.
-                        continue
-                    self._pulls.setdefault(head["ref"], pr)
+                found = self.call("GET", f"pulls?state=all&per_page={PAGE}&sort=created&direction=desc") or []
+                self._more = len(found) >= PAGE
+                for pr in found:
+                    if self._own(pr):
+                        self._pulls.setdefault(pr["head"]["ref"], pr)
             except ForgeError:
                 self.ok = False
         return self._pulls
 
-    def pr(self, branch):
-        """The newest pull request from a branch, as the list gives it: labels, head, title, merged_at."""
+    def pr(self, branch, expected=True):
+        """The newest pull request from a branch, as the list gives it: labels, head, title, merged_at. One that is
+        older than the 100 newest is asked for by its branch, when the caller expects the branch to have one."""
         if not self.ok or not branch:
             return None
-        return self.pulls().get(branch)
+        found = self.pulls().get(branch)
+        if found is None and self._more and expected and self.ok:
+            if branch not in self._by_branch:
+                owner = self.repo.split("/")[0]
+                try:
+                    rows = self.call("GET", f"pulls?state=all&per_page={PAGE}&sort=created&direction=desc"
+                                            f"&head={owner}:{branch}") or []
+                except ForgeError:
+                    rows = []
+                self._by_branch[branch] = next((pr for pr in rows if self._own(pr) and pr["head"]["ref"] == branch), None)
+            found = self._by_branch[branch]
+        return found
 
     def merged_from(self, nn):
         """The newest merged pull request from one of ticket NN's branches (NN-...), or None. A ticket whose branch
-        is gone shows by it that its own pull request was merged."""
+        is gone shows by it that its own pull request was merged. Only the 100 newest pull requests are searched:
+        the branch's name went with the branch, so there is nothing to ask GitHub for."""
         if not self.ok:
             return None
         return next((pr for ref, pr in self.pulls().items() if ref.startswith(f"{nn}-") and pr.get("merged_at")), None)
@@ -322,5 +404,6 @@ class Forge:
     # --- issues -------------------------------------------------------------------------
 
     def issues(self, label="rail"):
-        found = self.call("GET", f"issues?labels={label}&state=open&per_page=100") or []
+        """Every open issue with the label, however many pages they fill."""
+        found = pages(f"repos/{self.repo}/issues?labels={label}&state=open&per_page={PAGE}")
         return [i for i in found if "pull_request" not in i]

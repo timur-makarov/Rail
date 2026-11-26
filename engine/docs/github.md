@@ -47,3 +47,17 @@ each page.
 Turn on "Require branches to be up to date before merging": the engine rebases a shipped pull request that
 falls behind, and CI runs again. A merge queue is for organisations with many merges a day; a project that
 turns one on adds the `merge_group` trigger to `.github/workflows/rail.yml` and tests it.
+
+## Many pull requests, and GitHub's limits
+
+- The engine reads the 100 newest pull requests once per command. A ticket whose pull request is older than
+  those is asked for by its branch, one call for each such ticket, and only when the ticket should have one:
+  it is claimed, or it is a PERSON ticket with a contract to approve.
+- Issues labelled `rail` are read to the last page, so intake misses none.
+- When GitHub refuses a call because a rate limit is used up (a `403` or `429` with `retry-after`, or with
+  nothing left until `x-ratelimit-reset`), the command stops there and answers `GITHUB_LIMIT`. Under five
+  minutes the answer is the script `sleep N; rail next`; a longer wait is a `rest` that names the time to come
+  back. Nothing is counted as an attempt, and what the command had already done stays done: the next
+  `rail next` goes on from the journal. A ship whose pull request could not be written has its title and
+  description written by the next `rail next`.
+- Two writes to GitHub in one command are at least one second apart, as GitHub's guide to its REST API asks.

@@ -53,12 +53,25 @@ def list_view(state, pr):
     return view
 
 
-def respond(status, body=None):
-    reason = {200: "OK", 201: "Created", 202: "Accepted", 204: "No Content", 404: "Not Found",
-              405: "Method Not Allowed", 409: "Conflict", 422: "Unprocessable Entity"}.get(status, "")
-    print(f"HTTP/2.0 {status} {reason}\r\nContent-Type: application/json\r\n\r\n" +
+def respond(status, body=None, headers=None):
+    reason = {200: "OK", 201: "Created", 202: "Accepted", 204: "No Content", 403: "Forbidden", 404: "Not Found",
+              405: "Method Not Allowed", 409: "Conflict", 422: "Unprocessable Entity", 429: "Too Many Requests"}.get(status, "")
+    extra = "".join(f"{name}: {value}\r\n" for name, value in (headers or {}).items())
+    print(f"HTTP/2.0 {status} {reason}\r\nContent-Type: application/json\r\n{extra}\r\n" +
           (json.dumps(body) if body is not None else ""))
     return 0 if status < 400 else 1
+
+
+def paged(state, url, query, rows):
+    """One page of a list, as GitHub cuts it: per_page rows (30 unless asked, never more than the fake's
+    max_per_page), with a Link header naming the next page while there is one."""
+    size = min(int(query.get("per_page", 30)), state.get("max_per_page", 100))
+    page = int(query.get("page", 1))
+    headers = {}
+    if len(rows) > page * size:
+        rest = "&".join(f"{k}={v}" for k, v in query.items() if k != "page")
+        headers["Link"] = f'<https://api.github.com/{url.path.lstrip("/")}?{rest}&page={page + 1}>; rel="next"'
+    return respond(200, rows[(page - 1) * size:page * size], headers)
 
 
 def handle(state, method, path, body):
@@ -69,6 +82,14 @@ def handle(state, method, path, body):
         return respond(404, {"message": "Not Found"})
     rest = parts[3:]
     state.setdefault("calls", []).append(f"{method} {'/'.join(rest)}")
+    state.setdefault("log", []).append({"method": method, "path": "/".join(rest), "query": query, "at": time.time()})
+    limit = state.get("limit")
+    if limit and method in limit.get("methods", [method]):
+        # A rate limit, as GitHub answers one: the status, and the headers that say when to come back.
+        headers = {k: str(v() if callable(v) else v) for k, v in (
+            ("retry-after", limit.get("retry_after")), ("x-ratelimit-remaining", limit.get("remaining")),
+            ("x-ratelimit-reset", limit.get("reset"))) if v is not None}
+        return respond(limit.get("status", 429), {"message": limit.get("message", "API rate limit exceeded")}, headers)
     pulls, issues = state.setdefault("pulls", []), state.setdefault("issues", [])
 
     def find_pr(n):
@@ -94,7 +115,7 @@ def handle(state, method, path, body):
         found = [p for p in pulls if query.get("state", "open") in ("all", p["state"])]
         if "head" in query:
             found = [p for p in found if p["head"] == query["head"].split(":", 1)[1]]
-        return respond(200, [list_view(state, p) for p in sorted(found, key=lambda p: -p["number"])])
+        return paged(state, url, query, [list_view(state, p) for p in sorted(found, key=lambda p: -p["number"])])
     if len(rest) == 2 and rest[0] == "pulls":
         pr = find_pr(rest[1])
         if not pr:
@@ -150,7 +171,7 @@ def handle(state, method, path, body):
     if rest == ["issues"] and method == "GET":
         found = [i for i in issues if i["state"] == query.get("state", "open")
                  and (not query.get("labels") or query["labels"] in i["labels"])]
-        return respond(200, [dict(i, labels=[{"name": n} for n in i["labels"]]) for i in found])
+        return paged(state, url, query, [dict(i, labels=[{"name": n} for n in i["labels"]]) for i in found])
     if len(rest) == 3 and rest[0] == "commits" and rest[2] == "check-runs":
         runs = state.setdefault("checks", {}).get(rest[1], [])
         return respond(200, {"total_count": len(runs), "check_runs": runs})
