@@ -84,7 +84,7 @@ class Operations(RailTest):
         self.assertIn(".rail/packs/NAME/", packs)
         self.assertIn("never changes ticket state", packs)
         self.assertIn("## Decision", p.rail("docs", "adr")["text"])
-        self.assertIn("People keep four acts", p.rail("docs", "environments")["text"])
+        self.assertIn("A person is asked only about what a revert doesn't undo", p.rail("docs", "environments")["text"])
         journal = p.rail("docs", "journal")["text"]
         for name in ("requested", "accepted", "amended", "claimed", "saved", "worked", "step", "shipped", "tier_raised",
                      "finding",

@@ -52,7 +52,7 @@ external_id = "github#123"
   `"; "` between several. Ticket lint fails a PERSON ticket without one, or with a part that names no kind. The engine makes a ticket PERSON by itself in three cases: its
   `scope_paths` reach the paths of a kind, which are `[kinds]`, `person_paths` (`controls`) and
   `migration_paths` (`data-loss`), at add or amend, where it writes the tier and `person_reason` into the
-  ticket; it changes a file on those paths (at ship); or the reviewer asks for a person (at review). Size raises
+  ticket; it changes a file on those paths (at ship); or the reviewer lists something of a kind in the change (at review). Size raises
   no tier: over `[size] cap`, the first ship offers a split (`rail docs loop`), and the next goes on to review.
   A tier never goes down.
 - **A migration ticket**, one whose change touches `migration_paths`, sets two more keys in the front

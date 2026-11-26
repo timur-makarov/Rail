@@ -72,7 +72,7 @@ A person is asked only about what a revert doesn't undo: deleted data, a data sh
 with secrets, Rail's own gates, money and the rest of the kinds in `rail docs kinds`. A ticket is PERSON when its
 author names such a kind in `person_reason`, when it touches the paths `[kinds]` lists for one (the paths you
 name, such as auth, schemas and infrastructure, plus the CI workflows and agent settings), `person_paths` (Rail's
-own files) or a migration, or when the reviewer asks for one. Size raises no tier: a change past `[size] cap`
+own files) or a migration, or when the reviewer finds something of a kind in the change. Size raises no tier: a change past `[size] cap`
 (600 changed lines) is offered a split once, because a reviewer checks a small change better. The engine raises a
 tier and never lowers one.
 
@@ -107,9 +107,11 @@ that merged with no review, and turns what it finds into tickets. A source does 
 signal, such as failed CI runs or last week's merges: a prompt in `.rail/sources/` that files tickets and
 never edits.
 
-**What Rail leaves to others.** It starts no agents: a session or a cloud scheduled task does, and one
-person owns that task for a repository (`rail docs cloud` says why). It doesn't say how
-to write, test or debug code: that is the agent's craft. It doesn't deploy: a ticket ends at its merge.
+**What Rail leaves to others.** It schedules nothing: a session or a cloud scheduled task starts the work,
+and one person owns that task for a repository (`rail docs cloud` says why). Inside that session the engine
+can start the worker for a ticket itself (`rail work`), on the model and effort it names, as it starts the
+reviewer. It doesn't say how to write, test or debug code: that is the agent's craft. It doesn't deploy: a
+ticket ends at its merge.
 
 ## Start in a Claude Code cloud session
 
