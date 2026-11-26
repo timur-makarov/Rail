@@ -134,7 +134,7 @@ TAKEN = ("accepted", "edited", "rejected", "answered")
 
 def _grill_row():
     return {"tickets": 0, "questions": 0, **{taken: 0 for taken in TAKEN}, "merged": 0, "dropped": 0, "open": 0,
-            "amended": 0, "first_try": 0, "caused_fix": 0, "minutes": []}
+            "amended": 0, "first_try": 0, "caused_fix": 0, "hidden": 0, "minutes": []}
 
 
 def grilling(tickets, states, merged_at, start):
@@ -163,6 +163,7 @@ def grilling(tickets, states, merged_at, start):
             row[state] += 1
             row["amended"] += _amended_after_acceptance(t)
             row["caused_fix"] += nn in caused
+            row["hidden"] += bool(req.get("hidden_removed"))
             if state == "merged":
                 row["first_try"] += _first_try(t, ships)
                 row["minutes"].append(max(0.0, (merged_at[nn] - parse_iso(req["at"]).timestamp()) / 60))
@@ -399,6 +400,10 @@ def render_grilling(data):
     for title, rows in (("BY CHANNEL", data["grilling"]["channels"]), ("GRILLED BY", data["grilling"]["agents"])):
         if rows:
             lines += ["", *_table([title, *head], [[name, *[r[k] for k in head]] for name, r in rows.items()])]
+    hidden = {name: r["hidden"] for name, r in data["grilling"]["channels"].items() if r["hidden"]}
+    if hidden:
+        lines += ["", "Tickets whose request had hidden text removed at intake (HTML comments a reader of the page"
+                      " doesn't see): " + ", ".join(f"{name} {count}" for name, count in hidden.items()) + "."]
     return lines
 
 

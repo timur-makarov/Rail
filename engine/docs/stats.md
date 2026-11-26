@@ -114,7 +114,9 @@ in the period, whatever became of it, with grilled tickets beside the rest:
 | `median request to merge` | From the `requested` event to the squash commit |
 
 `BY CHANNEL` and `GRILLED BY` split the same counts by where the request came from and by the model that
-grilled.
+grilled. A last line names, by channel, the tickets whose request had hidden text removed at intake
+(`hidden` in the JSON; `rail docs tickets`): any at all means someone put text in an issue that its reader
+couldn't see.
 
 **Read the acceptance rate with the amends.** Many acceptances with many amends mean people said yes without
 deciding, and the recommendations steered them. Many acceptances with few amends mean the agent recommends

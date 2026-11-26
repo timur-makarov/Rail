@@ -73,7 +73,19 @@ the same on request), and work from any other tracker with
 the `+++` line, becomes that ticket as it is, when it passes lint and its author can push to the repository:
 that is how a chat bot files what it grilled out of a person (`rail docs bots`). Anything else makes a ticket
 with the request, quoted, and an empty contract; `rail next` asks the agent to write it, and
-`rail amend NN --file FILE` saves it. Intake is idempotent by `external_id`. Work already done on a branch
+`rail amend NN --file FILE` saves it. Intake is idempotent by `external_id`.
+
+**Text a person couldn't see doesn't reach the agent.** GitHub hides an HTML comment (`<!-- ... -->`) when it
+shows an issue, so the person who labelled the issue never read it. Intake removes every such comment before
+it makes the ticket, and before it checks a whole ticket; a comment with no `-->` takes the rest of the text
+with it, as it does on the page. A comment inside a fenced code block that opens at the start of a line, or
+inside a code span on one line, is shown as text and stays. Where GitHub might read the Markdown differently
+(a fence inside a list or a quote, raw HTML around it), the comment goes: the rule errs towards removing. The
+`requested` event records how many were removed (`hidden_removed`), and `rail stats` counts the tickets. A
+person's pull request comments, which reach the next brief, are read the same way. Other ways to hide text
+(a zero-width character, an attribute of a tag) are not looked for.
+
+Work already done on a branch
 with no ticket comes in with `rail adopt BRANCH`: the ticket's branch starts from that branch's commits, and
 each check must fail on the base and pass on the branch before the ticket is filed (`rail docs adopt`).
 

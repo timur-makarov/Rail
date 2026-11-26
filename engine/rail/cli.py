@@ -16,6 +16,7 @@ from .state import OPEN, derive, floor, ticket_kinds
 from .table import TRANSITIONS, first_match
 from .ticket import TIERS, Ticket, branch_name, highest, lint, rank, with_field, with_id, with_tier
 from .forge import ENGINE_MARK, TRUSTED, ForgeError, RateLimited
+from .hidden import strip_hidden
 from .util import RailError, age, cloud, could_not_run, disposable, match_any, session_url, shell
 
 VERBS = ("init", "add", "adopt", "accept", "amend", "answer", "next", "advance", "status", "context", "drop", "doctor", "ci",
@@ -297,10 +298,10 @@ def person_comments(project, f):
         return ""
     moves = [e["at"] for e in f.t.events if e.get("event") != "saved" and e.get("at")]  # a save isn't a move
     since = moves[-1] if moves else ""
-    said = [c["body"].strip() for c in project.forge.comments(f.pr["number"])
+    said = [strip_hidden(c["body"])[0].strip() for c in project.forge.comments(f.pr["number"])
             if c.get("created_at", "") >= since and c.get("body") and c.get("author_association") in TRUSTED
             and ENGINE_MARK not in c["body"]]
-    return "\n".join(said)
+    return "\n".join(s for s in said if s)  # what GitHub hides in a comment, its reader didn't write for the agent
 
 
 def answers_wait(f):
@@ -657,6 +658,9 @@ def intake_one(project, facts, title, request, external_id, channel, trusted=Fal
     for f in facts.values():
         if f.ticket and f.ticket.get("external_id") == external_id and f.state != "dropped":
             return None
+    # The person who handed this over read it rendered, where an HTML comment doesn't show: what they couldn't see
+    # goes into no ticket.
+    request, hidden = strip_hidden(request)
     if request.lstrip().startswith("+++"):
         text = request.lstrip()
         try:
@@ -665,11 +669,13 @@ def intake_one(project, facts, title, request, external_id, channel, trusted=Fal
         except StopIteration:
             errors = ["the front matter has no closing '+++' line"]
         if not errors:
-            nn, _, _ = create_ticket(project, text, via="intake", channel=channel, filed_by=filed_by, key=external_id)
+            nn, _, _ = create_ticket(project, text, via="intake", channel=channel, filed_by=filed_by, key=external_id,
+                                     hidden_removed=hidden)
             return nn
         extra = {"filed_by": filed_by, "not_taken": "; ".join(errors)}  # why the ticket became a request
     else:
         extra = {"filed_by": filed_by}
+    extra["hidden_removed"] = hidden
     nn, _, _ = create_ticket(project, stub(title, request, external_id, caused_by(project, request)), via="intake",
                              channel=channel, key=external_id, **extra)
     return nn
