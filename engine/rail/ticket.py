@@ -27,6 +27,7 @@ GRILL_KEYS = {"channel": "channel", "agent": "agent", "person": "person", "start
 VACUOUS = {"", "true", ":", "exit 0", "/bin/true", "/usr/bin/true", "pass", "ok", "works"}
 _CHECK = re.compile(r"^\s*[-*]\s+Check:\s*(.*)$")
 _ASSUMED = re.compile(r"^\s*[-*]\s+ASSUMED:\s*(.*)$")
+_DECIDED_BARE = re.compile(r"^\s*[-*]\s+VERIFIED:\s*decided, not checked\s*:?[\s.]*$", re.I)
 
 
 def rank(tier):
@@ -233,6 +234,9 @@ def lint(ticket, expect_id=None):
         errors.append("'## Done Contract' is missing")
     elif not ticket.check_lines():
         errors.append("the Done Contract needs at least one '- Check: `command`' line")
+    if any(_DECIDED_BARE.match(line) for line in ticket.sections.get("Assumptions", "").splitlines()):
+        errors.append("a 'VERIFIED: decided, not checked:' row needs, after the colon, what you decided, your reason and"
+                      " what it costs if you are wrong: a decision with no reason can't be checked later")
     errors += ticket.grilling()[1]
     for payload in ticket.check_lines():
         if not _ticked(payload):

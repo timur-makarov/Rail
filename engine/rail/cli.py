@@ -770,6 +770,15 @@ def cmd_answer(project, args):
     if args.outcome == "declined" and not args.reason:
         raise RailError("a decline needs a reason")
     by = "owner" if args.owner else "author"
+    if not args.reason.strip() and by == "author":
+        # An agent's decision with no reason can't be learned from: the next review run, the sweep and rail stats
+        # would see only that something happened. A person's word is its own reason.
+        raise RailError({
+            "fixed": f"say what you changed: rail answer {f.id} {fid} fixed \"what you changed\". The next review run"
+                     " reads it to check the fix.",
+            "parked": f"say why this change didn't cause it: rail answer {f.id} {fid} parked \"why\". The sweep makes"
+                      " a ticket from a parked finding, and the reason is where that ticket starts.",
+        }[args.outcome], code="NO_REASON")
     if args.outcome in ("declined", "parked") and by == "author" and f.ledger.findings[fid].get("severity") == "blocking":
         # The author can't close a blocking finding: declining or parking it disputes it, and a fresh refuter
         # decides whether it holds and whether this change caused it.
@@ -828,6 +837,10 @@ def cmd_amend(project, args):
         if not changed:
             raise RailError(f"the contract of ticket {t.id} matches the accepted one; there is nothing to amend",
                             code="NOTHING_TO_AMEND")
+        if not (args.reason or "").strip():
+            raise RailError(f"say why the contract changes: rail amend {t.id} \"why\". The journal keeps the reason:"
+                            " it is how whoever reads this ticket later tells a contract that was wrong from one that"
+                            " was weakened to pass.", code="NO_REASON")
         tier = new.tier
         needs = "done_contract" in changed and tier != "AUTO"  # a person approved the old one, so approves the new
         added_paths = [p for p in new.scope if p not in (last.get("scope_paths") or [])]
@@ -1431,6 +1444,10 @@ def cmd_drop(project, args):
     f = facts[project.find(args.ticket or requested(project, args), tickets).id]
     if f.state == "merged":
         raise RailError(f"ticket {f.id} is merged; follow-up work is a new ticket with caused_by", code="MERGED")
+    if args.by == "agent" and f.state != "dropped" and not (args.reason or "").strip():
+        raise RailError(f"say why the ticket ends: rail drop {f.id} --reason \"why\". The reason is kept in the drop's"
+                        " mark, which is all that is left of a dropped ticket once its branch is gone. A person who"
+                        f" drops it needs none: rail drop {f.id} --by person", code="NO_REASON")
     receipts, leftovers = [], []
     if drop(project, f, args.by, args.reason or "", receipts):
         tickets, facts = load(project)

@@ -206,7 +206,7 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
         # The contract and tier freeze at acceptance: only `rail amend` changes them.
         if ticket.contract_hash() != accepted.get("contract"):
             errors.append(f"the contract (Done Contract and scope_paths) differs from the accepted one; change it with"
-                          f" rail amend {nn}")
+                          f" rail amend {nn} \"why\"")
         if rank(ticket.tier) < rank(accepted.get("tier")):
             errors.append(f"the tier is {ticket.tier}, below the accepted {accepted.get('tier')}; tiers only go up")
     if not run.record("ticket-lint", not errors, patch_id, "; ".join(errors) or None, output="\n".join(errors)):

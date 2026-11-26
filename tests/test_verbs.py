@@ -133,7 +133,7 @@ class Text(RailTest):
         self.assertIn("  verify: ran, pass (exit 0)", lines)
         self.assertIn("AssertionError", text)
         p.fix_calc("1")
-        dropped = p.rail("drop", "1", raw=True).stdout
+        dropped = p.rail("drop", "1", "--reason", "not needed", raw=True).stdout
         self.assertIn("\n\nleftover: worktree .claude/worktrees/1 (uncommitted changes (1 files); left for you)", dropped)
 
     STOP = "If a person asked you for this work, stop here and tell them the ticket number: another session builds it."

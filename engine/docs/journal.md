@@ -23,7 +23,7 @@ stores state. Never edit it by hand: the guard denies it.
 |---|---|---|---|
 | `requested` | The ticket is made: `rail add`, intake, a sweep, `rail adopt` | `via` (`add`, `intake`, `sweep`, `adopt`), `channel` (`session`, `github`, `tracker`, `engine`, or the `## Grilling` record's channel), `grilled`, `assumed` (open ASSUMED rows at the start), `filed_by` (the issue's author), `not_taken` (why an issue's whole ticket became a request), `hidden_removed` (how many HTML comments intake took out of the request, when any), `external_id` (the ticket's, when it has one). When grilled: `agent`, `person`, `started`, `confirmed`, `drafts`, and `questions` with each one's `id`, `topic`, `recommended` and `taken` | `rail stats`. A drop mark on the counter branch keeps a copy, since the journal goes with the branch |
 | `accepted` | Ticket lint first passes on an AUTO ticket; a person approves; an amend takes effect | `by` (`engine`, `person`), `via` (`lint`, `label`, `accept`, `amend`, `merge`), `tier`, `contract`, `done`, `scope_paths`, `kinds` (the ids of what the ticket holds that a revert doesn't undo: those its `person_reason` names, in the order written, and those its scope's paths reach; `rail docs kinds`), `note` | The `accepted` state. Ship and CI compare `contract` and `tier` with the ticket: that is the freeze. `via: merge` is a contract pull request that a person merged |
-| `amended` | `rail amend NN` | `contract` (the new hash), `changed` (any of `done_contract`, `scope`, `tier`, `after`), `added_paths`, `needs_approval`, `reason` (when one was given) | When `needs_approval` is true, the ticket waits until a later `accepted` |
+| `amended` | `rail amend NN` | `contract` (the new hash), `changed` (any of `done_contract`, `scope`, `tier`, `after`), `added_paths`, `needs_approval`, `reason` | When `needs_approval` is true, the ticket waits until a later `accepted` |
 | `adopted` | `rail adopt BRANCH FILE` filed the ticket with a branch's work on it | `branch` (the adopted branch), `head` (its head commit, 12 characters) | `rail stats` |
 | `drafting` | `next`, when it hands a session the brief to write an unfinished ticket's contract | `session` | Other sessions leave that contract alone for `[claim] stale_minutes`; `rail next --ticket NN` takes it over |
 | `claimed` | A claim or a takeover inside `next`, or `rail adopt` | `session`, `takeover`, and in a cloud session `session_url` | The `implementing` state. `next` finds this session's ticket by it, and the pull request ends with the last `session_url` |
@@ -58,6 +58,13 @@ A sample:
 {"v":1,"at":"2026-01-11T14:41:13Z","ticket":"14","event":"finding","id":"F1","outcome":"fixed","by":"author","reason":"Both paths now revoke the old token."}
 ```
 
+**Every decision of an agent carries its reason.** `rail answer NN F1 fixed|declined|parked`, `rail amend` of
+an accepted contract and `rail drop` refuse an empty reason from an agent, so a `finding`, `amended` or
+`dropped` event written by one always says why: the next review run, the sweep and `rail stats` read the
+journal, and a decision with no reason tells them only that something happened. A person's act needs none
+(`rail answer ... --owner` on `fixed` and `parked`, `rail drop --by person`): approving is itself the
+reason. Ticket lint refuses a `VERIFIED: decided, not checked:` row with nothing after it.
+
 ## Steps
 
 | `step` | Run at | Fails when |
@@ -85,8 +92,9 @@ A sample:
 since that step last passed or since a person's `continued` or approval, whichever is later. Two attempts in a
 row are the same failure when their `signature`s are equal, or when either has none (an older engine wrote
 it). At `[retry] budget` same failures in a row consult runs once for that step and the agent gets one more
-attempt; if that fails too, the ticket waits for a person. At `[retry] cap` attempts, whatever their
-signatures, the ticket waits for a person (`rail docs retries`).
+attempt; if that fails too, the ticket is stuck. At `[retry] cap` attempts, whatever their signatures, the
+ticket is stuck. A stuck AUTO ticket is dropped with a record; a stuck PERSON ticket waits for a person
+(`rail docs retries`).
 
 **The signature** is `STEP:HASH`. The hash is the first 12 hex characters of the SHA-256 of the tail of the
 failure's output, lower-cased, with absolute paths, temp-folder names, hex strings and runs of digits

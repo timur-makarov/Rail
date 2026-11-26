@@ -402,7 +402,7 @@ class Choosing(RailTest):
         self.assertEqual(p.rail("intake", "--external-id", "PROJ-7", "--title", "Fix totals", "--brief", brief)["created"],
                          ["3"])
         self.assertEqual(p.rail("next", "--ticket", "PROJ-7")["ticket"], "3")
-        self.assertEqual(p.rail("drop", "PROJ-7")["state"], "dropped")
+        self.assertEqual(p.rail("drop", "PROJ-7", "--reason", "not needed")["state"], "dropped")
         self.assertEqual([(t["ticket"], t["state"]) for t in p.rail("status")["tickets"]],
                          [("1", "accepted"), ("2", "implementing"), ("3", "dropped")])
 

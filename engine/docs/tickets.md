@@ -61,7 +61,7 @@ external_id = "github#123"
 - **Two tickets never work the same paths at once.** A ticket whose `scope_paths` overlap those of a ticket
   already under way is accepted and then waits (`SCOPE_OVERLAP`) until that one merges or is dropped. Give
   such tickets an order with `after` when one needs the other's result.
-- **The contract** (Done Contract, scope and tier) freezes at acceptance. `rail amend NN` changes it.
+- **The contract** (Done Contract, scope and tier) freezes at acceptance. `rail amend NN "why"` changes it.
 - **`## Grilling`** is optional: the record of questioning the person who asked for the ticket, written by the
   agent that did it (`rail docs grill`). Ticket lint checks its shape, and `rail stats` counts it.
 

@@ -138,7 +138,7 @@ class Review(RailTest):
         self.medium(p)
         p.queue_reviews(found(BLOCKING), found(BLOCKING | {"repeats": "F1"}, summary="This change made it."))
         p.rail("advance", "1", expect=3)
-        p.rail("answer", "1", "F1", "parked")
+        p.rail("answer", "1", "F1", "parked", "Not from this change.")
         upheld = p.rail("advance", "1", expect=3)
         self.assertEqual(upheld["steps"][-1]["detail"], "run 2: upheld F1")
         # On AUTO no person settles a second dispute: the verdict stands, and it comes back as a failed review.
@@ -162,6 +162,18 @@ class Review(RailTest):
         done = p.rail("answer", "1", "F1", "parked", "The whole module lacks docstrings.")
         self.assertEqual(done["state"], "merge-ready")
         self.assertEqual(len(p.briefs()), 1)
+
+    def test_an_agents_answer_needs_its_reason_and_the_owners_does_not(self):
+        p = self.fixture()
+        self.medium(p)
+        p.queue_reviews(found(ADVISORY))
+        p.rail("advance", "1")
+        for outcome, wanted in (("fixed", "say what you changed"), ("parked", "say why this change didn't cause it")):
+            refused = p.rail("answer", "1", "F1", outcome, expect=2)
+            self.assertEqual(refused["reason"]["code"], "NO_REASON")
+            self.assertIn(wanted, refused["reason"]["message"])
+        self.assertFalse([e for e in events(p, "1-fix-add", "finding") if e.get("outcome") != "open"])
+        self.assertEqual(p.rail("answer", "1", "F1", "parked", "--owner")["state"], "merge-ready")
 
     def test_an_upheld_finding_the_agent_still_disputes_waits_for_a_person_on_a_person_ticket(self):
         p = self.fixture()
@@ -342,7 +354,7 @@ class Retry(RailTest):
         self.assertEqual(p.rail("next")["reason"]["code"], "WAITING_HUMAN")
         path = os.path.join(p.worktree("1"), ".rail", "tickets", "1.md")
         p.write(".rail/tickets/1.md", read(path).replace("== 5", "== 5 and calc.add(1, 1) == 2"), base=p.worktree("1"))
-        self.assertEqual(p.rail("amend", "1")["reason"]["code"], "APPROVE_AMEND")
+        self.assertEqual(p.rail("amend", "1", "the check missed a case")["reason"]["code"], "APPROVE_AMEND")
         approved = p.rail("accept", "1")
         self.assertNotEqual(approved["owner"], "human", approved["reason"]["code"] + " " + approved["action"]["brief"][:300])
 
@@ -414,7 +426,7 @@ class Contract(RailTest):
         p.write(".rail/tickets/1.md", weaker, base=p.worktree("1"))
         failed = p.rail("advance", "1", expect=3)
         self.assertIn("differs from the accepted one; change it with rail amend 1", failed["steps"][0]["detail"])
-        amended = p.rail("amend", "1")
+        amended = p.rail("amend", "1", "the check was wrong")
         self.assertEqual(amended["state"], "implementing")
         record = events(p, "1-fix-add", "amended")[0]
         self.assertEqual((record["changed"], record["needs_approval"]), (["done_contract"], False))
@@ -446,12 +458,12 @@ class Contract(RailTest):
         p.rail("next")
         path = os.path.join(p.worktree("1"), ".rail", "tickets", "1.md")
         p.write(".rail/tickets/1.md", read(path).replace('["src/**"]', '["src/**", "api/**"]'), base=p.worktree("1"))
-        widened = p.rail("amend", "1")
+        widened = p.rail("amend", "1", "the docs need a line too")
         self.assertEqual(widened["reason"]["code"], "IMPLEMENT")
         self.assertEqual(events(p, "1-fix-add", "amended")[0]["added_paths"], ["api/**"])
         text = read(path).replace("== 5", "== 5 and calc.add(0, 0) == 0")
         p.write(".rail/tickets/1.md", text, base=p.worktree("1"))
-        waiting = p.rail("amend", "1")
+        waiting = p.rail("amend", "1", "the check was wrong")
         self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("human", "APPROVE_AMEND"))
         self.assertEqual(p.rail("accept", "1")["reason"]["code"], "IMPLEMENT")
 
@@ -616,7 +628,7 @@ class Split(RailTest):
         with open(os.path.join(wt, ".rail/tickets/1.md")) as f:
             text = f.read()
         p.write(".rail/tickets/1.md", text.replace("calc.add(2, 3) == 5", "calc.add(1, 1) == 2"), base=wt)
-        amended = p.rail("amend", "1")  # an AUTO ticket's narrowed contract needs no person
+        amended = p.rail("amend", "1", "split: the rest moved to its own ticket")  # an AUTO ticket's narrowed contract needs no person
         self.assertEqual((amended["owner"], amended["tier"]), ("agent", "AUTO"))
         self.assertFalse(events(p, "1-fix-add", "amended")[-1]["needs_approval"])
         rest = ticket(title="Add more", front=('after = ["1"]',),

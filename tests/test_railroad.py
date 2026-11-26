@@ -351,7 +351,7 @@ class Claim(RailTest):
         p.write(".env", "TOKEN=local\n", base=p.worktree("1"))
         rerun = p.rail("next", "--ticket", "1")
         self.assertEqual((rerun["reason"]["code"], rerun["steps"][0]["result"]), ("IMPLEMENT", "pass"))
-        p.rail("drop", "1")
+        p.rail("drop", "1", "--reason", "not needed")
         p.add(ticket(title="Fix add again"))
         self.assertEqual(p.rail("next", expect=3)["reason"]["code"], "SETUP_FAILED")  # ticket 2: RAIL_TICKET is 2
         self.assertEqual(read(os.path.join(p.worktree("2"), ".env")), "TOKEN=local\n")
@@ -439,7 +439,7 @@ class Parallel(RailTest):
         p.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
         p.add(ticket(tier="PERSON", front=('after = ["1"]',)))
         p.rail("accept", "2")  # PERSON: a person decides; on AUTO the agent does (test_stuck.py)
-        p.rail("drop", "1")
+        p.rail("drop", "1", "--reason", "not needed")
         waiting = p.rail("next")
         self.assertEqual((waiting["owner"], waiting["waits"][0]["needs"]), ("human", "AFTER_DROPPED"))
 
@@ -561,7 +561,7 @@ class Drop(RailTest):
         self.assertEqual(p.git("branch", "--list", "1-*"), "")
         self.assertEqual(p.add(ticket(title="Fix add again"))["ticket"], "2")
         self.assertEqual([r["state"] for r in p.rail("status")["tickets"]], ["dropped", "accepted"])
-        self.assertEqual(p.rail("drop", "1")["state"], "dropped")
+        self.assertEqual(p.rail("drop", "1", "--reason", "not needed")["state"], "dropped")
 
 
 class Reading(RailTest):
@@ -570,7 +570,7 @@ class Reading(RailTest):
         p.add(ticket())
         p.rail("next")
         p.fix_calc("1")
-        dropped = p.rail("drop", "1")
+        dropped = p.rail("drop", "1", "--reason", "not needed")
         self.assertEqual(dropped["leftovers"][0]["kind"], "worktree")
         self.assertTrue(os.path.exists(p.worktree("1")))
         self.assertEqual(p.rail("next")["leftovers"][0]["ref"], ".claude/worktrees/1")

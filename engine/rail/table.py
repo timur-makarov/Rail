@@ -126,7 +126,7 @@ def _split(f):
         + (f" Push that branch (git push {f.project.remote} split/{nn}-rest): another session may work the later"
            " tickets." if f.project.remote else ""),
         f"2. Narrow this ticket's contract to the first part: in {f.cwd}, edit {ticket_path(nn)} (the Done Contract,"
-        f" and scope_paths if they shrink), then run rail amend {nn}. On an AUTO ticket the engine accepts the"
+        f" and scope_paths if they shrink), then run rail amend {nn} \"why\". On an AUTO ticket the engine accepts the"
         " narrowed contract at once: no person approves it.",
         f"3. File one ticket for each remaining part with rail add: its own Check: lines, after = [\"{nn}\"] (or the"
         f" part before it), a line in ## Request saying it was split from ticket {nn}, and under ## Look at the branch"
@@ -321,7 +321,7 @@ ROWS = [
      lambda f: f"rail next --ticket {f.id}"),
     ("APPROVE_CONTRACT",   "human", "human_wait",  lambda f: f.state == "new",
      lambda f: f"Approve the contract of ticket {f.id} ({f.tier}): read {ticket_path(f.id)} on branch {f.t.name},"
-               f" then run: rail accept {f.id}. To change it, say what to change. To reject it, run: rail drop {f.id}"
+               f" then run: rail accept {f.id}. To change it, say what to change. To reject it, run: rail drop {f.id} --by person"
                + (f" On GitHub: {_pr(f)} shows the contract; the label rail:go approves it, a comment asks for a"
                   f" change, and closing it rejects it." if f.pr_open else "")),
     # On AUTO no person is asked: whether the ticket stands without the dropped one is the contract writer's call,
@@ -333,7 +333,7 @@ ROWS = [
                f" it\" --file FILE. If it doesn't, drop it: rail drop {f.id} --reason \"why\"."),
     ("AFTER_DROPPED",      "human", "human_wait",  lambda f: f.state == "accepted" and f.after_dropped,
      lambda f: f"Ticket {f.id} comes after ticket {_join(f.after_dropped)}, which was dropped. A person decides:"
-               f" remove it from `after` (rail amend {f.id} --file FILE), or drop ticket {f.id}."),
+               f" remove it from `after` (rail amend {f.id} \"why\" --file FILE), or drop ticket {f.id}."),
     ("WAITING_AFTER",      "none",  "rest",        lambda f: f.state == "accepted" and f.after_open,
      lambda f: f"Ticket {f.id} waits for ticket {_join(f.after_open)} to merge."),
     ("SCOPE_OVERLAP",      "none",  "rest",        lambda f: f.state == "accepted" and f.overlaps,

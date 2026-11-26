@@ -108,7 +108,7 @@ class InASession(RailTest):
         with open(changed, "w") as f:
             f.write(ticket(check="python3 -c 'import sys; sys.path.insert(0, \"src\"); import calc; assert calc.add(-1, 1) == 0'",
                            front=('id = "1"',), body=GRILLING.replace("Channel: slack", "Channel: session")))
-        p.rail("amend", "1", "--file", changed)
+        p.rail("amend", "1", "the person asked for the negative case", "--file", changed)
         p.queue_reviews({"summary": "Clean.", "findings": []})
         p.rail("advance", "1")
         self.assertEqual(p.rail("advance", "1")["state"], "merged")
