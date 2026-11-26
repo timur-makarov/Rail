@@ -67,7 +67,7 @@ Advisory findings: 1. Declined 1.
 Disputes: 1. The refuter dismissed 1. Refuter overturns: 100%.
 Rounds to pass: median 1.5 review runs for each ticket the reviewer read; 50% merged after one run.
 Evidence reproduced: 1 of 2 blocking findings whose evidence the engine ran again (50%).
-PERSON tickets where the person changed nothing, by why they were PERSON: at add 1 of 1.
+PERSON tickets where the person changed nothing, by why they were PERSON: access 1 of 1.
 ```
 
 ## What each line counts
@@ -93,6 +93,8 @@ PERSON tickets where the person changed nothing, by why they were PERSON: at add
 | `Adopted from a branch with no ticket` | Tickets with an `adopted` event: work that came in through `rail adopt` (`rail docs adopt`). In JSON, `adopted`. Shown when there is one |
 | `Offered a split over [size] cap` | Tickets with a `split_offered` event, then those that shipped AUTO afterwards (and those an older engine made PERSON for `size`, when there are any). In JSON, `split`: `offered`, `auto`, `person`. Shown when there is one |
 | `AUTO tickets over [size] cap` | Merged AUTO tickets whose last `shipped` size is over the cap the config sets now, and how many were reverted afterwards or named in a later ticket's `caused_by`; then the same two numbers for those under it. Size raises no tier, so this is what a large AUTO change costs. In JSON, `size`: `cap`, `over` and `under`, each with `merged` and `reverted_or_fixed`. Shown when one merged over the cap |
+| `AUTO tickets that held a kind` | Merged AUTO tickets that a later PERSON ticket names in `caused_by`, by the kinds that later ticket holds. Such a ticket did something a revert doesn't undo and nobody was asked: it is the opposite mistake to a PERSON ticket where the person changed nothing. In JSON, `auto_held_a_kind`: `tickets`, `kinds`. Shown when there is one |
+| `Dropped` | Dropped tickets (those requested on or after `--since`), by who dropped them: the engine at the retry cap (`rail docs retries`), an agent, or a person; and for the engine's drops the step that kept failing. Read from the drop marks, which outlive the tickets' branches. In JSON, `drops`: `total`, `by`, `stuck_steps`. Shown when there is one |
 | `Became PERSON at ship or review` | `tier_raised` events, by reason: `kinds`, `person_paths`, `migration_paths`, `reviewer` (`size` from an older engine). Such a ticket counts under PERSON |
 | `STEPS THAT FAILED` | For each step that failed at least once: its runs, the failed ones, and the ones the shell couldn't start |
 | `Consult ran` | `consulted` events |
@@ -112,7 +114,7 @@ PERSON tickets where the person changed nothing, by why they were PERSON: at add
 | `Refuter overturns` | Disputes the refuter dismissed or parked, divided by all disputes. In JSON, `review.refuter_overturns` |
 | `Rounds to pass` | `review` runs stored in the journal (runs with a verdict; a timeout or invalid output is not one) for each merged ticket the reviewer read: the median, and the share of those tickets merged after one run. In JSON, `review.rounds`: `tickets`, `median`, `one_run` |
 | `Evidence reproduced` | Blocking findings (review and security) whose evidence, as the run that first reported them gave it, the engine ran again after the review (`evidence.reproduced` in the journal, `rail docs journal`), and how many of those re-runs showed every line the reviewer quoted. Findings from before the engine ran evidence again are left out. In JSON, `review.evidence`: `rerun`, `reproduced`, `share` |
-| `PERSON tickets where the person changed nothing` | For each reason a merged PERSON ticket was PERSON (`at add` when its first acceptance was already PERSON, else the `tier_raised` reasons; a ticket counts under each of its reasons): its tickets, and those where the person changed nothing. That is: no `accept` or `rail:go` with a note, no finding the person decided, no amend after the person's first act, and no new patch shipped after the person's first act once the work had shipped. A contract approval before the work is not that act, since every commit follows it. In JSON, `person_changed_nothing` |
+| `PERSON tickets where the person changed nothing` | For each kind a merged PERSON ticket held (`rail docs kinds`): the `kinds` of its first acceptance when that was already PERSON, and the kind of each `tier_raised` event; a ticket counts under each of its kinds. A journal of an older engine names no kind, and counts under `at add` or the event's reason: its tickets, and those where the person changed nothing. That is: no `accept` or `rail:go` with a note, no finding the person decided, no amend after the person's first act, and no new patch shipped after the person's first act once the work had shipped. A contract approval before the work is not that act, since every commit follows it. In JSON, `person_changed_nothing` |
 
 ## When a line says to remove something
 
@@ -123,7 +125,7 @@ out; read them over the stated number of tickets, not fewer.
 |---|---|
 | `Evidence reproduced` | Under 5% over 50 or more blocking findings with re-run evidence: the engine's re-run of the evidence buys nothing |
 | `Refuter overturns` | 0% over 50 or more disputes: the refuter always upholds, so it only costs a run |
-| `PERSON tickets where the person changed nothing` | 95% or more over 20 or more tickets of one reason, and none of them reverted or named in a later ticket's `caused_by`: that reason may stop making a ticket PERSON. It is policy, so the owner decides |
+| `PERSON tickets where the person changed nothing` | 95% or more over 20 or more tickets of one kind, and none of them reverted or named in a later ticket's `caused_by`: the paths that mark that kind reach changes that don't hold it, so they may be narrowed. It is policy, so the owner decides |
 | `Rounds to pass` | No removal test: it reads as convergence, and a rise after a change to the reviewer or the worker shows the change cost rounds |
 
 ## Guides

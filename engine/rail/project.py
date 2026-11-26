@@ -69,6 +69,7 @@ class TicketInfo:
         self.on_base = False       # the ticket file is on the base branch
         self.dropped_mark = False  # the counter branch says the ticket was dropped: it outlives the ticket's branch
         self.dropped_request = None  # the `requested` event the drop mark keeps, so stats still sees where it came from
+        self.dropped_record = None   # who dropped it and why, and the step the engine stopped at, from the drop mark
         self.remote_events = []    # the remote branch's journal, when it differs from the local branch's
 
     @property
@@ -150,6 +151,8 @@ class Project:
                 except ValueError:
                     kept = None
                 found[nn].dropped_request = kept if isinstance(kept, dict) and kept.get("event") == "requested" else None
+                record = kept.get("dropped") if isinstance(kept, dict) else None
+                found[nn].dropped_record = record if isinstance(record, dict) else None
 
         base = self.base_ref
         if gitx.rev(base, self.root):

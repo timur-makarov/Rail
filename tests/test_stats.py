@@ -80,7 +80,7 @@ class Stats(RailTest):
         self.assertEqual(review["refuter_overturns"], 1.0)
         self.assertEqual(review["rounds"], {"tickets": 2, "median": 1.5, "one_run": 0.5})  # 1 ran twice, 3 once
         self.assertEqual(review["evidence"], {"rerun": 2, "reproduced": 1, "share": 0.5})
-        self.assertEqual(stats["person_changed_nothing"], {"at add": {"tickets": 1, "changed_nothing": 1}})
+        self.assertEqual(stats["person_changed_nothing"], {"controls": {"tickets": 1, "changed_nothing": 1}})
 
         text = p.rail("stats", raw=True).stdout
         for line in ("Rail stats: 3 merged tickets. Not counted: 1 not merged.",
@@ -96,7 +96,7 @@ class Stats(RailTest):
                      "Disputes: 1. The refuter dismissed 1. Refuter overturns: 100%.",
                      "Rounds to pass: median 1.5 review runs for each ticket the reviewer read; 50% merged after one run.",
                      "Evidence reproduced: 1 of 2 blocking findings whose evidence the engine ran again (50%).",
-                     "PERSON tickets where the person changed nothing, by why they were PERSON: at add 1 of 1."):
+                     "PERSON tickets where the person changed nothing, by why they were PERSON: controls 1 of 1."):
             self.assertIn(line, text)
         self.assertEqual(p.git("status", "--porcelain"), "")  # stats only reads
 
@@ -173,6 +173,19 @@ class PersonChangedNothing(RailTest):
             "an amend": (journal(APPROVED, ("amended", {"changed": ["done_contract"]}), ("shipped", {"patch_id": "a"})),
                          False, ["at add"]),
         }
+        kinds = {
+            # The kinds the ticket held when it was filed, and the one a changed file added at ship.
+            "kinds at add": (journal(("accepted", {"by": "person", "tier": "PERSON", "kinds": ["access", "money"]}),
+                                     ("tier_raised", {"reason": "kinds", "kind": "data-shape"})),
+                             ["access", "money", "data-shape"]),
+            "the reviewer": (journal(("accepted", {"by": "engine", "tier": "AUTO", "kinds": []}),
+                                     ("tier_raised", {"reason": "reviewer", "kind": "data-exposure",
+                                                      "kinds": ["data-exposure", "external-effect"]})),
+                             ["data-exposure", "external-effect"]),
+        }
+        for name, (t, reasons) in kinds.items():
+            with self.subTest(name):
+                self.assertEqual(stats._person_reasons(t), reasons)
         for name, (t, nothing, reasons) in cases.items():
             with self.subTest(name):
                 self.assertEqual(stats._person_changed_nothing(t), nothing)
@@ -379,3 +392,38 @@ class WhereTheTimeGoes(RailTest):
             self.assertIn(key, keys)
         self.assertIn("WHERE THE TIME GOES", answer["text"])
         self.assertIn("waiting for a person, MERGE_BY_PERSON", answer["text"])
+
+
+class Responsibility(RailTest):
+    def test_an_auto_ticket_whose_fix_is_a_person_ticket_with_a_kind_held_that_kind(self):
+        p = self.fixture()
+        p.add(ticket())
+        p.rail("next")
+        p.fix_calc("1")
+        p.queue_reviews(clean())
+        p.rail("advance", "1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
+        p.add(ticket(title="Stored sums changed shape", tier="PERSON", front=('caused_by = "1"',)))
+        answer = p.rail("stats")
+        self.assertEqual(answer["stats"]["auto_held_a_kind"], {"tickets": 1, "kinds": {"data-shape": 1}})
+        self.assertIn("AUTO tickets that held a kind (a later PERSON ticket names one as its cause): 1 (data-shape 1).",
+                      answer["text"])
+
+    def test_drops_are_counted_from_the_marks_once_the_branches_are_gone(self):
+        from test_stuck import CAPPED, fail_twice
+        a, b, github = self.github_pair(config=CAPPED)
+        a.add(ticket())
+        a.rail("next")
+        fail_twice(a)
+        self.assertEqual(a.rail("next", "--ticket", "1")["state"], "dropped")  # the engine, at the retry cap
+        a.add(ticket(title="Other", scope=("api/**",), check="grep -q 201 api/handlers.py"))
+        a.rail("drop", "2", "--reason", "not needed")
+        a.add(ticket(title="Third", scope=("docs/**",), check="grep -q sum docs/guide.md"))
+        a.rail("drop", "3", "--by", "person")
+        self.assertEqual(a.git("branch", "--list", "[123]-*"), "")
+        b.rail("status")  # another clone, which never had the branches
+        answer = b.rail("stats")
+        self.assertEqual(answer["stats"]["drops"], {"total": 3, "by": {"agent": 1, "engine": 1, "person": 1},
+                                                    "stuck_steps": {"checks": 1}})
+        self.assertIn("Dropped: 3. By the engine at the retry cap 1, by an agent 1, by a person 1. The engine's drops,"
+                      " by the step that kept failing: checks 1.", answer["text"])

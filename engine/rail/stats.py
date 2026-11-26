@@ -161,11 +161,44 @@ def _profiles_of(project, t):
 
 
 def _person_reasons(t):
-    """Why a PERSON ticket was PERSON: `at add` when its first acceptance was already PERSON, and the reason of each
-    `tier_raised` event."""
+    """Why a PERSON ticket was PERSON: the kinds it held (rail docs kinds). Those its first acceptance names when
+    that was already PERSON, and those of each `tier_raised` event. A journal that names no kind, as an older
+    engine's doesn't, gives `at add` and the event's reason instead."""
     first = next((e for e in t.events if e.get("event") == "accepted"), {})
-    reasons = ["at add"] if first.get("tier") == "PERSON" else []
-    return list(dict.fromkeys(reasons + [e.get("reason") or "?" for e in t.events if e.get("event") == "tier_raised"]))
+    reasons = list(first.get("kinds") or ["at add"]) if first.get("tier") == "PERSON" else []
+    for e in t.events:
+        if e.get("event") == "tier_raised":
+            reasons += e.get("kinds") or [e.get("kind") or e.get("reason") or "?"]
+    return list(dict.fromkeys(reasons))
+
+
+def drops(tickets, start):
+    """The dropped tickets requested on or after `start`: who dropped them, and for the engine's drops at the retry
+    cap the step each stopped at. Read from the drop marks, which outlive the tickets' branches, and from the
+    journal of a drop whose mark isn't written yet."""
+    by, steps_ = Counter(), Counter()
+    for t in tickets.values():
+        record = t.dropped_record or (t.last("dropped") if not t.merged else None)
+        if not record:
+            continue
+        req = next((e for e in t.events if e.get("event") == "requested"), None) or t.dropped_request
+        if start is not None and (not req or parse_iso(req["at"]).timestamp() < start):
+            continue
+        by[record.get("by") or "?"] += 1
+        if record.get("by") == "engine":
+            steps_[record.get("step") or "?"] += 1
+    return {"total": sum(by.values()), "by": dict(sorted(by.items())), "stuck_steps": dict(sorted(steps_.items()))}
+
+
+def _held_a_kind(tickets):
+    """{id of a ticket: the kinds a later PERSON ticket that names it in caused_by holds}. Such a ticket did
+    something a revert doesn't undo: when it merged AUTO, nobody was asked."""
+    found = {}
+    for t in tickets.values():
+        cause = str(t.ticket.get("caused_by") or "") if t.ticket else ""
+        if cause and t.ticket.tier == "PERSON" and t.ticket.kinds:
+            found.setdefault(cause, []).extend(t.ticket.kinds)
+    return found
 
 
 def _person_changed_nothing(t):
@@ -281,6 +314,7 @@ def collect(project, tickets, since=None, states=None, now=None):
     old = (now if now is not None else time.time()) - held_days * 86400
     outcomes = {tier: _outcome_row() for tier in TIERS}
     by_worker, by_profile, names_cause, counted = {}, {}, 0, []
+    fixed_by_person, under = _held_a_kind(tickets), {"tickets": 0, "kinds": Counter()}
     for nn, t in tickets.items():
         ships = [e for e in t.events if e.get("event") == "shipped"]
         tier = (ships[-1] if ships else t.last("accepted") or {}).get("tier")
@@ -304,6 +338,9 @@ def collect(project, tickets, since=None, states=None, now=None):
         person = any(e.get("event") == "continued" or (e.get("event") == "accepted" and e.get("by") == "person")
                      or (e.get("event") == "finding" and e.get("by") == "owner") for e in t.events)
         row["no_person"] += tier == "AUTO" and not person
+        if tier == "AUTO" and nn in fixed_by_person:
+            under["tickets"] += 1
+            under["kinds"].update(set(fixed_by_person[nn]))
         row["first_try"] += _first_try(t, ships)
         row["reverted"] += nn in reverted
         if tier == "AUTO" and ships and isinstance(ships[-1].get("size"), int):
@@ -394,7 +431,9 @@ def collect(project, tickets, since=None, states=None, now=None):
         "outcomes": {"held_days": held_days, "tiers": {tier: _outcome_done(row) for tier, row in outcomes.items()},
                      "names_cause": names_cause, "by_worker": _split(by_worker), "by_profile": _split(by_profile)},
         "time": timing.collect(tickets, merged_at, counted),
-        "tiers": tiers, "raised": dict(raised),
+        "tiers": tiers, "raised": dict(raised), "drops": drops(tickets, start),
+        # AUTO tickets a later PERSON ticket names as its cause, by that ticket's kinds: nobody was asked.
+        "auto_held_a_kind": {"tickets": under["tickets"], "kinds": dict(sorted(under["kinds"].items()))},
         "base_checks": base, "adopted": adopted, "split": split, "size": {"cap": cap, **sizes},
         "guides": {"situations": dict(sorted(situations.items()))},
         "grilling": grilling(tickets, states or {}, merged_at, start),
@@ -491,6 +530,21 @@ def render_grilling(data):
     return lines
 
 
+DROPPED_BY = (("engine", "by the engine at the retry cap"), ("agent", "by an agent"), ("person", "by a person"),
+              ("?", "with no record of who"))
+
+
+def render_drops(data):
+    found = data["drops"]
+    if not found["total"]:
+        return []
+    line = f"Dropped: {found['total']}. " + _listed(found["by"], DROPPED_BY)
+    if found["stuck_steps"]:
+        line += " The engine's drops, by the step that kept failing: " + ", ".join(
+            f"{step} {n}" for step, n in found["stuck_steps"].items()) + "."
+    return [line]
+
+
 def render_sources(data):
     rows = data["sources"]
     head = ["filed", "merged", "reverted", "dropped", "open"]
@@ -537,7 +591,7 @@ def render_outcomes(data):
 def render(data):
     when = f" since {data['since']}" if data["since"] else ""
     if not data["merged"]:
-        grill = render_sources(data) + render_grilling(data)
+        grill = render_drops(data) + render_sources(data) + render_grilling(data)
         if grill:
             return "\n".join([f"Rail stats: no ticket has merged{when} yet.", *grill])
         return f"No ticket has merged{when}, so there is nothing to count yet."
@@ -568,11 +622,16 @@ def render(data):
         split = data["split"]
         lines.append(f"Offered a split over [size] cap: {split['offered']}. Shipped AUTO afterwards: {split['auto']}."
                      + (f" Became PERSON for size, under an older engine: {split['person']}." if split["person"] else ""))
+    held = data["auto_held_a_kind"]
+    if held["tickets"]:
+        lines.append(f"AUTO tickets that held a kind (a later PERSON ticket names one as its cause): {held['tickets']}"
+                     f" ({', '.join(f'{kind} {n}' for kind, n in held['kinds'].items())}).")
     over, under = data["size"]["over"], data["size"]["under"]
     if over["merged"]:
         lines.append(f"AUTO tickets over [size] cap of {data['size']['cap']}: {over['merged']} merged,"
                      f" {over['reverted_or_fixed']} reverted or named in a later ticket's caused_by. Under it:"
                      f" {under['merged']} merged, {under['reverted_or_fixed']}.")
+    lines += render_drops(data)
     failed = [[name, s["runs"], s["failed"], s["could_not_run"]] for name, s in data["steps"].items()
               if s["failed"] or s["could_not_run"]]
     lines.append("")
