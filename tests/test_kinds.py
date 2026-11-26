@@ -35,6 +35,19 @@ class Kinds(RailTest):
         accepted = events(p, "1-check-the-role", "accepted")[-1]
         self.assertEqual((accepted["tier"], accepted["kinds"]), ("PERSON", ["access"]))
 
+    def test_a_scope_reaching_several_kinds_names_each_once_with_its_first_path(self):
+        # data-loss is reached twice, through [kinds] and through migration_paths: one part, with the first path.
+        config = ('migration_paths = ["db/migrations/**"]\n[kinds]\naccess = ["src/auth/**"]\n'
+                  'data-loss = ["db/drop/**"]\n\n' + CONFIG)
+        files = dict(AUTH, **{"db/drop/a.sql": "drop table a;\n", "db/migrations/1.sql": "alter table b;\n"})
+        p = self.fixture(config=config, files=files)
+        added = p.add(ticket(title="Check the role", scope=("src/auth/**", "db/**")))
+        self.assertEqual(added["tier"], "PERSON")
+        self.assertIn('person_reason = "data-loss: db/drop/a.sql; access: src/auth/x.py"',
+                      front(p, "1-check-the-role"))
+        p.rail("accept", "1")
+        self.assertEqual(events(p, "1-check-the-role", "accepted")[-1]["kinds"], ["data-loss", "access"])
+
     def test_an_authors_person_reason_is_kept(self):
         p = self.fixture(config=ACCESS + CONFIG, files=AUTH)
         p.add(ticket(title="Check the role", tier="PERSON", scope=("src/auth/**",),

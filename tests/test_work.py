@@ -3,6 +3,7 @@ run. The worker is tests/fake_worker.py, which prints what the test queues in th
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -350,3 +351,51 @@ class Sweep(RailTest):
         self.assertEqual(p.rail("advance", "3")["state"], "merged")
         self.assertIn("Sweep: since", p.git("log", "-1", "--format=%b", "main"))
         self.assertEqual([t["title"] for t in p.rail("status")["tickets"]][-1], "Add subtract")
+
+
+class AfterDropped(RailTest):
+    """Ticket 2 comes after ticket 1, and ticket 1 is dropped: on AUTO the decision is the contract writer's, and a
+    script that drives Rail with next, work and advance goes through it."""
+
+    def chain(self):
+        p = self.fixture(config=WORK)
+        p.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
+        p.add(ticket(front=('after = ["1"]',)))
+        p.rail("drop", "1", "--reason", "not needed")
+        task = p.rail("next")
+        self.assertEqual((task["ticket"], task["reason"]["code"]), ("2", "AFTER_DROPPED"))
+        return p
+
+    def test_the_worker_keeps_the_ticket_and_the_chain_goes_on_to_merge(self):
+        p = self.chain()
+        written = os.path.join(self.tmp, "2.md")
+        p.queue_work({"write": {written: ticket()}, "run": [rail_in_worker("amend", "2", shlex.quote("add stands alone"),
+                                                                            "--file", written)]})
+        done = p.rail("work", "2")
+        self.assertEqual((done["reason"]["code"], done["action"]["command"]), ("WORKED", "rail advance 2"))
+        ran = p.work_log()[-1]
+        self.assertEqual((ran["cwd"], ran["env"]["RAIL_MODEL"], ran["env"]["RAIL_EFFORT"]),
+                         (p.root, "claude-opus-5-5", "high"))
+        self.assertIn("rail amend 2", ran["brief"])
+        self.assertEqual(ran["ran"][0]["code"], 0, ran["ran"][0]["output"])
+        worked = events(p, ref="2-fix-add", name="worked", nn="2")
+        self.assertEqual((worked[0]["code"], worked[0]["model"]), ("AFTER_DROPPED", "claude-opus-5-5"))
+        after = p.rail("advance", "2")
+        self.assertNotEqual(after["reason"]["code"], "AFTER_DROPPED")
+        told = p.rail("next")
+        self.assertEqual(told["reason"]["code"], "IMPLEMENT")
+        p.queue_work({"write": {"src/calc.py": FIXED}})
+        p.rail("work", "2")
+        p.rail("advance", "2")
+        self.assertEqual(p.rail("advance", "2")["state"], "merged")
+
+    def test_the_worker_drops_the_ticket_and_the_chain_ends(self):
+        p = self.chain()
+        p.queue_work({"run": [rail_in_worker("drop", "2", "--reason", shlex.quote("it only made sense with the status code"))]})
+        done = p.rail("work", "2")
+        self.assertEqual(done["reason"]["code"], "WORKED")
+        self.assertEqual(p.work_log()[-1]["ran"][0]["code"], 0, p.work_log()[-1]["ran"][0]["output"])
+        self.assertEqual([e["code"] for e in events(p, ref="2-fix-add", name="worked", nn="2")], ["AFTER_DROPPED"])
+        after = p.rail("advance", "2")
+        self.assertEqual(after["state"], "dropped")
+        self.assertEqual(p.rail("next")["reason"]["code"], "NO_WORK")
