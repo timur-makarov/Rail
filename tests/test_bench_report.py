@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import threading
+import time
 import unittest
 import urllib.request
 
@@ -151,8 +152,14 @@ class Relay(unittest.TestCase):
             with urllib.request.urlopen(req) as resp:
                 self.assertEqual(resp.status, 200)
             listener.close()
-            with open(os.path.join(tmp, "proxy-worker.jsonl")) as f:
-                self.assertEqual(json.loads(f.readline())["usage"]["output"], 12)
+            # The proxy writes its log line after it has answered: wait for the whole line, not only for the answer.
+            log, line, until = os.path.join(tmp, "proxy-worker.jsonl"), "", time.monotonic() + 10
+            while not line.endswith("\n") and time.monotonic() < until:
+                time.sleep(0.05)
+                if os.path.exists(log):
+                    with open(log) as f:
+                        line = f.readline()
+            self.assertEqual(json.loads(line)["usage"]["output"], 12)
         finally:
             proxies["worker"].close()
             up.close()
