@@ -30,10 +30,11 @@ from . import grade as grademod
 from . import netlock, proxy, rail_install, runs, sealed, taint, tomlw
 from .common import BENCH, BenchError, Clock, git, kill, now_iso, run, write
 
+# engine/rail/work.py CODES: the briefs rail work runs
 WORK_CODES = ("TICKET_LINT", "VERIFY_ASSUMPTIONS", "IMPLEMENT", "STEP_FAILED", "RED_CHECK", "ANSWER_FINDINGS", "CONFLICT",
-              "REBASING", "SPLIT", "SWEEP_TICKETS")  # engine/rail/work.py CODES: the briefs rail work runs
+              "REBASING", "SPLIT", "SWEEP_TICKETS", "AFTER_DROPPED")
 # engine/rail/cli.py worker(): the briefs that run on [worker] contract's model, so on the arm's contract role
-CONTRACT_CODES = ("TICKET_LINT", "SWEEP_TICKETS")
+CONTRACT_CODES = ("TICKET_LINT", "SWEEP_TICKETS", "AFTER_DROPPED")
 PERSON_WAITS = ("APPROVE_CONTRACT", "APPROVE_AMEND", "MERGE_BY_PERSON")
 REVIEW_STEPS = ("review", "security", "refuter")
 AGAIN = re.compile(r"rate[ _-]?limit|overloaded|\b429\b|\b529\b|usage limit", re.I)

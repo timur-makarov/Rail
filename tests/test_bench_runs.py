@@ -266,7 +266,7 @@ class Plain(BenchTest):
     def test_a_brief_on_the_contract_model_runs_as_the_contract_role(self):
         # Rail runs the sweep's ticket filing on [worker] contract, as it does the contract: so does the bench.
         self.assertEqual({code: driver.role_of(code) for code in driver.WORK_CODES},
-                         {code: "contract" if code in ("TICKET_LINT", "SWEEP_TICKETS") else "worker"
+                         {code: "contract" if code in ("TICKET_LINT", "SWEEP_TICKETS", "AFTER_DROPPED") else "worker"
                           for code in driver.WORK_CODES})
 
     def test_the_done_rule(self):
