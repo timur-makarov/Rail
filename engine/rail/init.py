@@ -57,7 +57,8 @@ INIT_TASK = """Rail is installed, and this project isn't set up for it yet: .rai
 6. [tools.NAME] in .rail/config.toml: one table for each thing the work reaches outside the repository (a service
    with a key, a CLI that signs in, an MCP server): `use`, one line the agents read; `env`, the names of the
    variables it needs, never a value; `probe`, a fast command that changes nothing and fails when the tool is out
-   of reach.{tools} Leave it out when the work reaches nothing.
+   of reach; `ci = true` only for a test or dev key that a pull request's run may be given, with its line in
+   .github/workflows/rail.yml.{tools} Leave it out when the work reaches nothing.
 If the project already has its own agent workflow, hooks, guards, CI gates or repo map, list them and ask the
 person whether to keep, merge or retire each one; until they decide, both run, and a hook of theirs may block a
 step below. Then ask the person to make that commit.
@@ -93,7 +94,8 @@ once by reading and merging one pull request. {profiles}Read the repository to l
 5. [tools.NAME] in .rail/config.toml: one table for each thing the work reaches outside the repository (a service
    with a key, a CLI that signs in, an MCP server): `use`, one line the agents read; `env`, the names of the
    variables it needs, never a value; `probe`, a fast command that changes nothing and fails when the tool is out
-   of reach.{tools} Leave it out when the work reaches nothing.
+   of reach; `ci = true` only for a test or dev key that a pull request's run may be given, with its line in
+   .github/workflows/rail.yml.{tools} Leave it out when the work reaches nothing.
 If the project already has its own agent workflow, hooks, guards, CI gates or repo map, leave them running and list
 them in the pull request for the person to decide: keep, merge or retire.
 Then commit what rail init added together with these changes to a new branch, push it, and open a pull request with

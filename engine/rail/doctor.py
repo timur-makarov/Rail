@@ -113,6 +113,7 @@ def checks(project):
                       f"not on this machine: {', '.join(gone)}; a sensor whose tool is missing can't run at ship"))
     from . import tools as toolsmod
     found += toolsmod.doctor(project)
+    found += toolsmod.doctor_workflows(project)
     guides = {key: path for key, path in project.config["guides"].items() if path}
     if guides:
         from .docs import read_part
@@ -137,6 +138,8 @@ def checks(project):
         else:
             for name, passed, detail in forge.doctor_checks(project, repo):
                 found.append((name, passed, detail))
+            if found[-1][0] != "gh":  # gh reads the repository
+                found += toolsmod.github_checks(project, repo)
     return found
 
 

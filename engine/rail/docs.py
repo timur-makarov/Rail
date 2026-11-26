@@ -97,8 +97,8 @@ READERS = {
                        " other than Claude Code reads SKILL.md files from a folder of its own: add it, and run rail"
                        " init again. The [guides] pages that are skills name the first",
     "tools": "next, advance, review and doctor: a [tools.NAME] table for each thing the work reaches outside the"
-             " repository, listed in the briefs; a ticket is not claimed while a name in its `env` is not set"
-             " (rail docs tools)",
+             " repository, listed in the briefs; a ticket is not claimed while a name in its `env` is not set, and"
+             " only the key of a tool with `ci = true` may be in a ticket branch's reach (rail docs tools)",
     "profiles": "nothing yet: the language profiles rail init found, each a name and the paths that hold its files"
                 " (rail docs languages)",
     "guides.start": "next and advance: the page whose text a ticket's first IMPLEMENT brief carries, once per"

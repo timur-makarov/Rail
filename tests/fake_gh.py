@@ -11,7 +11,7 @@ import os
 import subprocess
 import sys
 import time
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 def git(bare, *args, input=None):
@@ -204,6 +204,25 @@ def handle(state, method, path, body):
         log = state.get("logs", {}).get(rest[2])  # plain text, as GitHub sends a job's log
         print(log if log is not None else json.dumps({"message": "Not Found"}))
         return 0 if log is not None else 1
+    if rest in (["actions", "secrets"], ["actions", "organization-secrets"]) and method == "GET":
+        if state.get("secrets_status"):  # a token that may not list secrets
+            return respond(state["secrets_status"], {"message": "Resource not accessible by integration"})
+        names = state.get("secrets" if rest[1] == "secrets" else "org_secrets", [])
+        return respond(200, {"total_count": len(names), "secrets": [{"name": n} for n in names]})
+    if rest == ["environments"] and method == "GET":
+        found = [{"name": e["name"], "deployment_branch_policy": None if e.get("branches") is None else {
+            "protected_branches": e["branches"] == "protected", "custom_branch_policies": e["branches"] != "protected"}}
+            for e in state.get("environments", [])]
+        return respond(200, {"total_count": len(found), "environments": found})
+    if len(rest) == 3 and rest[0] == "environments" and method == "GET":
+        env = next((e for e in state.get("environments", []) if e["name"] == unquote(rest[1])), None)
+        if env and rest[2] == "secrets":
+            return respond(200, {"total_count": len(env.get("secrets", [])),
+                                 "secrets": [{"name": n} for n in env.get("secrets", [])]})
+        if env and rest[2] == "deployment-branch-policies":
+            rows = [{"name": b, "type": "branch"} if isinstance(b, str) else b for b in env.get("branches") or []]
+            return respond(200, {"total_count": len(rows), "branch_policies": rows})
+        return respond(404, {"message": "Not Found"})
     if len(rest) == 3 and rest[0] == "rules" and rest[1] == "branches":
         required = [{"context": c} for c in state.get("required", [])]
         rules = [{"type": "required_status_checks", "parameters": {"required_status_checks": required}}] if required else []

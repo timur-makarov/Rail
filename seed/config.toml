@@ -128,6 +128,7 @@ setup = ".claude/skills/rail-verify/SKILL.md"
 # env = ["PAY_TEST_KEY"]                  # repository (rail docs tools). Names only, never values: a ticket is
 # probe = 'curl -sf -u "$PAY_TEST_KEY:" https://api.example.com/v1/balance >/dev/null'   # not claimed while one
 # review = false                          # is not set. true: the reviewer, the refuter and consult are told too
+# ci = false                              # true: a test or dev key that a pull request's run may be given
 
 # [[sensors]]                             # reader: ship and CI, last; a tool whose output lines fail the ship when
 # id = "duplication"                      # they are on lines the change adds (rail docs sensors). None is on by default

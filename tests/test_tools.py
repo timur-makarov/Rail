@@ -1,6 +1,7 @@
 """Tools: what the work reaches outside the repository is declared, listed in the briefs, and checked before a claim."""
 
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -112,6 +113,120 @@ class Doctor(RailTest):
                          ("pass", "RAIL_TEST_PAY_KEY set; its probe passed"))
         self.assertEqual((found["tool errors"]["result"], found["tool errors"]["detail"]),
                          ("pass", "RAIL_TEST_ERRORS_TOKEN set; no probe"))
+
+
+CI_TOOL = TOOLS.replace("probe = 'test", "ci = true\nprobe = 'test")
+PASSED = "          RAIL_TEST_PAY_KEY: ${{ secrets.RAIL_TEST_PAY_KEY }}\n"
+
+
+class Secrets(RailTest):
+    """A ticket branch runs its own copy of every workflow: only the key of a tool declared ci = true may be in reach."""
+
+    def doctor(self, p, **kw):
+        return {s["step"]: s for s in p.rail("doctor", expect=None, env_extra=SET, **kw)["steps"]}
+
+    def test_a_run_a_pull_request_starts_is_given_only_the_keys_declared_for_ci(self):
+        p = self.fixture(config=CONFIG + CI_TOOL)
+        workflow = open(p.path(".github/workflows/rail.yml")).read()
+        self.assertNotIn("pull request secrets", self.doctor(self.fixture(name="plain")))  # nothing to say
+        # The seed's workflow names an example in a comment, which is no reference; the declared key is not passed yet.
+        found = self.doctor(p)["pull request secrets"]
+        self.assertEqual((found["result"], found["detail"]), (
+            "fail", ".github/workflows/rail.yml doesn't pass RAIL_TEST_PAY_KEY, declared ci = true, so a check that"
+                    " needs it fails in CI: add `RAIL_TEST_PAY_KEY: ${{ secrets.RAIL_TEST_PAY_KEY }}` to the env of the"
+                    " step that runs rail ci"))
+        p.write(".github/workflows/rail.yml", workflow + PASSED)
+        found = self.doctor(p)["pull request secrets"]
+        self.assertEqual((found["result"], found["detail"]), (
+            "pass", "a run a pull request starts is given only keys declared ci = true: RAIL_TEST_PAY_KEY"))
+        # A key no tool declares for CI, however it is spelled.
+        for line, said in (
+                ("          DEPLOY: ${{ secrets.DEPLOY_KEY }}\n", "gives a run a pull request starts DEPLOY_KEY, which no"
+                                                                  " tool declares with ci = true"),
+                ("          DEPLOY: ${{ secrets['DEPLOY_KEY'] }}\n", "gives a run a pull request starts DEPLOY_KEY"),
+                ("          ERRORS: ${{ secrets.RAIL_TEST_ERRORS_TOKEN }}\n",  # declared, but not for CI
+                 "gives a run a pull request starts RAIL_TEST_ERRORS_TOKEN"),
+                ("          ALL: ${{ toJSON(secrets) }}\n", "passes every secret to a run a pull request starts"),
+                ("          ONE: ${{ secrets[matrix.key] }}\n", "passes every secret to a run a pull request starts")):
+            p.write(".github/workflows/rail.yml", workflow + PASSED + line)
+            found = self.doctor(p)["pull request secrets"]
+            self.assertEqual(found["result"], "fail", line)
+            self.assertIn(".github/workflows/rail.yml " + said, found["detail"])
+            self.assertIn("A ticket branch runs its own copy of every workflow", found["detail"])
+        p.write(".github/workflows/rail.yml", workflow + PASSED)
+        # Another workflow a pull request starts counts; one only a push to the base branch starts does not.
+        p.write(".github/workflows/deploy.yml", "on:\n  push:\n    branches: [main]\njobs:\n  d:\n    env:\n"
+                                                "      K: ${{ secrets.PROD_KEY }}\n")
+        self.assertEqual(self.doctor(p)["pull request secrets"]["result"], "pass")
+        for trigger in ("on: [push, pull_request]\n", "on: pull_request_target\n", "'on':\n  pull_request:\n    paths: [src/**]\n",
+                        "on:\n- pull_request\n"):
+            p.write(".github/workflows/lint.yml", trigger + "jobs:\n  d:\n    secrets: inherit\n")
+            found = self.doctor(p)["pull request secrets"]
+            self.assertEqual(found["result"], "fail", trigger)
+            self.assertIn(".github/workflows/lint.yml passes every secret", found["detail"])
+
+    def test_every_repository_secret_is_in_a_ticket_branchs_reach(self):
+        a, b, github = self.github_pair(config=CONFIG + CI_TOOL)
+        self.assertNotIn("repository secrets", self.doctor(a))  # the repository holds none
+        github.update(lambda s: s.update(secrets=["RAIL_TEST_PAY_KEY"]))
+        found = self.doctor(a)["repository secrets"]
+        self.assertEqual((found["result"], found["detail"]), (
+            "pass", "every repository secret is the key of a tool declared ci = true: RAIL_TEST_PAY_KEY"))
+        github.update(lambda s: s.update(secrets=["RAIL_TEST_PAY_KEY", "PROD_KEY"], org_secrets=["ORG_TOKEN"]))
+        found = self.doctor(a)["repository secrets"]
+        self.assertEqual(found["result"], "fail")
+        self.assertIn("ORG_TOKEN, PROD_KEY: in a ticket branch's reach, and no tool declares it with ci = true. A branch"
+                      " can add a workflow of its own that reads any repository or organization secret.", found["detail"])
+        self.assertIn("Move any other secret to a GitHub environment that only main may deploy to", found["detail"])
+        # A token that may not list secrets: the check says it did not run, and what holds anyway.
+        github.update(lambda s: s.update(secrets_status=403))
+        found = self.doctor(a)["repository secrets"]
+        self.assertEqual(found["status"], "unavailable")
+        self.assertIn("gh can't list this repository's Actions secrets here (403), so they weren't checked.", found["detail"])
+
+    def test_an_environment_that_holds_a_secret_lets_only_the_base_branch_deploy(self):
+        a, b, github = self.github_pair(config=CONFIG + CI_TOOL)
+        github.update(lambda s: s.update(environments=[
+            {"name": "open", "secrets": ["PROD_KEY"]},
+            {"name": "wide", "secrets": ["PROD_KEY", "RAIL_TEST_PAY_KEY"], "branches": ["main", "release/*",
+                                                                                      {"name": "v*", "type": "tag"}]},
+            {"name": "base only", "secrets": ["PROD_KEY"], "branches": ["main"]},
+            {"name": "protected", "secrets": ["PROD_KEY"], "branches": "protected"},
+            {"name": "preview", "secrets": ["RAIL_TEST_PAY_KEY"]},  # a test key: any branch may read it
+            {"name": "empty"}]))
+        found = self.doctor(a)
+        self.assertEqual({k: v["result"] for k, v in found.items() if k.startswith("environment ")}, {
+            "environment open": "fail", "environment wide": "fail", "environment base only": "pass",
+            "environment protected": "pass"})
+        self.assertIn("it holds PROD_KEY and any branch may deploy to it, so a ticket branch can read them",
+                      found["environment open"]["detail"])
+        self.assertIn("it holds PROD_KEY and branch release/*, tag v* may deploy to it", found["environment wide"]["detail"])
+        self.assertIn("allow main alone", found["environment wide"]["detail"])
+        self.assertEqual(found["environment base only"]["detail"], "only main may deploy to it")
+        self.assertEqual(found["environment protected"]["detail"], "only protected branches may deploy to it")
+
+    def test_a_key_marked_for_ci_needs_its_name(self):
+        p = self.fixture(config=CONFIG + '[tools.search]\nuse = "Search the docs"\nci = true\n')
+        self.assertIn("config: tools.search.ci marks the tool's key as one a pull request's run may be given, so the"
+                      " tool needs env", p.rail("status", expect=None)["reason"]["message"])
+
+    def test_a_failed_rail_ci_names_a_declared_key_the_job_was_not_given(self):
+        p = self.fixture(config=CONFIG + CI_TOOL)
+        from railtest import CHECK_ADD
+        p.add(ticket(check=f'test -n "$RAIL_TEST_PAY_KEY" && {CHECK_ADD}'))  # a check that needs the key
+        p.rail("next", env_extra=SET)
+        p.fix_calc("1")
+        p.queue_reviews(CLEAN)
+        p.rail("advance", "1", env_extra=SET)
+        ci = os.path.join(self.tmp, "ci")  # what the workflow does: a clone, the pull request's head checked out
+        subprocess.run(["git", "clone", "--quiet", p.root, ci], check=True)
+        subprocess.run(["git", "checkout", "--quiet", "--detach", p.git("rev-parse", "1-fix-add").strip()], cwd=ci, check=True)
+        failed = p.rail("ci", cwd=ci, expect=3, env_extra={"RAIL_BRANCH": "1-fix-add", "RAIL_TEST_PAY_KEY": ""})
+        self.assertIn("Failed at 'checks'", failed["action"]["brief"])
+        self.assertIn("\nNot set in this job: RAIL_TEST_PAY_KEY (tool payments). A check that needs it fails here.",
+                      failed["action"]["brief"])
+        passed = p.rail("ci", cwd=ci, env_extra=dict(SET, RAIL_BRANCH="1-fix-add"))
+        self.assertEqual(passed["action"]["brief"], "Every check passed.")
 
 
 class Config(RailTest):

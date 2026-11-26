@@ -2129,7 +2129,7 @@ def cmd_ci(project, args):
         run.record("review", complete, patch_id, None if complete else "no complete review for this patch",
                    output="A review bound to this patch, with every finding answered, is missing.")
     code = "CI_PASS" if run.ok else "CI_FAIL"
-    brief = "Every check passed." if run.ok else f"Failed at '{run.failure[0]}':\n{run.failure[1]}"
+    brief = "Every check passed." if run.ok else f"Failed at '{run.failure[0]}':\n{run.failure[1]}{tools.ci_note(project)}"
     return answer(nn, code=code, action={"kind": "rest", "brief": brief}, steps_=run.steps, tier=tier)
 
 

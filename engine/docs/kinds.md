@@ -52,11 +52,13 @@ tier (`rail docs loop`).
 The `accepted` event records the ticket's kinds: its `person_reason`'s, in the order written, and those its
 scope's paths reach (`rail docs journal`).
 
-## `runs-with-secrets` at push: a known gap
+## `runs-with-secrets` at push
 
 Rail's CI workflow runs the ticket branch's own Rail, config and workflow file, and `.claude/**` hooks run in the
 ticket's worktree on the worker's machine. So a ticket branch controls what CI and the worker's session do with
 any secret they hold, at push, before any PERSON gate: a PERSON contract is approved before the code exists, and
-its merge comes after the push. No tier can stop that. Until a secret a ticket branch can reach is limited to one
-whose exposure rotation undoes, and prod secrets live only in a GitHub environment that allows the base branch
-alone, this is a gap: keep prod secrets out of what pull request CI and the worker's machine can read.
+its merge comes after the push. No tier can stop that.
+
+What bounds it is which secrets are in reach at all: only the key of a tool declared `ci = true`, a test or dev
+key, with every other secret in a GitHub environment that only the base branch may deploy to. `rail doctor`
+checks both (`rail docs tools`). A leak of such a key is still possible, and nothing detects one.
