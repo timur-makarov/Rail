@@ -49,6 +49,7 @@ DEFAULTS = {
     "guides": {key: "" for key in ("start", "stuck", "findings", "conflict", "contract", "split", "setup")},
     "rules": [],
     "sensors": [],
+    "tools": {},
     "profiles": [],
 }
 
@@ -135,6 +136,9 @@ def load(root):
             if not isinstance(value, list):
                 raise RailError(f"config: {key} must be an array of tables ([[{key}]])")
             config[key] = [_check_item(key, item, n) for n, item in enumerate(value)]
+        elif key == "tools":
+            from . import tools
+            config[key] = tools.check(value)
         elif key in DEFAULTS:
             config[key] = _check(value, DEFAULTS[key], key)
         elif isinstance(value, dict) and os.path.isdir(os.path.join(packs_dir, key)):

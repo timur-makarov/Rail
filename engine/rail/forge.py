@@ -415,6 +415,12 @@ class Forge:
         found = pages(f"repos/{self.repo}/issues?labels={label}&state=open&per_page={PAGE}")
         return [i for i in found if "pull_request" not in i]
 
+    def open_issue(self, title, body, labels):
+        return self.call("POST", "issues", {"title": title, "body": body, "labels": list(labels)})
+
+    def close_issue(self, number):
+        self.call("PATCH", f"issues/{number}", {"state": "closed", "state_reason": "completed"})
+
     def asked_reverts(self):
         """The merged pull requests a person labelled rail:revert, each in full. The issues endpoint lists pull
         requests too, and only it filters by label."""

@@ -30,8 +30,10 @@ def ask(project, f, trigger, step, question, output, receipt):
                      ":(exclude).rail/journal"], project.root)
     # The worker writes ## Look at and ## Tried: they are the worker's own story, which consult is not to be led by.
     text = re.sub(r"(?ms)^## (?:Look at|Tried)[ \t]*$.*?(?=^## |\Z)", "", blobs[f"{t.ref}:{ticket_path(t.id)}"] or "")
+    from . import tools
     request = {"ticket": t.id, "trigger": trigger, "step": step, "question": question,
-               "ticket_text": text, "diff": diff, "output": tail(output, 120, 12000)}
+               "ticket_text": text, "diff": diff, "output": tail(output, 120, 12000),
+               "tools": "\n".join(tools.lines(project, review=True))}
     code, out, _ = run_shell(f'"{pack(project)}"', t.worktree or project.root,
                              {"RAIL_TICKET": t.id, "RAIL_ROOT": project.root,
                               **model_env(project.config["consult"].get("model", ""))},

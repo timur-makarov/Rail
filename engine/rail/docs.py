@@ -92,6 +92,9 @@ READERS = {
     "rules": "ship and CI: structure rules on added lines and files (rail docs rules)",
     "sensors": "ship and CI, last: each entry runs a tool when the change touches its paths, and a line of its output"
                " on a line the change adds fails the step (rail docs sensors)",
+    "tools": "next, advance, review and doctor: a [tools.NAME] table for each thing the work reaches outside the"
+             " repository, listed in the briefs; a ticket is not claimed while a name in its `env` is not set"
+             " (rail docs tools)",
     "profiles": "nothing yet: the language profiles rail init found, each a name and the paths that hold its files"
                 " (rail docs languages)",
     "guides.start": "next and advance: the page whose text a ticket's first IMPLEMENT brief carries, once per"
@@ -131,6 +134,8 @@ def config_page():
         lines.append(f"| `{name}` | {shown} | {READERS.get(name, '')} |")
     for name, (keys, needed) in configmod.TABLE_ARRAYS.items():
         lines += ["", f"A `[[{name}]]` table takes: " + ", ".join(f"`{k}`" for k in keys) + f"; `{needed}` is needed."]
+    from . import tools
+    lines += ["", "A `[tools.NAME]` table takes: " + ", ".join(f"`{k}`" for k in tools.KEYS) + "; `use` is needed."]
     for name, default in long:
         lines += ["", f"## Default `{name}`", "", "```text", default, "```"]
     return "\n".join(lines) + "\n"

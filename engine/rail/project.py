@@ -96,6 +96,7 @@ class Project:
         self.session = os.environ.get("CLAUDE_CODE_SESSION_ID") or None
         self.ids_dir = os.path.join(common, "rail", "ids")
         self.orphans = []
+        self._tools_missing = None
 
     # --- refs ---------------------------------------------------------------
 
@@ -230,6 +231,13 @@ class Project:
             return ""
         result = gitx.git(["patch-id", "--stable"], self.root, input=diff).stdout.split()
         return result[0] if result else ""
+
+    def tools_missing(self):
+        """{tool: [names]} for the declared tools whose names are not set on this machine; read once per command."""
+        if self._tools_missing is None:
+            from . import tools
+            self._tools_missing = tools.missing(self)
+        return self._tools_missing
 
     # --- writing ---------------------------------------------------------------
 

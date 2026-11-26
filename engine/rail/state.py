@@ -120,6 +120,7 @@ class Facts:
             self.pr = self.forge.merged_from(t.id)
         self.labels = self.forge.labels(self.pr) if self.pr else set()
         self.stopped = self._stop()
+        self.tools_missing = project.tools_missing()
         self.revert = self._revert(project)
         self._needs_review = None
         self.state = self._state()

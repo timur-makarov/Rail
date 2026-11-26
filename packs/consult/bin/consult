@@ -34,7 +34,7 @@ brief = f"""You advise a coding agent that is stuck on one ticket. Read the repo
 
 ## The question
 {request.get("question", "")}
-
+{chr(10) + "## Tools" + chr(10) + request["tools"] + chr(10) if request.get("tools") else ""}
 Answer in a few sentences: what is wrong, and what the agent should do. End with exactly one of these lines:
 VERDICT: proceed   (the approach is right; keep going)
 VERDICT: change    (change the approach as you describe)

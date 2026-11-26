@@ -111,6 +111,19 @@ def handle(state, method, path, body):
               "base": body["base"], "state": "open", "merged": False, "labels": []}
         pulls.append(pr)
         return respond(201, pr_view(state, pr))
+    if rest == ["issues"] and method == "POST":
+        number = state.get("next_number", 1)
+        state["next_number"] = number + 1
+        issues.append({"number": number, "title": body["title"], "body": body.get("body", ""), "state": "open",
+                       "labels": list(body.get("labels", [])), "user": {"login": "owner"},
+                       "author_association": "OWNER"})
+        return respond(201, issues[-1])
+    if len(rest) == 2 and rest[0] == "issues" and method == "PATCH":
+        issue = next((i for i in issues if i["number"] == int(rest[1])), None)
+        if not issue:
+            return respond(404, {"message": "Not Found"})
+        issue.update({k: body[k] for k in ("state", "title", "body") if k in body})
+        return respond(200, issue)
     if rest == ["pulls"] and method == "GET":
         found = [p for p in pulls if query.get("state", "open") in ("all", p["state"])]
         if "head" in query:

@@ -54,6 +54,10 @@ INIT_TASK = """Rail is installed, and this project isn't set up for it yet: .rai
 4. The [[rules]] in .rail/config.toml: keep, drop or add structure rules for this project.
 5. .worktreeinclude at the root: one glob per line for local files a ticket worktree needs that git doesn't
    track, such as .env. Leave it out when there are none.
+6. [tools.NAME] in .rail/config.toml: one table for each thing the work reaches outside the repository (a service
+   with a key, a CLI that signs in, an MCP server): `use`, one line the agents read; `env`, the names of the
+   variables it needs, never a value; `probe`, a fast command that changes nothing and fails when the tool is out
+   of reach.{tools} Leave it out when the work reaches nothing.
 If the project already has its own agent workflow, hooks, guards, CI gates or repo map, list them and ask the
 person whether to keep, merge or retire each one; until they decide, both run, and a hook of theirs may block a
 step below. Then ask the person to make that commit.
@@ -86,6 +90,10 @@ once by reading and merging one pull request. {profiles}Read the repository to l
    before the engine merges it. [review] skip_paths lists paths whose changes need no reviewer, such as docs; leave
    it empty when unsure.
 4. The [[rules]] in .rail/config.toml: keep, drop or add structure rules for this project.
+5. [tools.NAME] in .rail/config.toml: one table for each thing the work reaches outside the repository (a service
+   with a key, a CLI that signs in, an MCP server): `use`, one line the agents read; `env`, the names of the
+   variables it needs, never a value; `probe`, a fast command that changes nothing and fails when the tool is out
+   of reach.{tools} Leave it out when the work reaches nothing.
 If the project already has its own agent workflow, hooks, guards, CI gates or repo map, leave them running and list
 them in the pull request for the person to decide: keep, merge or retire.
 Then commit what rail init added together with these changes to a new branch, push it, and open a pull request with

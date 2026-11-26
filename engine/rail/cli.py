@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 
-from . import areas, gitx, guard, hooks, history, rules, steps
+from . import areas, gitx, guard, hooks, history, rules, steps, tools
 from .project import Project, event, events_path, ticket_path
 from .state import OPEN, derive, floor, ticket_kinds
 from .table import TRANSITIONS, first_match
@@ -132,7 +132,7 @@ def guide(project, code, action, f=None):
 def from_facts(f, steps_=None, code=None, **extra):
     row_code, owner, action = first_match(f)
     worker(f, action, row_code)
-    if row_code != "STOPPED" and (owner == "human" or person_next(f)):
+    if row_code not in ("STOPPED", "TOOL_MISSING") and (owner == "human" or person_next(f)):
         label_wait(f.project, f, row_code)  # the person's inbox is this label, whichever command met the wait
     named = guide(f.project, row_code, action, f)
     if named:
@@ -1124,6 +1124,7 @@ def cmd_next(project, args):
         return task
     tickets, facts = load(project)
     took_in = auto_intake(project, facts)
+    tools.sync_issues(project, project.tools_missing())
     asked = file_reverts(project, facts)
     took_in += asked
     if took_in or red_base_ticket(project, facts):
@@ -1168,8 +1169,8 @@ def cmd_next(project, args):
         # A ship whose pull request GitHub didn't let it write (a rate limit, an outage) left the old title and
         # description there, and a person's merge squashes with what the pull request says.
         update_pr(project, f, took_in)
-        if code == "STOPPED":
-            continue  # the person set the brake and knows: it is no wait in their inbox
+        if code in ("STOPPED", "TOOL_MISSING"):
+            continue  # the person set the brake and knows; a missing tool gets one issue of its own, not one a ticket
         if owner == "human" or person_next(f):
             label_wait(project, f, code)
         elif owner == "agent" and f.pr_open and "rail:needs-you" in f.labels:
@@ -1229,6 +1230,11 @@ def cmd_next(project, args):
             return answer(fresh_push[0].id, fresh_push[0].state, "agent",
                           {"kind": "script", "brief": command, "command": command}, "CI_WAIT", took_in, **extra)
     others = ("\nNothing for an agent on these now:\n" + "\n".join(resting)) if resting else ""
+    if waits and all(w["needs"] == "TOOL_MISSING" for w in waits):
+        # One thing is missing, however many tickets wait for it: say it once.
+        brief = tools.wait_brief(", ".join(w["ticket"] for w in waits), project.tools_missing()) + others
+        return answer(owner="human", code="TOOL_MISSING", action={"kind": "human_wait", "brief": brief},
+                      steps_=took_in, **extra)
     if waits:
         brief = "Tickets wait for a person:\n" + "\n".join(f"- {w['ticket']}: {w['brief']}" for w in waits) + others
         return answer(owner="human", code="WAITING_HUMAN", action={"kind": "human_wait", "brief": brief},
@@ -1678,6 +1684,7 @@ def init_task(project):
         return None
     from .init import INIT_TASK, INIT_TASK_CLOUD, found_line
     brief = (INIT_TASK_CLOUD if cloud() else INIT_TASK).format(base=project.base, depth=project.config["map"]["depth"],
+                                                               tools=tools.found_line(project.root),
                                                                profiles=found_line(project.config))
     action = {"kind": "agent_task", "brief": brief}
     named = guide(project, "INIT_TASK", action)  # no ticket, so no event

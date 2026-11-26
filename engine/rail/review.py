@@ -278,6 +278,8 @@ def brief(project, f, role, ledger, disputed=None):
     flaky = list(dict.fromkeys(flakes.name(x) for x in flakes.of(t.events) if x["patch_id"] == patch))
     from . import sensors
     marked = sensors.markers(project, ref)
+    from . import tools
+    reviewer_tools = tools.lines(project, review=True)
     parts = [
         f"# Review brief: ticket {t.id}, {f.tier}", "", f"This run's job: {job}", "",
         "## The ticket", ticket_text.strip(), "",
@@ -291,6 +293,7 @@ def brief(project, f, role, ledger, disputed=None):
            "Each line below tells a sensor that its violation there is wrong or accepted. Judge the reason: a marker"
            " with no reason that holds is a finding.", *[f"- {line}" for line in marked], ""]
           if marked and role in ("review", "security") else []),
+        *(["## Tools", *reviewer_tools, ""] if reviewer_tools else []),
         "## The diff", "```diff", diff, "```", "",
         "## Areas this change touches", "| Area | Paths | Holds |", "|---|---|---|", rows, "",
         "Directories:", found["digest"], "",

@@ -111,6 +111,8 @@ def checks(project):
         gone = [f"{tool} (sensor {name})" for name, tool in tools.items() if not shutil.which(tool)]
         found.append(("sensors", not gone, f"the tools of the {len(tools)} sensors are on this machine" if not gone else
                       f"not on this machine: {', '.join(gone)}; a sensor whose tool is missing can't run at ship"))
+    from . import tools as toolsmod
+    found += toolsmod.doctor(project)
     guides = {key: path for key, path in project.config["guides"].items() if path}
     if guides:
         from .docs import read_part

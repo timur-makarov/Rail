@@ -7,7 +7,7 @@ consult); `next` makes the move, derives the facts again, and reads the table on
 import json
 import os
 
-from . import flakes, gitx, history
+from . import flakes, gitx, history, tools
 from .project import advice_path, ticket_path
 from .ticket import Ticket
 from .util import MISSING_HELP, tried_help
@@ -137,11 +137,11 @@ def _implement(f):
         if extra:
             lines.append(extra)
     past = history.text(history.of(f.project, f.ticket.scope, skip=f.id))
-    for extra in (_tried(f), past):
+    for extra in (tools.lines(f.project), _tried(f), past):
         if extra:
             lines += ["", *extra]
     lines += [
-        *([""] if _tried(f) or past else []),
+        *([""] if _tried(f) or past or f.project.config["tools"] else []),
         "Before you ship, write \"## Look at\" in the ticket: what a reader of this change should check. A problem you"
         " see outside this ticket is not yours to fix here: leave it, and write a line there that starts \"Noticed:\".",
         f"When the Done Contract holds, run: rail advance {f.id}",
@@ -429,6 +429,8 @@ ROWS = [
      lambda f: f"Ticket {f.id} waits for ticket {_join(f.after_open)} to merge."),
     ("SCOPE_OVERLAP",      "none",  "rest",        lambda f: f.state == "accepted" and f.overlaps,
      lambda f: f"Ticket {f.id} can't be claimed while ticket {_join(f.overlaps)} changes the same paths."),
+    ("TOOL_MISSING",       "human", "human_wait",  lambda f: f.state == "accepted" and f.tools_missing,
+     lambda f: tools.wait_brief(f.id, f.tools_missing)),
     ("CLAIM",              "agent", "script",      lambda f: f.state == "accepted",
      lambda f: f"rail next --ticket {f.id}"),
     ("APPROVE_AMEND",      "human", "human_wait",  lambda f: f.amend_pending,

@@ -118,6 +118,12 @@ contract = ".claude/skills/rail-blast-radius/SKILL.md"
 split = ".claude/skills/rail-slice/SKILL.md#2. Three tests for each draft#When the engine offered the split"
 setup = ".claude/skills/rail-verify/SKILL.md"
 
+# [tools.payments]                        # reader: next, review and doctor; one table for each thing the work
+# use = "The payment service in test mode: create customers and charges in checks"   # reaches outside the
+# env = ["PAY_TEST_KEY"]                  # repository (rail docs tools). Names only, never values: a ticket is
+# probe = 'curl -sf -u "$PAY_TEST_KEY:" https://api.example.com/v1/balance >/dev/null'   # not claimed while one
+# review = false                          # is not set. true: the reviewer, the refuter and consult are told too
+
 # [[sensors]]                             # reader: ship and CI, last; a tool whose output lines fail the ship when
 # id = "duplication"                      # they are on lines the change adds (rail docs sensors). None is on by default
 # paths = ["src/**"]                      # runs only when the change touches these
