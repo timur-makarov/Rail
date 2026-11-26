@@ -3,7 +3,7 @@
 This page is a proposal: what remains of a larger one. Its built parts are in the engine and its docs, and
 are no longer described here: the kinds of change a revert doesn't undo (`rail docs kinds`), the brake
 `rail:stop` and the label `rail:revert` (`rail docs cloud`, `rail docs tickets`), `## Read these` with its
-review comments, flag rules and the label `rail:look` (`rail docs github`), the revert that goes first after a
+review comments and flag rules (`rail docs github`), the revert that goes first after a
 failed deploy to dev (`rail docs environments`), and the count of a person's acts in `rail stats`. Nothing below is implemented, and nothing below was run.
 
 Marks: **confirmed** means read in Rail's code or on the primary source while writing this; **reported**
@@ -25,8 +25,10 @@ becomes a "Read these" item with the source "the reviewer".
 change before it merges, and on an AUTO ticket it raises the tier. `attention` raises nothing. If the owner
 ends the reviewer's tier raise (Decision 1), its cases move to `attention`.
 
-`proposals/responsibility.md` Part 1 proposes the opposite: no `attention` field, and no `rail:look`, because
-an AUTO change can be undone. Its Decision 1 is settled before this part is built.
+`proposals/responsibility.md` Part 1 proposes the opposite: no `attention` field, because an AUTO change can be
+undone. The owner dropped the label `rail:look` on 2026-11-26, so Rail sends no person to read a merged AUTO
+change, and this field would serve only a person, or their agent, who chooses to look. That page's Decision 1
+is settled before this part is built.
 
 `engine/review-v1.json` refuses unknown keys at its top level today, so the field is a schema change, with
 `engine/reviewer.md` and `engine/docs/review.md`.
@@ -36,8 +38,7 @@ an AUTO change can be undone. Its Decision 1 is settled before this part is buil
 `rail stats --forge`. `rail stats` reads only the journals and the base branch's history, and line comments
 live on GitHub; `--forge` also reads each merged ticket's pull request comments, and without it these lines
 are left out. On PERSON tickets: the person's line comments per ticket (unmarked ones), and the share that
-fall on an item. On tickets reverted afterwards: whether the reverted lines held an item. On AUTO tickets:
-how many `rail:look` pull requests led to a revert or to a ticket that names them in `caused_by`.
+fall on an item. On tickets reverted afterwards: whether the reverted lines held an item.
 
 ## Tests, each before its part is kept
 
@@ -51,8 +52,7 @@ how many `rail:look` pull requests led to a revert or to a ticket that names the
    of 4 runs per case, the controls get no item in at least 3 of 4, and no kind is named on the planted cases
    in at least 3 of 4. This uses models, so it waits for the owner to restart the paused model tests.
 3. **In use, from the journals.** Over 20 PERSON tickets: when fewer than half the person's line comments fall
-   on items, the sources are revisited. Over 20 `rail:look` pull requests: a source whose items never led to
-   a revert, a ticket or a comment is removed from the list.
+   on items, the sources are revisited.
 
 Not covered: how long a person takes per pull request (GitHub doesn't report reading time); whether a person
 reads the items or the whole diff; forges other than GitHub.

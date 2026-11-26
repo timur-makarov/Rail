@@ -11,7 +11,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from railtest import ARCHITECTURE, CONFIG, Fixture, RailTest, ticket  # noqa: E402
 
-LABELS = ["rail", "rail:go", "rail:needs-you", "rail:hold", "rail:stop", "rail:revert", "rail:look"]
+LABELS = ["rail", "rail:go", "rail:needs-you", "rail:hold", "rail:stop", "rail:revert"]
 
 
 def read(path):
@@ -35,7 +35,7 @@ class Init(RailTest):
                                                  "detail": "created " + ", ".join(LABELS)})
         self.assertEqual(sorted(github.read()["labels"]), sorted(LABELS))
         again = a.rail("init")
-        self.assertEqual(steps(again)["labels"]["detail"], "all 7 exist")
+        self.assertEqual(steps(again)["labels"]["detail"], "all 6 exist")
         self.assertEqual(sorted(github.read()["labels"]), sorted(LABELS))
 
     def test_settings_that_are_not_json_are_left_alone_and_doctor_says_the_hooks_are_missing(self):

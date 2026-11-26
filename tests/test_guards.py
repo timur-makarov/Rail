@@ -599,6 +599,18 @@ class Wiring(RailTest):
         for verb in ("accept", "drop", "init"):
             self.assertFalse([rule for rule in allow if f"rail {verb}" in rule], verb)
         self.assertFalse([rule for rule in allow if rule in ("Bash", "Bash(*)", "Bash(rail *)")])
+        # A worker may search for a fact the repository doesn't hold. A fetch names a URL, which can carry data
+        # out, so it has no allow rule and the session's permission mode judges each one.
+        self.assertIn("WebSearch", allow)
+        self.assertFalse([rule for rule in allow if rule.startswith("WebFetch")])
+        # The seats whose word decides a merge read the repository only.
+        import re
+        import tomllib
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "seed", "config.toml"), "rb") as f:
+            seed = tomllib.load(f)
+        for seat in ("review", "consult"):
+            tools = re.search(r"--tools (\S+)", seed[seat]["command"]).group(1).split(",")
+            self.assertTrue(tools and not [tool for tool in tools if tool.startswith("Web")], (seat, tools))
         self.assertIn("Bash(rail answer * --owner)", settings["permissions"]["ask"])
         self.assertIn("Bash(rail answer * --owner *)", settings["permissions"]["ask"])
         self.assertIn("Bash(rail answer --owner *)", settings["permissions"]["ask"])

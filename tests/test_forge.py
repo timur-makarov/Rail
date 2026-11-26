@@ -666,7 +666,7 @@ class Doctor(RailTest):
                                                    "allow_rebase_merge": False, "squash_merge_commit_title": "PR_TITLE",
                                                    "squash_merge_commit_message": "PR_BODY",
                                                    "delete_branch_on_merge": True},
-                                         labels=["rail", "rail:go", "rail:needs-you", "rail:hold", "rail:stop", "rail:revert", "rail:look"]))
+                                         labels=["rail", "rail:go", "rail:needs-you", "rail:hold", "rail:stop", "rail:revert"]))
         found = {s["step"]: s for s in a.rail("doctor", expect=None)["steps"]}
         for name in ("squash merging", "required check", "labels", "merged branches"):
             self.assertEqual(found[name]["result"], "pass", found[name])

@@ -22,23 +22,20 @@ those, with the reason given.
 The owner's position (2026-11-25): "a person still bears the responsibility. Anything that can be undone does
 not provoke any consideration about whether the change should be approved, reviewed or learnt about. Anything
 that is not *is* the responsibility a person bears." The built parts make a person's approval depend on a kind.
-Two things still ask a person to learn about a change that can be undone, and one thing the rule needs is
+One thing still puts a change that can be undone in front of a person, and one thing the rule needs is
 untested.
 
-Today (confirmed, `engine/docs/github.md`): every pull request opens with `## Read these`, built from facts,
-and an AUTO ticket whose list is not empty gets the label `rail:look` as it merges, so that
-`is:pr is:merged label:rail:look` is what to read afterwards. Its rows include a declined finding, an amended
-contract, markers and changed manifests, each of which can be undone. `proposals/oversight.md` Part 1 would add
-a reviewer's `attention` field that feeds the same list.
+Today (confirmed, `engine/docs/github.md`): every pull request opens with `## Read these`, built from facts.
+Its rows include a declined finding, an amended contract, markers and changed manifests, each of which can be
+undone. No label marks a merged AUTO ticket for a person any more: the owner dropped `rail:look` on 2026-11-26.
+`proposals/oversight.md` Part 1 would add a reviewer's `attention` field that feeds the same list.
 
 ## Part 1: no one is asked to learn about a change that can be undone
 
 The rule says "no consideration" for an AUTO change: no approval, no review by a person, and no being told about
-it. The built `rail:look` label and the AUTO rows of `## Read these` are the last places that ask for it. The
+it. The AUTO rows of `## Read these` are the last place that puts such a change in front of a person. The
 proposed change:
 
-- **`rail:look` goes,** and with it the saved search for merged AUTO pull requests. An AUTO ticket holds nothing
-  that can't be undone, so no person is asked to learn about it.
 - **"Read these" serves PERSON tickets only, and lists only what can't be undone:** the hunks in files that
   matched a kind's paths, the reviewer's `kinds` items, the `person_reason`, and changed manifests when they add a
   dependency. Rows for declined findings, an amended contract, markers, other manifests and `.gitattributes` go:
@@ -46,11 +43,11 @@ proposed change:
   get no row.
 - **The reviewer's `attention` field is not built** (`oversight.md` Part 1): the reviewer's `kinds` is its one
   route to a person, and `attention` would be a second one for a change that merges either way.
-- **`rail stats --forge`** (`oversight.md` Part 2) keeps the PERSON-ticket lines and has no `rail:look` lines.
 
 A person who wants to look at an AUTO change keeps `rail:hold`, the brake `rail:stop` and `rail:revert`: those
-are the person's choice, never a step Rail asks for. This part is open (Decision 1), because the built list was
-made for the opposite purpose: so that a person could look after an AUTO ticket merged.
+are the person's choice, never a step Rail asks for. This part is open (Decision 1). The case for keeping the
+rows: they ask nothing of anyone, and they are what a person, or an agent that gathers things for a person to
+look at, would read.
 
 ## Part 2: the contract writer's tier and `person_reason`
 
@@ -60,8 +57,8 @@ rule needs. Wording is in the guide and the brief; no model run has checked it.
 
 ## Tests, each before its part is kept
 
-1. **Gate cases, no model** (Part 1, once decided). A pull request of an AUTO ticket gets no `rail:look` label
-   and its `## Read these` has no row for a declined finding, an amended contract, a marker or a manifest; a
+1. **Gate cases, no model** (Part 1, once decided). A pull request of an AUTO ticket has, in its
+   `## Read these`, no row for a declined finding, an amended contract, a marker or a manifest; a
    PERSON ticket's list has only the kind rows, its `person_reason`, and manifests that add a dependency; a
    flag rule without a `kind` raises no row. Kept when every case behaves as written.
 2. **The contract writer, with a model.** Intake cases with and without a kind; four runs each at
@@ -88,8 +85,7 @@ secrets a ticket branch reaches, which `ci = true` keys bound and no tier can.
 One pull request each, with docs and `CHANGELOG.md`.
 
 1. The contract writer's test (test 2), when the owner restarts the model tests; fix the guide's wording by it.
-2. After Decision 1: no `rail:look`, "Read these" for PERSON tickets and kinds only, `rail stats --forge` as
-   `oversight.md` says with no `rail:look` lines, and `oversight.md` edited to match.
+2. After Decision 1: "Read these" for PERSON tickets and kinds only, and `oversight.md` edited to match.
 
 ## Decisions
 
@@ -98,10 +94,15 @@ One pull request each, with docs and `CHANGELOG.md`.
 - A person bears responsibility for what can't be undone, and only for that.
 - Review before merge stays: the machine's review runs on every AUTO change.
 
+**Made by the owner (2026-11-26):**
+
+- `rail:look` goes. Rail marks no merged AUTO change for a person; an agent of the person's own can gather what
+  they want to look at.
+
 **Open:**
 
-1. Whether `rail:look` and the AUTO rows of "Read these" go (proposed), or stay as an optional aid for a person
-   who chooses to look. If they go, `oversight.md`'s `attention` field and its Decision 2 go with them.
+1. Whether the AUTO rows of "Read these" go (proposed), or stay as a record for a person, or their agent, who
+   chooses to look. If they go, `oversight.md`'s `attention` field and its Decision 2 go with them.
 
 ## Sources
 

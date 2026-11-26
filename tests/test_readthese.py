@@ -117,13 +117,14 @@ class OnGitHub(RailTest):
         a.rail("advance", "1")
         github.ci("1-fix-add", "success")
 
-    def test_an_auto_ticket_with_a_list_merges_with_its_items_on_their_lines_and_the_look_label(self):
+    def test_an_auto_ticket_with_a_list_merges_with_its_items_on_their_lines_and_no_label_for_a_person(self):
         a, b, github = self.github_pair()
         self.shipped(a, github, "def add(a, b):\n    # SHORTCUT(1): ints only; use Decimal for money\n    return a + b\n")
         self.assertIn("## Read these\n- src/calc.py:2: # SHORTCUT(1): ints only; use Decimal for money (a marker)\n"
                       "1 other changed line: checked by verify, 1 check and the reviewer.\n\n## Why", github.pr(1)["body"])
         self.assertEqual(a.rail("advance", "1")["state"], "merged")
-        self.assertIn("rail:look", github.pr(1)["labels"])
+        # Nothing asks a person to read a merged AUTO ticket: the list is in the description and the squash message.
+        self.assertEqual([name for name in github.pr(1)["labels"] if name not in ("rail",)], [])
         comments = github.read()["line_comments"]["1"]
         self.assertEqual([(c["path"], c["line"]) for c in comments], [("src/calc.py", 2)])
         self.assertEqual(comments[0]["body"], "# SHORTCUT(1): ints only; use Decimal for money (a marker)\n\n<!-- rail -->")
@@ -133,7 +134,6 @@ class OnGitHub(RailTest):
         a, b, github = self.github_pair()
         self.shipped(a, github, "def add(a, b):\n    return a + b\n")
         self.assertEqual(a.rail("advance", "1")["state"], "merged")
-        self.assertNotIn("rail:look", github.pr(1)["labels"])
         self.assertEqual(github.read().get("line_comments", {}).get("1", []), [])
 
     def test_a_person_ticket_shows_why_it_is_a_persons_before_the_merge_and_hears_an_answer_on_a_line(self):
@@ -150,7 +150,6 @@ class OnGitHub(RailTest):
         body = github.pr(1)["body"]
         self.assertIn("- The ticket: the ticket is PERSON as it was written: money: src/calc.py (the tier)", body)
         self.assertIn("- src/calc.py:2: return a + b # TODO(7): floats (a marker)", body)
-        self.assertNotIn("rail:look", github.pr(1)["labels"])  # its person reads the list before the merge
         self.assertEqual(len(github.read()["line_comments"]["1"]), 1)
         a.rail("next")
         self.assertEqual(len(github.read()["line_comments"]["1"]), 1)  # once per patch, however many runs pass
