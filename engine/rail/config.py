@@ -9,7 +9,7 @@ from .ticket import KINDS
 from .util import RailError
 
 REVIEW_COMMAND = (
-    "claude -p --safe-mode --effort high --system-prompt-file .rail/engine/reviewer.md "
+    "claude -p --safe-mode --effort high --autocompact 400000 --system-prompt-file .rail/engine/reviewer.md "
     "--tools Read,Grep,Glob,Bash,Edit,Write --allowedTools Bash,Edit,Write "
     "--disallowedTools 'Bash(git push *)' --output-format json "
     "--json-schema \"$(cat .rail/engine/review-v1.json)\""
@@ -20,7 +20,7 @@ REVIEW_COMMAND = (
 WORKER_COMMAND = (
     'claude -p --output-format stream-json --verbose ${RAIL_MODEL:+--model "$RAIL_MODEL"} '
     '${RAIL_EFFORT:+--effort "$RAIL_EFFORT"} --permission-mode auto --permission-prompts none --max-turns 300 '
-    '--max-budget-usd 15 ${RAIL_SESSION:+--resume "$RAIL_SESSION"}'
+    '--max-budget-usd 15 --autocompact 400000 ${RAIL_SESSION:+--resume "$RAIL_SESSION"}'
 )
 
 DEFAULTS = {
@@ -34,7 +34,7 @@ DEFAULTS = {
     "size": {"cap": 600, "exclude": []},
     "review": {"command": REVIEW_COMMAND, "model": "", "skip_paths": []},
     "retry": {"budget": 2, "cap": 5},
-    "consult": {"command": "claude -p --safe-mode --effort high --tools Read,Grep,Glob", "model": ""},
+    "consult": {"command": "claude -p --safe-mode --effort high --autocompact 400000 --tools Read,Grep,Glob", "model": ""},
     "claim": {"stale_minutes": 30, "save_minutes": 10},
     "worker": {"ladder": ["claude-sonnet-5-5:medium", "claude-sonnet-5-5:high", "claude-opus-5-5:medium"],
                "person_ladder": ["claude-opus-5-5:medium", "claude-opus-5-5:high"],
