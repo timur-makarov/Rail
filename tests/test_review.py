@@ -787,3 +787,12 @@ class ReviewerKinds(RailTest):
         schema = json.loads(read(os.path.join(ENGINE, "review-v1.json")))
         self.assertEqual(tuple(schema["properties"]["kinds"]["items"]["properties"]["kind"]["enum"]), KINDS)
         self.assertNotIn("needs_person", schema["properties"])
+
+    def test_the_reviewer_text_names_every_kind_but_public_release(self):
+        # On purpose (the comment at KINDS): public-release is found at release, not in a ticket's diff.
+        sys.path.insert(0, ENGINE)
+        from rail.ticket import KINDS
+        text = " ".join(read(os.path.join(ENGINE, "reviewer.md")).split())
+        listed = text.split("The kinds are")[1].split(":", 1)[1].split(".")[0]
+        self.assertEqual(tuple(k.strip() for k in listed.split(",")), tuple(k for k in KINDS if k != "public-release"))
+        self.assertNotIn("public-release", text)
