@@ -40,6 +40,7 @@ DEFAULTS = {
                "person_ladder": ["claude-opus-5-5:medium", "claude-opus-5-5:high"],
                "contract": "claude-opus-5-5:high", "command": WORKER_COMMAND, "timeout_minutes": 90},
     "sweep": {"after": 20, "every": 20},
+    "stats": {"held_days": 14},
     "map": {"depth": 1, "ignore": []},
     "tests": {"paths": []},
     # A page whose text the brief carries when its situation applies. The pages come with the seed config only: a

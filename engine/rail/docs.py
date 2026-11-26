@@ -78,6 +78,8 @@ READERS = {
                    " ticket) since the last sweep before one is offered",
     "sweep.every": "next: tickets merged since the last sweep, reviewed or not, before one is offered; it then"
                    " gathers the findings reviewers parked and the checks they proposed. 0 switches this off",
+    "stats.held_days": "stats: the days a merged ticket must have been on the base branch before it can count as"
+                       " held (not reverted, and named in no later ticket's caused_by)",
     "map.depth": "doc-lint: the directory depth ## Areas must cover",
     "map.ignore": "doc-lint: directories that need no ## Areas row",
     "tests.paths": "nothing yet: globs of the files that hold tests and their runner's settings, which rail init"

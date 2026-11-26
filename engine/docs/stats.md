@@ -17,6 +17,16 @@ with its code, so for a reverted ticket the journal is read from its squash comm
 ```text
 Rail stats: 3 merged tickets. Not counted: 1 not merged.
 
+OUTCOMES                                     AUTO  PERSON
+merged                                          2       1
+reverted afterwards                             0       0
+caused a fix ticket                             0       0
+held, of those merged 14 days ago or more  2 of 2  1 of 1
+cost for each merged ticket                 $0.62   $0.50
+a person's acts, median for a ticket            0       2
+tickets with no act of a person                 2       0
+Merged tickets that name the ticket that caused them (caused_by): 0 of 3.
+
 TICKETS                   AUTO  PERSON
 merged                       2       1
 the reviewer read it         1       1
@@ -54,6 +64,14 @@ PERSON tickets where the person changed nothing, by why they were PERSON: at add
 
 | Line | Counts |
 |---|---|
+| `OUTCOMES` | What became of the merged tickets, by tier. It comes first: the rest says how the work went, this says whether it lasted. In JSON, `outcomes.tiers` |
+| `caused a fix ticket` | Merged tickets a later ticket names in `caused_by` (`rail docs tickets`). In JSON, `caused_fix` |
+| `held, of those merged N days ago or more` | Of the tickets merged at least `[stats] held_days` ago (14 unless the config says otherwise), those not reverted and named in no `caused_by`. A ticket merged yesterday has had no time to fail, so it is in neither number. In JSON, `held` and `old_enough` |
+| `cost for each merged ticket` | What the review commands reported (`cost_usd` on the `review`, `security`, `refuter` and `sweep` step events) and what the worker runs reported (`cost_usd` on the `worked` events), summed and divided by the merged tickets. A command that reports no cost counts as $0, and a session a person drives records none. In JSON, `review_usd`, `worker_usd` and `cost_per_ticket` |
+| `a person's acts, median for a ticket` | The acts the journal records for a ticket: each approval of a contract, an amend or a merge and each continued wait (`accepted` by a person, `continued`), and each finding a person decided (`rail answer --owner`). In JSON, `acts`: `total`, `median`, `none` |
+| `tickets with no act of a person` | Merged tickets with none of those acts |
+| `Merged tickets that name the ticket that caused them` | Merged tickets with `caused_by` set. Read it beside `caused a fix ticket`: a fix that names no cause leaves the ticket that caused it counted as held. In JSON, `outcomes.names_cause` |
+| `BY WORKER`, `BY LANGUAGE` | The outcome counts by the model and effort of the ticket's last worker run (`worked` events; `(no worker run)` when a session did the work), and by each `[[profiles]]` entry whose paths the ticket's scope reaches (`rail docs languages`). A group of fewer than five merged tickets is summed into `other`, and a split with no group of five isn't shown. In JSON, `outcomes.by_worker` and `outcomes.by_profile` |
 | `merged` | Merged tickets, by tier |
 | `the reviewer read it` | Tickets with at least one `review` run |
 | `merged with no review` | The rest: every changed file was in `[review] skip_paths`, or no product file changed. The sweep reads these afterwards |

@@ -67,6 +67,10 @@ after = 20                                # reader: next; changes merged with no
 every = 20                                # reader: next; tickets merged since the last sweep, reviewed or not. The sweep
                                           # then gathers the findings reviewers parked and the checks they proposed. 0: off
 
+[stats]
+held_days = 14                            # reader: stats; a merged ticket counts as held once it has been merged
+                                          # this long with no revert and no later ticket naming it in caused_by
+
 [map]
 depth = 1                                 # reader: doc-lint; the directory depth ## Areas must cover
 ignore = []

@@ -7,6 +7,7 @@ numbers can be checked against the journal they come from.
 import datetime
 import re
 import statistics
+import time
 from collections import Counter
 
 from . import gitx
@@ -14,7 +15,7 @@ from .project import events_path, parse_events, review_path
 from .review import Ledger, load_doc
 from .state import SHIP_STEPS
 from .ticket import TIERS, highest
-from .util import RailError, parse_iso
+from .util import RailError, globs_overlap, parse_iso
 
 REVIEW_STEPS = ("review", "security", "refuter", "sweep")
 STEP_ORDER = ("setup", "rebase", "ticket-lint", "assumptions", "scope", "change", "rules", "migration", "size", "doc-lint",
@@ -98,6 +99,65 @@ def _amended_after_acceptance(t):
     return False
 
 
+def _acts(t):
+    """A person's acts the journal records: each approval and each continue, and each finding a person decided."""
+    return sum(1 for e in t.events if e.get("event") == "continued"
+               or (e.get("event") == "accepted" and e.get("by") == "person")
+               or (e.get("event") == "finding" and e.get("by") == "owner"))
+
+
+def _cost(t):
+    """(what the review commands reported, what the worker runs reported), in dollars."""
+    return (sum(e.get("cost_usd") or 0 for e in t.events if e.get("event") == "step" and e.get("step") in REVIEW_STEPS),
+            sum(e.get("cost_usd") or 0 for e in t.events if e.get("event") == "worked"))
+
+
+def _outcome_row():
+    return {"merged": 0, "reverted": 0, "caused_fix": 0, "old_enough": 0, "held": 0, "first_try": 0,
+            "review_usd": 0.0, "worker_usd": 0.0, "acts": []}
+
+
+def _outcome_done(row):
+    acts, merged = row.pop("acts"), row["merged"]
+    row["review_usd"], row["worker_usd"] = round(row["review_usd"], 4), round(row["worker_usd"], 4)
+    row["cost_per_ticket"] = round((row["review_usd"] + row["worker_usd"]) / merged, 4) if merged else None
+    row["acts"] = {"total": sum(acts), "median": statistics.median(acts) if acts else None, "none": acts.count(0)}
+    return row
+
+
+SPLIT_LEAST = 5  # a group smaller than this says little by itself: it is summed with the other small ones
+
+
+def _split(groups):
+    """The groups of SPLIT_LEAST tickets or more by name, and the smaller ones summed as `other`. {} when no group
+    is that large: a split of small groups shows nothing."""
+    large = {name: row for name, row in sorted(groups.items()) if row["merged"] >= SPLIT_LEAST}
+    if not large:
+        return {}
+    small = [row for row in groups.values() if row["merged"] < SPLIT_LEAST]
+    if small:
+        other = _outcome_row()
+        for row in small:
+            for key, value in row.items():
+                other[key] += value
+        large["other"] = other
+    return {name: _outcome_done(row) for name, row in large.items()}
+
+
+def _worker_of(t):
+    """The model and effort of the ticket's last worker run, as `rail work` recorded it."""
+    last = t.last("worked")
+    if not last:
+        return "(no worker run)"
+    return ":".join(part for part in (last.get("model"), last.get("effort")) if part) or NO_MODEL
+
+
+def _profiles_of(project, t):
+    """The language profiles ([[profiles]] in the config) whose paths the ticket's scope reaches."""
+    accepted = next((e for e in t.events if e.get("event") == "accepted"), {})
+    scope = accepted.get("scope_paths") or (sorted(t.ticket.scope) if t.ticket else [])
+    return [p["name"] for p in project.config["profiles"]
+            if any(globs_overlap(p.get("paths") or "**", path) for path in scope)]
 
 
 def _person_reasons(t):
@@ -194,7 +254,7 @@ def by_source(project, tickets, states, merged_at, reverted, start):
     return dict(sorted(rows.items()))
 
 
-def collect(project, tickets, since=None, states=None):
+def collect(project, tickets, since=None, states=None, now=None):
     """The numbers, for tickets merged on or after `since` (YYYY-MM-DD), or for every merged ticket. The grilling
     numbers count the tickets requested on or after `since`, whatever became of them; `states` says which were
     dropped."""
@@ -215,6 +275,12 @@ def collect(project, tickets, since=None, states=None):
     blocking, advisory, parked, disputes = Counter(), Counter(), 0, Counter()
     rounds, evidence, by_reason = [], Counter(), {}  # review runs per reviewed ticket; blocking evidence re-run; PERSON
     situations = Counter()
+    # What became of the merged tickets, by tier, and by what did the work. A ticket is old enough to count as held
+    # once it has been merged for [stats] held_days: before that it has had no time to fail.
+    held_days = project.config["stats"]["held_days"]
+    old = (now if now is not None else time.time()) - held_days * 86400
+    outcomes = {tier: _outcome_row() for tier in TIERS}
+    by_worker, by_profile, names_cause = {}, {}, 0
     for nn, t in tickets.items():
         ships = [e for e in t.events if e.get("event") == "shipped"]
         tier = (ships[-1] if ships else t.last("accepted") or {}).get("tier")
@@ -244,6 +310,19 @@ def collect(project, tickets, since=None, states=None):
             side = sizes["over" if ships[-1]["size"] > cap else "under"]
             side["merged"] += 1
             side["reverted_or_fixed"] += nn in reverted or nn in caused
+        review_usd, worker_usd = _cost(t)
+        names_cause += bool(t.ticket and t.ticket.get("caused_by"))
+        for out in (outcomes[tier], by_worker.setdefault(_worker_of(t), _outcome_row()),
+                    *[by_profile.setdefault(name, _outcome_row()) for name in _profiles_of(project, t)]):
+            out["merged"] += 1
+            out["reverted"] += nn in reverted
+            out["caused_fix"] += nn in caused
+            out["old_enough"] += merged_at[nn] <= old
+            out["held"] += merged_at[nn] <= old and nn not in reverted and nn not in caused
+            out["first_try"] += _first_try(t, ships)
+            out["review_usd"] += review_usd
+            out["worker_usd"] += worker_usd
+            out["acts"].append(_acts(t))
         adopted += t.last("adopted") is not None  # work that came in on a branch with no ticket: rail adopt
         found = t.last("base_checks")
         if found and found.get("checks"):
@@ -310,7 +389,10 @@ def collect(project, tickets, since=None, states=None):
     merged = sum(row["merged"] for row in tiers.values())
     overturned, disputed = disputes["dismissed"] + disputes["parked"], sum(disputes.values())
     return {
-        "since": since, "merged": merged, "left_out": len(tickets) - merged, "tiers": tiers, "raised": dict(raised),
+        "since": since, "merged": merged, "left_out": len(tickets) - merged,
+        "outcomes": {"held_days": held_days, "tiers": {tier: _outcome_done(row) for tier, row in outcomes.items()},
+                     "names_cause": names_cause, "by_worker": _split(by_worker), "by_profile": _split(by_profile)},
+        "tiers": tiers, "raised": dict(raised),
         "base_checks": base, "adopted": adopted, "split": split, "size": {"cap": cap, **sizes},
         "guides": {"situations": dict(sorted(situations.items()))},
         "grilling": grilling(tickets, states or {}, merged_at, start),
@@ -421,6 +503,35 @@ def render_guides(data):
     return ["", "Guides named: " + ", ".join(f"{name} {n}" for name, n in situations.items()) + "."]
 
 
+def _money(value):
+    return "-" if value is None else f"${value:.2f}"
+
+
+def render_outcomes(data):
+    """What became of the merged tickets: the first thing to read."""
+    out = data["outcomes"]
+    rows = list(out["tiers"].values())
+    days = out["held_days"]
+    lines = _table(["OUTCOMES", *out["tiers"]], [
+        ["merged", *[r["merged"] for r in rows]],
+        ["reverted afterwards", *[r["reverted"] for r in rows]],
+        ["caused a fix ticket", *[r["caused_fix"] for r in rows]],
+        [f"held, of those merged {days} days ago or more", *[f"{r['held']} of {r['old_enough']}" for r in rows]],
+        ["cost for each merged ticket", *[_money(r["cost_per_ticket"]) for r in rows]],
+        ["a person's acts, median for a ticket", *["-" if r["acts"]["median"] is None else f"{r['acts']['median']:g}"
+                                                   for r in rows]],
+        ["tickets with no act of a person", *[r["acts"]["none"] for r in rows]]])
+    lines.append(f"Merged tickets that name the ticket that caused them (caused_by): {out['names_cause']} of"
+                 f" {data['merged']}.")
+    head = ["merged", "reverted", "caused a fix", "first try", "cost each"]
+    for title, split in (("BY WORKER", out["by_worker"]), ("BY LANGUAGE", out["by_profile"])):
+        if split:
+            lines += ["", *_table([title, *head], [
+                [name, r["merged"], r["reverted"], r["caused_fix"], r["first_try"], _money(r["cost_per_ticket"])]
+                for name, r in split.items()])]
+    return lines + [""]
+
+
 def render(data):
     when = f" since {data['since']}" if data["since"] else ""
     if not data["merged"]:
@@ -432,7 +543,7 @@ def render(data):
     head = f"Rail stats: {data['merged']} merged ticket{'' if data['merged'] == 1 else 's'}{when}."
     if data["left_out"]:
         head += f" Not counted: {data['left_out']} {'merged earlier or not merged' if data['since'] else 'not merged'}."
-    lines = [head, ""]
+    lines = [head, "", *render_outcomes(data)]
     lines += _table(["TICKETS", *tiers], [
         ["merged", *[row["merged"] for row in tiers.values()]],
         ["the reviewer read it", *[row["reviewed"] for row in tiers.values()]],

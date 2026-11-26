@@ -224,3 +224,80 @@ class Reverts(RailTest):
         b.git("commit", "--quiet", "--allow-empty", "-m", 'Revert "1: fix add" (#2)', "-m", "Reverts acme/app#1")
         b.git("push", "--quiet", "origin", "HEAD:main")
         self.assertEqual(a.rail("stats")["stats"]["tiers"]["AUTO"]["reverted"], 1)
+
+
+class Outcomes(RailTest):
+    def history(self, config=CONFIG):
+        """Three merged AUTO tickets: 1 is reverted afterwards, and 3 says 2 caused it."""
+        p = self.fixture(config=config)
+        p.add(ticket(check="grep -q add src/calc.py"))
+        p.rail("next")
+        p.fix_calc("1")
+        p.queue_reviews(clean())
+        p.rail("advance", "1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
+        p.add(ticket(title="Add mul", check=MUL_CHECK))
+        p.rail("next")
+        p.write("src/mul.py", "def mul(a, b):\n    return a * b\n", base=p.worktree("2"))
+        p.queue_reviews(clean())
+        p.rail("advance", "2")
+        self.assertEqual(p.rail("advance", "2")["state"], "merged")
+        p.git("revert", "--no-edit", p.git("log", "--grep=^Ticket: 1$", "--format=%H", "main").strip())
+        p.add(ticket(title="mul of None", check=MUL_CHECK.replace("mul.mul(2, 3) == 6", "mul.mul(None, 3) == 0"),
+                     front=('caused_by = "2"',)))
+        p.rail("next")
+        p.write("src/mul.py", "def mul(a, b):\n    return (a or 0) * (b or 0)\n", base=p.worktree("3"))
+        p.queue_reviews(clean())
+        p.rail("advance", "3")
+        self.assertEqual(p.rail("advance", "3")["state"], "merged")
+        return p
+
+    def test_what_became_of_the_merged_tickets_comes_first(self):
+        p = self.history(CONFIG + "\n[stats]\nheld_days = 0\n")
+        out = p.rail("stats")["stats"]["outcomes"]
+        auto = out["tiers"]["AUTO"]
+        self.assertEqual({k: auto[k] for k in ("merged", "reverted", "caused_fix", "old_enough", "held")},
+                         {"merged": 3, "reverted": 1, "caused_fix": 1, "old_enough": 3, "held": 1})  # only 3 held
+        self.assertEqual((auto["review_usd"], auto["worker_usd"], auto["cost_per_ticket"]), (0.03, 0.0, 0.01))
+        self.assertEqual(auto["acts"], {"total": 0, "median": 0, "none": 3})
+        self.assertEqual((out["held_days"], out["names_cause"]), (0, 1))
+        self.assertEqual((out["by_worker"], out["by_profile"]), ({}, {}))  # no group of five tickets
+        text = p.rail("stats", raw=True).stdout
+        self.assertLess(text.index("OUTCOMES"), text.index("TICKETS"))
+        self.assertRegex(text, r"\ncaused a fix ticket +1 +0\n")
+        self.assertRegex(text, r"\nheld, of those merged 0 days ago or more +1 of 3 +0 of 0\n")
+        self.assertRegex(text, r"\ncost for each merged ticket +\$0\.01 +-\n")
+        self.assertIn("Merged tickets that name the ticket that caused them (caused_by): 1 of 3.", text)
+
+    def test_a_ticket_merged_today_is_not_yet_counted_as_held(self):
+        p = self.history()
+        auto = p.rail("stats")["stats"]["outcomes"]["tiers"]["AUTO"]
+        self.assertEqual((auto["merged"], auto["old_enough"], auto["held"]), (3, 0, 0))
+        self.assertRegex(p.rail("stats", raw=True).stdout, r"\nheld, of those merged 14 days ago or more +0 of 0 +0 of 0\n")
+
+    def test_a_persons_acts_are_counted_for_each_merged_ticket(self):
+        p = self.fixture()
+        p.add(ticket(title="Add a status code", tier="PERSON", scope=("api/**",), check="grep -q 201 api/handlers.py"))
+        p.rail("accept", "1")
+        p.rail("next")
+        p.write("api/handlers.py", "def handle():\n    return 201\n", base=p.worktree("1"))
+        p.queue_reviews({"summary": "One.", "findings": [ADVISORY | {"file": "api/handlers.py"}]},
+                        {"summary": "No leak.", "findings": []})
+        p.rail("advance", "1")
+        self.assertEqual(p.rail("answer", "1", "F1", "parked", "--owner")["reason"]["code"], "MERGE_BY_PERSON")
+        p.rail("accept", "1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
+        person = p.rail("stats")["stats"]["outcomes"]["tiers"]["PERSON"]
+        self.assertEqual(person["acts"], {"total": 3, "median": 3, "none": 0})  # two approvals and one finding decided
+        self.assertRegex(p.rail("stats", raw=True).stdout, r"\na person's acts, median for a ticket +- +3\n")
+
+    def test_a_split_shows_groups_of_five_and_sums_the_smaller_ones(self):
+        stats = engine_stats()
+        groups = {"big": dict(stats._outcome_row(), merged=5, reverted=1, acts=[0] * 5, review_usd=1.0),
+                  "small": dict(stats._outcome_row(), merged=2, acts=[1, 0]),
+                  "smaller": dict(stats._outcome_row(), merged=1, caused_fix=1, acts=[2])}
+        split = stats._split(groups)
+        self.assertEqual(list(split), ["big", "other"])
+        self.assertEqual((split["big"]["reverted"], split["big"]["cost_per_ticket"]), (1, 0.2))
+        self.assertEqual((split["other"]["merged"], split["other"]["caused_fix"], split["other"]["acts"]["total"]), (3, 1, 3))
+        self.assertEqual(stats._split({"small": dict(stats._outcome_row(), merged=4, acts=[0] * 4)}), {})
