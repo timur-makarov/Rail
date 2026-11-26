@@ -21,6 +21,9 @@ fix = "Create migrations with make migration."
 - `fix` is printed to the agent when the rule breaks.
 - `why` is a note for whoever reads the config, such as the ticket that added the rule. The engine prints it nowhere.
 - `allow` lists paths the rule skips.
+- `flag = true` makes a rule that fails nothing: an added line that matches goes onto the pull request's "Read
+  these" list (`rail docs github`), with the rule's `why` as its reason. Write one for what gives the code new
+  reach in this project: reading an environment variable, a new route, an outbound URL. The seed ships none.
 - Globs, here and everywhere in the config: `**` matches across folders, `*` and `?` stay inside one, and
   `{ts,tsx}` matches either word, as in `**/*.{ts,tsx}`.
 - A rule prevents mistakes; real dependency analysis belongs in `verify`, with any checker the project likes.

@@ -19,6 +19,7 @@ LABELS = {
     "rail:stop": ("b60205", "Rail: while an issue with this label is open, Rail does nothing here"),
     # only a person sets it, on a merged pull request; the engine removes it once the revert ticket is filed
     "rail:revert": ("b60205", "Rail: on a merged pull request, files a ticket that reverts it"),
+    "rail:look": ("fbca04", "Rail: merged with no person, and its Read these list is not empty"),  # the engine sets it
 }
 
 STOP_PATHS = re.compile(r"(?im)^[ \t]*paths:[ \t]*(\S.*)$")
@@ -218,7 +219,7 @@ def doctor_checks(project, repo):
         found.append(("labels", False, str(e)))
         return found
     missing = [name for name in LABELS if name not in names]
-    found.append(("labels", not missing, "rail, rail:go, rail:needs-you and rail:hold exist" if not missing
+    found.append(("labels", not missing, f"all {len(LABELS)} labels exist" if not missing
                   else f"missing labels: {', '.join(missing)}; rail init creates them"))
     return found
 
@@ -343,6 +344,14 @@ class Forge:
         except ForgeError as e:
             if e.status != 404:
                 raise
+
+    def line_comments(self, number):
+        """The review comments on a pull request's lines, every page."""
+        return pages(f"repos/{self.repo}/pulls/{number}/comments?per_page={PAGE}")
+
+    def post_review(self, number, sha, comments):
+        """One review that only comments: each comment on a line of the pull request's head."""
+        self.call("POST", f"pulls/{number}/reviews", {"commit_id": sha, "event": "COMMENT", "comments": comments})
 
     def comments(self, number):
         return self.call("GET", f"issues/{number}/comments?per_page=100") or []

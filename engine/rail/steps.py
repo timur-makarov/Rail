@@ -428,7 +428,12 @@ def describe(project, t, ticket, tier):
     risk += "".join(f"\n\nThe reviewer found what a revert doesn't undo: {said}" for said in ledger.asked_for_person())
     advisory = [ledger.describe(fid, with_answer=False) for fid in ledger.open_advisory()]
     external = ticket.get("external_id", "") or ""
+    from . import readthese
+    listed = readthese.items(project, t, ticket, tier, ledger, changed)
+    added_count = sum(len(lines) for lines in readthese.numbered(project, t.ref).values())
     body = [
+        # First, and built from facts: the author's own "Look at" below frames the change as its author sees it.
+        "## Read these", *readthese.section(project, ticket, listed, added_count, reviewed), "",
         "## Why", f"{ticket.sections.get('Why', '')} (ticket {t.id})", "",
         "## Look at", ticket.sections.get("Look at") or "(not written)", "",
         "## Evidence", "| Step | Status |", "|---|---|", *rows, "",

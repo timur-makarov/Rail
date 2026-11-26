@@ -443,6 +443,26 @@ def init(cwd, skills_to=None):
         _write(target, text)
         step(dest, True, "added")
 
+    # GitHub folds a file marked linguist-generated in a pull request's diff, so a person reads what was written.
+    from .rules import LOCKFILES
+    try:
+        with open(os.path.join(rail_dir, "config.toml"), "rb") as f:
+            generated = [g for g in (tomllib.load(f).get("size") or {}).get("exclude") or [] if isinstance(g, str)]
+    except (OSError, tomllib.TOMLDecodeError):
+        generated = []
+    attributes = os.path.join(root, ".gitattributes")
+    had = open(attributes).read() if os.path.exists(attributes) else ""
+    # A glob with braces has no spelling in .gitattributes; a lockfile stays in sight, since it says what is installed.
+    new = [g for g in generated if "{" not in g and " " not in g and os.path.basename(g) not in LOCKFILES
+           and not any(line.split()[:1] == [g] for line in had.splitlines())]
+    if new:
+        _write(attributes, (had.rstrip("\n") + "\n" if had.strip() else "")
+               + "".join(f"{g} linguist-generated\n" for g in new))
+        step(".gitattributes", True, f"marked as generated, so GitHub folds them in a diff: {', '.join(new)}")
+    else:
+        step(".gitattributes", False, "nothing in [size] exclude to mark as generated" if not generated
+             else "the generated files are marked already")
+
     agents = os.path.join(root, "AGENTS.md")
     existing = open(agents).read() if os.path.exists(agents) else ""
     if any(line.strip() == "## Rail" for line in existing.splitlines()):

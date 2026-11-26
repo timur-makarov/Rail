@@ -79,6 +79,8 @@ def violations(project, ref, cwd=None):
         return found
     lines, new_files = added(project, ref, cwd)
     for rule in project.config["rules"]:
+        if rule.get("flag"):
+            continue  # a flag rule fails nothing: its matches go on the pull request's "Read these" list
         files, allow = rule.get("files", "**"), rule.get("allow", [])
         for path, added_lines in lines.items():
             if not globmatch(files, path) or match_any(allow, path):

@@ -111,6 +111,15 @@ def handle(state, method, path, body):
               "base": body["base"], "state": "open", "merged": False, "labels": []}
         pulls.append(pr)
         return respond(201, pr_view(state, pr))
+    if len(rest) == 3 and rest[0] == "pulls" and rest[2] == "comments" and method == "GET":
+        return paged(state, url, query, state.setdefault("line_comments", {}).get(rest[1], []))
+    if len(rest) == 3 and rest[0] == "pulls" and rest[2] == "reviews" and method == "POST":
+        kept = state.setdefault("line_comments", {}).setdefault(rest[1], [])
+        for c in body.get("comments", []):
+            kept.append({"path": c["path"], "line": c["line"], "body": c["body"], "user": {"login": "owner"},
+                         "author_association": "OWNER", "created_at": "2026-11-11T12:00:00Z",
+                         "commit_id": body.get("commit_id")})
+        return respond(200, {"id": len(kept), "state": "COMMENTED"})
     if rest == ["issues"] and method == "POST":
         number = state.get("next_number", 1)
         state["next_number"] = number + 1

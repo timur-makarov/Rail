@@ -55,7 +55,8 @@ DEFAULTS = {
 }
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-RULE_KEYS = {"id": str, "files": str, "forbid": list, "only_in": str, "allow": list, "fix": str, "why": str}
+RULE_KEYS = {"id": str, "files": str, "forbid": list, "only_in": str, "allow": list, "fix": str, "why": str,
+             "flag": bool}
 PROFILE_KEYS = {"name": str, "paths": str}
 SENSOR_KEYS = {"id": str, "paths": list, "command": str, "ok_exit": list, "violations_exit": list, "fix": str}
 # Arrays of tables: each item's keys and types, and the key every item needs.

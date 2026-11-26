@@ -336,9 +336,16 @@ def person_comments(project, f):
         return ""
     moves = [e["at"] for e in f.t.events if e.get("event") != "saved" and e.get("at")]  # a save isn't a move
     since = moves[-1] if moves else ""
-    said = [strip_hidden(c["body"])[0].strip() for c in project.forge.comments(f.pr["number"])
-            if c.get("created_at", "") >= since and c.get("body") and c.get("author_association") in TRUSTED
-            and ENGINE_MARK not in c["body"]]
+    def theirs(c):
+        return (c.get("created_at", "") >= since and c.get("body") and c.get("author_association") in TRUSTED
+                and ENGINE_MARK not in c["body"])
+
+    said = [strip_hidden(c["body"])[0].strip() for c in project.forge.comments(f.pr["number"]) if theirs(c)]
+    # A comment on a line of the diff, such as an answer to a "Read these" item, is the person's word too.
+    for c in project.forge.line_comments(f.pr["number"]):
+        text = strip_hidden(c["body"])[0].strip() if theirs(c) else ""
+        if text:
+            said.append(f"{c.get('path')}:{c.get('line') or c.get('original_line')}: {text}")
     return "\n".join(s for s in said if s)  # what GitHub hides in a comment, its reader didn't write for the agent
 
 
@@ -1279,11 +1286,36 @@ def person_next(f):
     return f.state == "in-ci" and not f.auto and f.pr_open and f.pushed and not f.behind
 
 
+def show_read_these(project, f, look=False):
+    """Put each "Read these" item on its line of the pull request, as a review comment, once per patch. With `look`,
+    an AUTO ticket about to merge with a list that isn't empty gets rail:look: the search is:merged label:rail:look
+    is what a person reads after the fact."""
+    from . import readthese
+    from .forge import ForgeError
+
+    if not f.pr_open:
+        return
+    posted = project.cache_read("read-these", f.id) == f.patch_id
+    if posted and not look:
+        return
+    found = readthese.items(project, f.t, f.ticket, f.tier, f.ledger, project.changed_files(f.t.ref))
+    try:
+        if not posted:
+            readthese.post(project, f.t, f.pr, found)
+            project.cache_write("read-these", f.id, f.patch_id)
+        if look and found and "rail:look" not in f.labels:
+            project.forge.add_labels(f.pr["number"], ["rail:look"])
+    except ForgeError:
+        pass  # the list is in the description either way
+
+
 def label_wait(project, f, code):
     """The inbox is one saved search, is:open label:rail:needs-you: label each wait's PR. The engine only ever sets
     and removes this label. It never reads it as a person's word: that is rail:hold."""
     from .forge import ForgeError
 
+    if code == "MERGE_BY_PERSON" or person_next(f):
+        show_read_these(project, f)  # the person is about to read the change
     if f.pr_open and "rail:needs-you" not in f.labels:
         try:
             project.forge.add_labels(f.pr["number"], ["rail:needs-you"])
@@ -1391,6 +1423,7 @@ def forge_merge(project, f, receipts):
     pr = f.pr
     ticket = Ticket(gitx.read_blobs([f"{f.t.ref}:{ticket_path(f.id)}"], project.root)[f"{f.t.ref}:{ticket_path(f.id)}"])
     subject, body = steps.describe(project, f.t, ticket, f.tier)
+    show_read_these(project, f, look=f.auto)
     requested, why = project.forge.merge(pr["number"], pr["head"]["sha"], f"{subject} (#{pr['number']})", body)
     if requested:
         project.cache_write("merge", f.id, f"{pr['head']['sha']} {int(time.time())}")
@@ -1668,7 +1701,7 @@ def cmd_init(args):
             try:
                 created = forge.create_labels(repo)
                 receipts.append({"step": "labels", "status": "ran", "result": "pass",
-                                 "detail": f"created {', '.join(created)}" if created else "all three exist"})
+                                 "detail": f"created {', '.join(created)}" if created else f"all {len(forge.LABELS)} exist"})
             except forge.ForgeError as e:
                 receipts.append({"step": "labels", "status": "unavailable", "detail": str(e)})
     brief = ("Rail is installed. Next: rail next, which returns the init task: the project's commands, ## Areas,"
