@@ -51,6 +51,12 @@ ticket that improves how the project is verified; the engine gives each in the b
 | `rail-grill` | The request should become a ticket | The ticket, filed (`rail docs grill`) |
 | `rail-slice` | The work is more than one ticket | Several tickets with their order |
 
+**Where the skills are written.** `SKILL.md` is a format several agents read, each from a folder of its own.
+`[init] skill_dirs` lists the folders `rail init` writes the skills to, `.claude/skills` by default. For a
+worker or reviewer command that is another agent's CLI, add that agent's folder and run `rail init` again: it
+writes what is missing and leaves the rest. `rail init --skills DIR` (repeat it for several) sets the folders
+of a new project, and the `[guides]` lines that name a skill then read it from the first.
+
 A seed skill can carry a docs page instead of naming it: a line `<!-- include engine/docs/grill.md -->` in
 the seed is replaced by that page's text when `rail init` installs the skill. To take only some sections, put
 each heading after a `#`, as it stands, spaces and all, such as

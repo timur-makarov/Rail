@@ -323,7 +323,39 @@ def _base_branch(root):
     return current or "main"
 
 
-def init(cwd):
+SKILL_DIR = ".claude/skills"
+
+
+def skill_dirs(root, asked=None):
+    """The folders the skills are written to: `asked` (rail init --skills), else [init] skill_dirs of the project's
+    config, else the default. Each is a path from the repository root."""
+    dirs = list(asked or [])
+    if not dirs:
+        try:
+            with open(os.path.join(root, ".rail", "config.toml"), "rb") as f:
+                dirs = (tomllib.load(f).get("init") or {}).get("skill_dirs") or []
+        except (OSError, tomllib.TOMLDecodeError):
+            dirs = []
+    dirs = [d.strip().strip("/") for d in dirs if isinstance(d, str) and d.strip().strip("/")] or [SKILL_DIR]
+    bad = next((d for d in dirs if os.path.isabs(d) or d.startswith("/") or ".." in d.split("/")), None)
+    if bad:
+        raise RailError(f"a skill folder is a path inside the repository, from its root; got '{bad}'")
+    return list(dict.fromkeys(dirs))
+
+
+def with_skill_dirs(text, dirs):
+    """The seed config's text for skill folders other than the default: [init] skill_dirs names them, and the
+    [guides] pages that are skills are read from the first."""
+    if dirs == [SKILL_DIR]:
+        return text
+    text = _set_list(text, "init", "skill_dirs", dirs)
+    start = text.index("\n[guides]")
+    end = text.find("\n[", start + 1)
+    end = len(text) if end < 0 else end
+    return text[:start] + text[start:end].replace(f'"{SKILL_DIR}/', f'"{dirs[0]}/') + text[end:]
+
+
+def init(cwd, skills_to=None):
     """Returns the receipts: one step per thing init adds, `not_run` when the project already has it."""
     seed = os.path.join(FRAMEWORK, "seed")
     if not os.path.isdir(seed):
@@ -386,9 +418,9 @@ def init(cwd):
     # The skills a person's session starts, as Claude Code skills. The engine's own pages for the briefs stay in
     # .rail/engine/guides; [guides] names both kinds.
     skills = os.path.join(seed, "skills")
-    for name in sorted(os.listdir(skills)):
-        if os.path.isfile(os.path.join(skills, name, "SKILL.md")):
-            copies[f"skills/{name}/SKILL.md"] = f".claude/skills/{name}/SKILL.md"
+    folders = skill_dirs(root, skills_to)
+    skill_copies = [(f"skills/{name}/SKILL.md", f"{folder}/{name}/SKILL.md") for folder in folders
+                    for name in sorted(os.listdir(skills)) if os.path.isfile(os.path.join(skills, name, "SKILL.md"))]
     packs = os.path.join(FRAMEWORK, "packs")
     for name in sorted(os.listdir(packs)) if os.path.isdir(packs) else []:
         dest = os.path.join(rail_dir, "packs", name)
@@ -397,7 +429,7 @@ def init(cwd):
         else:
             shutil.copytree(os.path.join(packs, name), dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
             step(f"pack {name}", True, f"copied to .rail/packs/{name}")
-    for src, dest in copies.items():
+    for src, dest in [*copies.items(), *skill_copies]:
         target = os.path.join(root, dest)
         if os.path.exists(target):
             step(dest, False, "the project has it already")
@@ -406,7 +438,7 @@ def init(cwd):
             text = f.read()
         if src == "config.toml":
             text = text.replace('base_branch = "main"', f'base_branch = "{_base_branch(root)}"', 1)
-            text = with_profiles(text, found)
+            text = with_skill_dirs(with_profiles(text, found), folders)
         text = include(text)
         _write(target, text)
         step(dest, True, "added")

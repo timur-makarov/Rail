@@ -1658,7 +1658,7 @@ def release_issue(project, f, reason=""):
 def cmd_init(args):
     from . import init
 
-    root, receipts = init.init(os.getcwd())
+    root, receipts = init.init(os.getcwd(), args.skills)
     project = Project(root)
     repo = None
     if project.remote:
@@ -2209,7 +2209,10 @@ def parser():
     provision = verb("provision", "install what the checks need on this machine (cloud sessions and CI only)",
                      ticket=False)
     provision.add_argument("--force", action="store_true", help="run it again on a machine that has it")
-    verb("init", "set this project up for Rail", ticket=False)
+    init_ = verb("init", "set this project up for Rail", ticket=False)
+    init_.add_argument("--skills", action="append", metavar="DIR",
+                       help="a folder for the SKILL.md files, from the repository root; repeat it for several. The"
+                            " default is [init] skill_dirs")
     verb("doctor", "check the setup and print what's missing", ticket=False)
     verb("ci", "the rail check: the ship checks again on a pull request's head", ticket=False)
     hook = sub.add_parser("hook")  # internal: Claude Code hooks call it; not a verb

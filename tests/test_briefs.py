@@ -48,6 +48,8 @@ ALLOWED = [
     ("seed/skills/rail-blast-radius/SKILL.md", "there is no next skill", "says there is nothing more to read"),
     ("review", ".claude/skills/ (",
      "the brief's directory digest lists the project's folders; a folder's name is no instruction"),
+    ("engine/rail/cli.py", "--skills", "an option of rail init, which a person types when setting a project up"),
+    ("engine/rail/config.py", ".claude/skills", "the default of [init] skill_dirs: a folder's name is no instruction"),
     ("engine/rail/docs.py", None, "the `rail docs` verb and its generated pages, which are for people"),
     ("engine/rail/init.py", None, "installs the skills; its strings are receipts for the person running init"),
 ]

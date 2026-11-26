@@ -92,6 +92,9 @@ READERS = {
     "rules": "ship and CI: structure rules on added lines and files (rail docs rules)",
     "sensors": "ship and CI, last: each entry runs a tool when the change touches its paths, and a line of its output"
                " on a line the change adds fails the step (rail docs sensors)",
+    "init.skill_dirs": "init: the folders, from the repository root, that rail init writes the skills to. An agent"
+                       " other than Claude Code reads SKILL.md files from a folder of its own: add it, and run rail"
+                       " init again. The [guides] pages that are skills name the first",
     "tools": "next, advance, review and doctor: a [tools.NAME] table for each thing the work reaches outside the"
              " repository, listed in the briefs; a ticket is not claimed while a name in its `env` is not set"
              " (rail docs tools)",

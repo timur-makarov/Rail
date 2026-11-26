@@ -48,6 +48,7 @@ DEFAULTS = {
     # project whose config has no [guides] table gets no guide.
     "guides": {key: "" for key in ("start", "stuck", "findings", "conflict", "contract", "split", "setup")},
     "rules": [],
+    "init": {"skill_dirs": [".claude/skills"]},
     "sensors": [],
     "tools": {},
     "profiles": [],
