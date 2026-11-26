@@ -1,9 +1,15 @@
-# Code that agents can keep changing: what could be built
+# Code that agents can keep changing: what is left to build
 
-This page is a proposal. None of it is implemented. It says how Rail could keep agent-written code from
+This page is a proposal: what remains of a larger one. It says how Rail could keep agent-written code from
 decaying, how it could keep what each step learns from being lost, and how each part would be tested before it
 is kept. Status: written 2026-11-25 from Rail's engine code and docs, published research up to November 2026
-(sources at the end), and the owner's decisions of 2026-11-24. Nothing here was run.
+(sources at the end), and the owner's decisions of 2026-11-24. Nothing below was run.
+
+Two of its parts are built and are no longer described here: the `sensors` step with `[[sensors]]`, the
+base's configs, `SENSOR(NN)` and violations only on added lines (`rail docs sensors`); and what a brief now
+carries from earlier work: `## Why`, the decided rows, `## Tried`, the last tickets on the same paths, open
+markers, `Noticed:` and `TODO(NN)` (`rail docs loop`, `rail docs rules`). No sensor is on by default: the first
+ones below wait for their test.
 
 Marks: **confirmed** means read in Rail's code or on the primary source while writing this; **reported**
 means a research agent read the primary source and it was not read again; **inferred** means it follows from
@@ -56,10 +62,15 @@ names that cost and the one place that handles it.
 | Drift: erosion per area, duplicated share, dead code totals, long functions and files, deep nesting, many parameters, files changed per ticket | slow decay no single change shows | trend, read by the sweep |
 | Pass-throughs, options no caller uses, leaky interfaces, misleading names, code that search can't find, a concept in the wrong area, a special case in a shared flow | design cost no tool measures | `rail-build` (prevent), the sweep (find) |
 
-## Part 1: sensors (core)
+## Part 1: the first sensors (core)
 
-A **sensor** is a ship step backed by a tool. A **violation** is one line of its output. ("Finding" stays the
-word for a review finding, and `Check:` stays the word for a Done Contract line.)
+A **sensor** is a ship step backed by a tool, and a **violation** is one line of its output (`rail docs
+sensors`). The engine runs any sensor a project declares. None ships switched on, because none has passed its
+test (test 2).
+
+**Stage 1 is language-neutral:** lizard (complexity growth), jscpd (new copies), and each language's
+suppression markers added to `no-new-suppressions` (text, no tool). These match the strongest evidence (a
+complexity signal in the loop; agents duplicating code) and need no profile.
 
 ```toml
 [[sensors]]
@@ -71,43 +82,13 @@ violations_exit = [1]               # violations printed
 fix = "Call the code that already does this, or move both copies into one function."
 ```
 
-1. **One step, last.** `sensors` runs after `checks`, at the end of ship (`engine/rail/steps.py:190`), so the
-   Done Contract and `verify` speak first. It counts toward the retry budget and cap like any step.
-2. **Only new code fails.** Each violation line reads `path:start[-end]: message`. The engine parses the hunks
-   of the change's diff and keeps a violation whose lines overlap an added line, the principle structure rules
-   follow ("old code never fails", `engine/docs/rules.md:3-4`). This needs new code: `rules.added` returns the
-   added lines' text without their numbers (`engine/rail/rules.py:22-36`, confirmed). Lines git can mark as
-   moved are dropped; reading that from git is listed under "Assumed, not verified". Old violations and
-   whole-program findings in untouched files go to the trend.
-3. **A touched legacy function doesn't block.** The complexity sensor uses lizard, which reads source text in
-   all four languages and needs no build. It runs on the old and new text of each touched file. It reports a
-   function when its span overlaps added lines, it is over the cap after the change, and its cyclomatic count
-   grew. Growth in the cyclomatic count stands in for "the change added branches" (inferred proxy).
-4. **The engine passes the base commit's configs.** `$RAIL_SENSORS` points at a copy of `.rail/sensors/` taken
-   from the base commit, and `$RAIL_MAP` at the base's `ARCHITECTURE.md`. A ticket that edits them changes
-   nothing for its own ship. `[[sensors]]` lives in `.rail/config.toml`, which is already in `person_paths`
-   (`seed/config.toml:8`, confirmed); `.rail/sensors/**` joins it (Decision 3). Configs a project owns for
-   its own tools (`tsconfig.json`, Cargo `[lints]`) stay editable; loosening them is what the reviewer already
-   looks for ("a check weakened, skipped or deleted so that it passes", `engine/rail/review.py:42-44`,
-   confirmed).
-5. **Exits.** An exit the sensor doesn't declare is `could_not_run`, with the tool's output in the brief. Its
-   brief needs its own text: today `could_not_run` says to install the tool (`table.py:150-152`), which is
-   wrong for a crash or a config error. A tool missing on a person's own machine is `could_not_run` like any
-   other command (`engine/docs/retries.md:29-33`); `rail doctor` lists the tools each sensor needs.
-6. **A wrong sensor has a way out.** A comment `SENSOR(NN): why` on a line, or on the line above it, with the
-   ticket's number, makes the engine drop that line's violations. No tool suppression is needed, so
-   `no-new-suppressions` is unchanged. A structure rule refuses `SENSOR:` without a number, as it does for
-   `SHORTCUT` (`seed/config.toml:86-90`). The reviewer's brief asks it to judge each new marker's reason;
-   `rail stats` and the sweep count markers. Without the marker, a false violation with no fix in scope fails
-   three times: the retry budget (2), consult, one more attempt, then a person (`engine/docs/retries.md:11-13`,
-   confirmed).
-7. **Output.** Each sensor names a one-line format and turns off its tool's caps on repeated findings
-   (golangci-lint shows 3 of a kind and 50 per linter by default; reported). The engine strips colour codes
-   and skips generated files and lockfiles, as the size check does.
+**A touched legacy function doesn't block.** The complexity sensor uses lizard, which reads source text in
+all four languages and needs no build. It runs on the old and new text of each touched file. It reports a
+function when its span overlaps added lines, it is over the cap after the change, and its cyclomatic count
+grew. Growth in the cyclomatic count stands in for "the change added branches" (inferred proxy).
 
-**Stage 1 is language-neutral:** lizard (complexity growth), jscpd (new copies), and each language's
-suppression markers added to `no-new-suppressions` (text, no tool). These match the strongest evidence (a
-complexity signal in the loop; agents duplicating code) and need no profile.
+**Output.** Each sensor names a one-line format and turns off its tool's caps on repeated findings
+(golangci-lint shows 3 of a kind and 50 per linter by default; reported).
 
 ## Part 2: language profiles (stage 2)
 
@@ -260,13 +241,15 @@ Fable, and Rail's workers run on Sonnet 5.5 and Opus 5.5.
    returning gets a "make it a check" ticket; when that check is a sensor or rule in `.rail/config.toml`, the
    ticket is PERSON, as such tickets are today.
 4. **It collects what tickets left behind** (Part 6).
-5. **The findability probe (optional, Decision 4).** For up to five tickets merged since the last sweep, a
+5. **The findability probe (optional, Decision 3).** For up to five tickets merged since the last sweep, a
    fresh agent gets only the ticket's `## Why` and the repository at the ticket's base, and names the files it
    would change. The score is its overlap with the files the ticket changed. A falling score per area means the
    next agent can no longer find its way there. Inferred: the merged diff is the answer key, so no person
    grades it. It adds up to five model runs per sweep.
 
 ## Part 6: nothing learned is lost (core)
+
+The brief's own part of this is built. What is left is the sweep's: collecting what the tickets wrote down.
 
 Information survives when it is written down outside any context window, kept in one known place, sent by the
 engine to the next agent that needs it, marked confirmed, inferred or decided, and closed: done, a ticket, a
@@ -276,15 +259,12 @@ applies to its paths and its situation.
 
 | Stage | Learned | Today (confirmed) | Change |
 |---|---|---|---|
-| Request | Intent, constraints, the person's answers | In the ticket; the implement brief names the ticket file but carries neither `## Why` nor the decided rows (`table.py:90-110`) | The implement brief carries `## Why` and the `VERIFIED: decided` rows |
-| Building | What was tried, what was ruled out | The worker's context only | A `## Tried` section in the ticket, one line per attempt, sent in the next `STEP_FAILED` and `IMPLEMENT` brief. Consult's brief strips it as it strips `## Look at` (`consult.py:31-32`); the reviewer sees the whole ticket today, `## Look at` included (`review.py:240`) |
-| Earlier tickets on the same paths | Decided rows, "not tested" lines, open markers | Merged ticket files and journals on the base branch | `rail context NN` lists, for the ticket's paths, the last five merged tickets: title, the first line of `## Why`, decided rows, "not tested" lines, open `SHORTCUT` and `TODO` markers. The implement brief includes it |
-| Out-of-scope problems | Bugs and smells noticed in passing | A `## Look at` line, if any; nothing collects it | `Noticed:` lines. The sweep collects them, and the "not tested" lines |
+| Out-of-scope problems | Bugs and smells noticed in passing | `Noticed:` lines under `## Look at`, which the brief asks for; nothing collects them | The sweep collects them, and the "not tested" lines |
 | Review | Findings and answers | The sweep collects parked findings and the checks of fixed ones (`sweep.py:97-121`) | The sweep also collects declined findings, grouped by kind |
 | A person's word | `rail accept` notes, pull request comments | The briefs until the next ship (`state.py:180-183`) | The sweep collects every note since the last sweep and files a ticket for each that reads as a standing rule |
 | Repeated failures | Failure signatures | Counted within one ticket | The sweep flags a signature that recurs across tickets and files a check or an `AGENTS.md` line |
 | Worker runs | Commands that failed before the right one, commands not found, denied calls, files re-read | Lost with the worker's context | The counts in each `worked` event, from a run log kept in the local cache (`proposals/worker.md`, "What the runs teach"); a pattern in three or more tickets gives the sweep a task, and the agent files a ticket for it |
-| Work left for later | `TODO` and `FIXME` comments | Free text | A structure rule: a `TODO` or `FIXME` names the open ticket that will do it, `TODO(NN)`, filed with `rail add`. The sweep files a removal ticket when that ticket merged or was dropped and the comment is still there. (`SHORTCUT(NN)` names the current ticket; `TODO(NN)` names a later one) |
+| Work left for later | `TODO` and `FIXME` comments | A structure rule: each names the open ticket that will do it, `TODO(NN)` | The sweep files a removal ticket when that ticket merged or was dropped and the comment is still there |
 
 Left out on purpose: a free-form reasoning log. Each change above is a section or an event with one reader and
 one way to close.
@@ -376,34 +356,31 @@ more than a few dozen tickets to show; the worker's cost, until `rail work` (`pr
 
 One pull request each, with docs and `CHANGELOG.md`. Nothing becomes a default before its test.
 
-1. Engine: `[[sensors]]`, the `sensors` step, hunk-line parsing, `$RAIL_SENSORS` and `$RAIL_MAP` from the
-   base, `SENSOR(NN)` and its rule, the `could_not_run` brief for a sensor, the reviewer's line on markers,
-   `rail doctor` listing sensor tools; gate cases (test 1). No sensor is on by default.
-2. Stage 1 (lizard, jscpd, suppression markers) and its past-commit test (test 2); then on by default.
-3. Part 6, the engine changes: `## Why` and decided rows in the brief, `## Tried`, `Noticed:`, `TODO(NN)`,
-   the context history. Test 5 starts here.
-4. The profiles, one pull request per language, each with its past-commit test, candidate rule sets
+1. Stage 1 (lizard, jscpd, suppression markers) and its past-commit test (test 2); then on by default.
+2. The profiles, one pull request per language, each with its past-commit test, candidate rule sets
    included; then on by default.
-5. The `Uses` column: `areas.py`, doc-lint, the review brief, the boundary sensors.
-6. The design sweep: reviewed merges, the `trend` event, refactor tickets, the collections.
-7. After the model arms (test 3): the `rail-build` and `rail-debug` text.
-8. The probe, after its pilot (test 4), if Decision 4 keeps it.
+3. The `Uses` column: `areas.py`, doc-lint, the review brief, the boundary sensors.
+4. The design sweep: reviewed merges, the `trend` event, refactor tickets, the collections of Part 6.
+5. After the model arms (test 3): the `rail-build` and `rail-debug` text.
+6. The probe, after its pilot (test 4), if Decision 3 keeps it.
 
 Tests 3 and 4 use models and wait until the owner restarts the paused model tests.
 
 ## Decisions
 
 **Made by the owner (2026-11-24):** no design review step; oxlint for TypeScript; the `Uses` column; a marker
-for a wrong sensor (now `SENSOR(NN): why`, read by the engine, so `no-new-suppressions` needs no exemption).
+for a wrong sensor (`SENSOR(NN): why`, read by the engine, so `no-new-suppressions` needs no exemption).
+
+**Built as proposed, for the owner to confirm:** `.rail/sensors/**` is in `person_paths`, as
+`.rail/config.toml` already is, since both hold the gates. `ARCHITECTURE.md` stays out: every ticket that adds
+a directory must edit it.
 
 **Open:**
 
 1. The refactor cap as "open at once" (`max_refactor_open`, proposed) or "per sweep".
 2. The touched-legacy rule: fail only when a function over its cap gets more complex (proposed), or whenever a
    touched function is over its cap.
-3. `.rail/sensors/**` in `person_paths`. Proposed: yes, as `.rail/config.toml` already is, since both hold the
-   gates. `ARCHITECTURE.md` stays out: every ticket that adds a directory must edit it.
-4. The probe: build it after its pilot, or not at all.
+3. The probe: build it after its pilot, or not at all.
 
 ## Sources
 
