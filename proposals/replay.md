@@ -50,17 +50,17 @@ project's engine and a config key turns it on.
    it (inferred: a fresh `git init` with one commit has no history to read). The commit's message has a
    `Ticket: NN` line for every ticket merged on the base before that parent, so the engine sees those tickets
    as merged, not dropped. Without them, a ticket whose `after` names one would wait as `AFTER_DROPPED`
-   (`engine/rail/project.py:155-166`, `engine/rail/state.py:262-263`, confirmed).
+   (`engine/rail/project.py`, `engine/rail/state.py`, confirmed).
 2. **The engine.** The project runs its own engine from `.rail/engine/` (`bin/rail`, confirmed), and the
    parent's may be older than the arms need: the config loader refuses keys it doesn't know
-   (`engine/rail/config.py:52-53`, confirmed), and an engine from before `rail work` can't run a worker.
+   (`engine/rail/config.py`, confirmed), and an engine from before `rail work` can't run a worker.
    So the copy takes `.rail/engine/`, `.rail/bin/` and `.claude/` from the project's current base, and
    `.rail/config.toml` from the parent, with the arm's overrides on top. A ticket whose old config the current
    engine refuses doesn't qualify. Replay measures the current setup on old tasks, not the old setup.
 3. **The ticket.** A ticket qualifies only when its Done Contract never changed: the merged file's Done
    Contract hashes to the `done` of its first `accepted` event. That event keeps the hash, not the text
-   (`engine/rail/cli.py:656-659`, confirmed), and the engine finds the first text from the ticket's branch
-   (`engine/rail/review.py:225-229`, confirmed), which is deleted after the merge. With the hashes equal, the
+   (`engine/rail/cli.py`, confirmed), and the engine finds the first text from the ticket's branch
+   (`engine/rail/review.py`, confirmed), which is deleted after the merge. With the hashes equal, the
    merged text is the first text, and the worker is graded on the checks it was given. Each part of the
    ticket file:
 
@@ -79,7 +79,7 @@ project's engine and a config key turns it on.
    `rail advance` (`engine/docs/loop.md`, "With no remote", confirmed). `GH_TOKEN` and `GITHUB_TOKEN` are
    unset, and `GH_CONFIG_DIR` points at an empty folder, since `gh` keeps its own stored login. `RAIL_CLOUD=0`,
    so no `rail provision` runs. The sandbox's `allowedDomains` limits Bash, not the web tools
-   (reported, Claude Code docs; Rail's sandbox is in `engine/docs/guards.md:86-97`), so the replay brief says the forge is out of bounds, and the
+   (reported, Claude Code docs; Rail's sandbox is in `engine/docs/guards.md`), so the replay brief says the forge is out of bounds, and the
    run is searched afterwards (below).
 
 ### The run
@@ -132,7 +132,7 @@ set. The entropy proposal's "strict solve rate" on replayed tickets is this shar
 - kept their Done Contract, had no open `ASSUMED:` rows at the start, and run under the current engine
   (steps 2 and 3 above);
 - have no `adopted` event: an adopted ticket's contract and scope were written from finished work
-  (`engine/rail/adopt.py:83-107`, confirmed);
+  (`engine/rail/adopt.py`, confirmed);
 - were not reverted, and are not named in a later `caused_by`, so the change that passed was right;
 - pass the oracle and null grades below on the current machine.
 
@@ -151,7 +151,7 @@ person acts the replay stood in for, review rounds, and the trend numbers. It pr
 runs each number rests on.
 
 Results live under the git directory, `.git/rail/replays/`, where the engine already keeps its cache
-(`engine/rail/project.py:233-235`, confirmed), so they can't be committed by mistake: each run's journal,
+(`engine/rail/project.py`, confirmed), so they can't be committed by mistake: each run's journal,
 stream, grade and the result's diff.
 
 ## Uses
@@ -159,7 +159,7 @@ stream, grade and the result's diff.
 - The worker ladder and the reviewer's model: arms per rung, as the paused model tests planned (owner,
   2026-11-20).
 - A change to a skill, a brief or `reviewer.md`: the old page against the new on the same tickets, which is
-  how guide changes are kept today ("Change it on evidence", `engine/docs/guides.md:62`, confirmed).
+  how guide changes are kept today ("Change it on evidence", `engine/docs/guides.md`, confirmed).
 - The model arms of `proposals/entropy.md` (Tests 3), on the project's own tickets beside SlopCodeBench, once
   each part's engine code is in the project's engine.
 - The pilot in `proposals/worker.md`, with `rail work` as the arm.

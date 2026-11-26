@@ -25,6 +25,9 @@ becomes a "Read these" item with the source "the reviewer".
 change before it merges, and on an AUTO ticket it raises the tier. `attention` raises nothing. If the owner
 ends the reviewer's tier raise (Decision 1), its cases move to `attention`.
 
+`proposals/responsibility.md` Part 1 proposes the opposite: no `attention` field, and no `rail:look`, because
+an AUTO change can be undone. Its Decision 1 is settled before this part is built.
+
 `engine/review-v1.json` refuses unknown keys at its top level today, so the field is a schema change, with
 `engine/reviewer.md` and `engine/docs/review.md`.
 

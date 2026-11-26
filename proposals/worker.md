@@ -12,17 +12,17 @@ those, with the reason given.
 ## Why
 
 **The worker's cost is not recorded.** Only review runs carry `cost_usd`: the engine starts the reviewer with
-`[review] command` and reads `total_cost_usd` from its JSON (`engine/rail/review.py:293`,
-`engine/rail/steps.py:52-67`, confirmed). The worker is a subagent the runner starts, and the Agent tool
+`[review] command` and reads `total_cost_usd` from its JSON (`engine/rail/review.py`,
+`engine/rail/steps.py`, confirmed). The worker is a subagent the runner starts, and the Agent tool
 returns no token count, cost or duration to the runner (reported). So `rail stats` can't say what a ticket
 cost, which ladder rung is cheaper per merged ticket, or what a test arm spent.
 
 **One attempt has no limit.** The retry budget and cap count ships. A worker that never returns can work for
 hours. The save hook writes a `saved` event at least every `[claim] save_minutes` (10), and `quiet_minutes`
 counts it as a sign of life, so the claim never goes stale and no other session takes the ticket over
-(`engine/rail/state.py:209-215`, confirmed). Nothing bounds a ticket's total spend either: each step has its
+(`engine/rail/state.py`, confirmed). Nothing bounds a ticket's total spend either: each step has its
 own cap of 5, and a ticket that fails at several steps in turn can run dozens of attempts, many on Opus
-(`state.py:100-175`, confirmed; the count is inferred).
+(`state.py`, confirmed; the count is inferred).
 
 **The runner makes choices the engine should make.** Today the runner reads `action.model`, decides whether
 to reuse a subagent, starts it, and tells it not to run `rail advance` (`engine/docs/cloud.md`, runner
@@ -36,7 +36,7 @@ as it does today after a subagent returns.
 1. **It builds the brief `rail next` would give for ticket NN**, and runs only when that brief is an
    `agent_task` whose last step is `rail advance NN`: `TICKET_LINT`, `VERIFY_ASSUMPTIONS`, `IMPLEMENT`,
    `STEP_FAILED`, `ANSWER_FINDINGS`, `CONFLICT`, `REBASING` and `SPLIT`. For any other answer, such as
-   `SETUP_FAILED` (whose brief says to run `rail next` again, `engine/rail/table.py:279-282`, confirmed), it
+   `SETUP_FAILED` (whose brief says to run `rail next` again, `engine/rail/table.py`, confirmed), it
    runs nothing and returns the answer, and the runner does that brief as it does today.
 2. **It runs `[worker] command` in the answer's `cwd`**: the ticket's worktree, or the project's root for a
    contract on a ticket not yet claimed. The brief goes on stdin with one line added: "When you are done, or
@@ -47,13 +47,13 @@ as it does today after a subagent returns.
 3. **Inside a worker run, the engine's moves refuse.** With `RAIL_WORKER` set, `rail advance`, `rail next`,
    `rail work` and `rail save` refuse with one sentence, so the worker can't ship, claim another ticket, take
    its own ticket over, or start a worker. The child is a different Claude Code session from the runner,
-   and the claim belongs to the runner's session (`engine/rail/project.py:95`, confirmed), so without this
-   its `rail next` would take the ticket over from its own runner (`engine/rail/cli.py:97-99, 323-329`,
+   and the claim belongs to the runner's session (`engine/rail/project.py`, confirmed), so without this
+   its `rail next` would take the ticket over from its own runner (`engine/rail/cli.py`,
    confirmed).
 4. **It keeps the claim alive itself.** While the run lasts, `rail work` saves the worktree's in-scope changes
    and pushes them every `[claim] save_minutes`, as the save hook does today. It runs in the runner's Bash
    call, so the saves are the runner's session's. The child's own save hooks do nothing (step 3). A save
-   during a rebase is skipped, as today (`cli.py:1458-1462`, confirmed).
+   during a rebase is skipped, as today (`cli.py`, confirmed).
 5. **It records the run.** It reads the command's output as JSON lines when it is that: the last `result`
    line gives `total_cost_usd`, `session_id`, `num_turns` and `subtype`, and the lines before it give the run
    log (below). It writes a `worked` event: model, effort, cost, turns, minutes, session id, the run-log
@@ -139,9 +139,9 @@ talk, 31:15-32:22). Rail could do the same from each run's own record, with no m
 - **The run log.** From the stream's tool-call lines `rail work` keeps one line per tool call: the tool,
   the command or path, and whether it failed or was denied. Each run appends to the ticket's log, cut at 200
   characters a line and 500 lines a run. The log stays in the local cache (`.git/rail/cache/work/NN`, where
-  the engine keeps its other notes, `engine/rail/project.py:233-235`, confirmed) and is never committed:
+  the engine keeps its other notes, `engine/rail/project.py`, confirmed) and is never committed:
   command lines can carry tokens, and a committed one would be pushed and merged, in a folder only the engine
-  may write (`.rail/journal/**`, `engine/docs/guards.md:91-92`, confirmed), so no one could take it out. The
+  may write (`.rail/journal/**`, `engine/docs/guards.md`, confirmed), so no one could take it out. The
   stream's format is documented, and the session transcript's is not (reported: the Claude Code docs say the
   transcript format is internal and changes between versions).
 - **What is counted per run,** into the `worked` event, which is committed: Bash commands that failed before
@@ -152,10 +152,10 @@ talk, 31:15-32:22). Rail could do the same from each run's own record, with no m
   `uv run`, `npx`, `pnpm exec`, `poetry run` and `bundle exec`; `uv run pytest -x` is `pytest`. In a rebase the
   event waits in the cache like the rest (above), and the log is already there.
 - **What the sweep does with it.** It reads the `worked` events of the tickets merged since the last sweep,
-  from the base, as it reads their other events (`engine/rail/sweep.py:96-99`, confirmed). A key that recurs
+  from the base, as it reads their other events (`engine/rail/sweep.py`, confirmed). A key that recurs
   in three or more tickets goes into the sweep's summary as a pattern, and a pattern counts as something found,
   so the sweep's ticket gets a task even when nothing merged unreviewed (today it merges with no task,
-  `engine/docs/sweep.md:36-38`, confirmed). The agent files one ticket per pattern, as it does for a finding:
+  `engine/docs/sweep.md`, confirmed). The agent files one ticket per pattern, as it does for a finding:
   a `setup` or `provision` line, a line in the project's part of `AGENTS.md`, or a guide's text. A ticket that
   changes `.claude/**` or `.rail/config.toml` is PERSON, as today. This is a row of the entropy proposal's
   Part 6 (nothing learned is lost).

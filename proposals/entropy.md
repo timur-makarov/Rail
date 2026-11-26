@@ -32,7 +32,7 @@ those, with the reason given.
 
 **Rail has no sensor for this.** The reviewer reports style only when a rule says so; the sweep looks for
 duplication and logic in the wrong area only in changes that merged with no review; two structure rules exist.
-(confirmed: `engine/reviewer.md:12-14`, `engine/rail/sweep.py:16-23, 170-174`, `seed/config.toml:80-90`)
+(confirmed: `engine/reviewer.md`, `engine/rail/sweep.py`, `seed/config.toml`)
 
 **What makes code readable to the next agent is partly measured.** Misleading names cut code completion by
 17-34%; a type checker that blocks a change helped where annotations alone did not; success falls steeply
@@ -43,7 +43,7 @@ effects shrink as models get stronger. (reported; see "Code for the next agent")
 `## Why` or the decided assumption rows; a fresh worker after a failure gets the failure output and consult's
 advice but not what the last worker tried; a person's note reaches the briefs only until the next ship;
 `rail context` shows the area map and a directory digest but nothing earlier tickets learned about the same
-paths. (confirmed: `engine/rail/table.py:90-110, 148-155`, `state.py:180-183`, `areas.py:64-72`)
+paths. (confirmed: `engine/rail/table.py`, `state.py`, `areas.py`)
 
 ## Bad code, defined
 
@@ -93,7 +93,7 @@ grew. Growth in the cyclomatic count stands in for "the change added branches" (
 ## Part 2: language profiles (stage 2)
 
 A **profile** is a language's further sensors, their tool configs, and its suppression markers. ("Pack" stays
-the word for an optional feature that only adds hints, `engine/docs/packs.md:10-11`.) `rail init` detects
+the word for an optional feature that only adds hints, `engine/docs/packs.md`.) `rail init` detects
 `pyproject.toml` or `setup.cfg`, `package.json` with `tsconfig.json`, `Cargo.toml` and `go.mod`. For each match
 it writes the profile's `[[sensors]]` entries into `config.toml`, copies tool configs to `.rail/sensors/LANG/`,
 adds the language's markers to `no-new-suppressions`, and adds a `provision` line that installs pinned tool
@@ -151,7 +151,7 @@ enters a profile only through it.
 A fork of anti-slop maintained at Factory (K-Mistele/anti-slop, MIT) adds rules a model judges, such as
 Fowler's "middle man" and "feature envy", and an `integrity` script that fails a branch that weakens its own
 checks. Left out: a model call per rule per ship costs more than Rail's one review, and the reviewer already
-looks for "a check weakened, skipped or deleted so that it passes" (`engine/rail/review.py:42-44`). The talk
+looks for "a check weakened, skipped or deleted so that it passes" (`engine/rail/review.py`). The talk
 that named these sources also reports that newer models have regressed on some patterns, such as Python's `%`
 formatting in place of f-strings (reported, Horthy, "12 Rules for a Software Factory"): a lint rule catches
 that, and a prompt can't keep up with each model.
@@ -164,13 +164,13 @@ advice).
 
 `## Areas` in `ARCHITECTURE.md` gains an optional fourth column, `Uses`: the areas this one may import. The
 boundary sensor reads the map from the base commit and builds its tool's rules from it. A path no row maps, and
-a row with no `Uses`, is unrestricted, so a ticket that adds a directory (and must add its row, `doclint.py:131-135`,
+a row with no `Uses`, is unrestricted, so a ticket that adds a directory (and must add its row, `doclint.py`,
 confirmed) fails nothing. A new row's rules apply from the next ticket. The parts that need code: `areas.py`
-reads the column (today it keeps three, `areas.py:18-25`, confirmed), doc-lint checks that every name in `Uses`
-is an area, and the review brief shows the column (`review.py:244`). An agent may change `Uses` on an AUTO
+reads the column (today it keeps three, `areas.py`, confirmed), doc-lint checks that every name in `Uses`
+is an area, and the review brief shows the column (`review.py`). An agent may change `Uses` on an AUTO
 ticket; the reviewer's brief asks it to judge any change to the column.
 
-A structure rule can already forbid one import text in a set of files (`engine/docs/rules.md:7-13`). The map
+A structure rule can already forbid one import text in a set of files (`engine/docs/rules.md`). The map
 column adds a single place where boundaries are written, read by tools that understand each language's imports.
 
 ## Part 4: `rail-build` and `rail-debug` (craft)
@@ -197,7 +197,7 @@ replacing the `Abstraction`, `Place` and `You notice a problem` lines:
 Section 7 step 4 adds: "Write a `Noticed:` line for each problem outside the ticket." Section 3 loses its
 `rail context` line once the brief carries the context history (Part 6). Counted: 97 lines today, 7 bullets
 for 3 (about +12 lines), section 3 and 7 changes (about -1): about 108 lines, slightly over the guide rule's
-"about a hundred" (`engine/docs/guides.md:61`).
+"about a hundred" (`engine/docs/guides.md`).
 
 `rail-debug` gains two lines. Step 4: "Write each explanation you ruled out under `## Tried` in the ticket."
 Step 7: "A sensor is wrong on one line: mark it `SENSOR(NN): why`. Wrong in general: open a ticket that
@@ -210,7 +210,7 @@ would be expensive to change later: a database schema, a stored or wire format, 
 calls. A choice that is cheap to change later, such as wording or a colour, is an `ASSUMED:` row, not a
 question." The measure is Horthy's: the chance of rework times the cost of the change (reported, Boundary
 talk, 45:26-47:44, and his "12 Rules" talk). The grill keeps its cap of five questions
-(`engine/docs/grill.md:32-38`, confirmed). It changes on evidence like any guide: the
+(`engine/docs/grill.md`, confirmed). It changes on evidence like any guide: the
 old page against the new on the same requests.
 
 How the pages are written stays as `guides.md` says, and the research supports it: no persona ("you are the
@@ -225,18 +225,18 @@ Fable, and Rail's workers run on Sonnet 5.5 and Opus 5.5.
 
 1. **It reads reviewed merges too.** Every `[sweep] every` merged tickets (20), whatever their review, the
    sweep's reviewer pass reads the current code of the areas that changed since the last sweep. Today a sweep
-   with nothing unreviewed runs no model (`sweep.py:170-174`, confirmed); this adds one model run per 20
+   with nothing unreviewed runs no model (`sweep.py`, confirmed); this adds one model run per 20
    tickets.
 2. **It gets the numbers.** The trend commands (lizard, jscpd, and each profile's own) report per area the
    trend measures in Part 2, sensor-rule counts over the whole tree, and `SENSOR(NN)` markers. From the
    journals the engine adds, per area, files and areas changed per merged ticket, failed steps and review
    rounds, and the worker's cost once `rail work` records it (`proposals/worker.md`; today only review runs
-   carry `cost_usd`, `steps.py:52-67`, confirmed). The sweep stores the numbers in a `trend` event, so the next sweep and `rail stats` see the
+   carry `cost_usd`, `steps.py`, confirmed). The sweep stores the numbers in a `trend` event, so the next sweep and `rail stats` see the
    change.
 3. **It files refactor tickets.** Each names a kind from "Bad code, defined", with evidence (tool output, or
    two `file:line` places) and its cost. Its `Check:` lines are the tests plus a threshold command that fails
    before the refactor and passes after. At most `[sweep] max_refactor_open` (3) refactor tickets are open at
-   once, as sources cap theirs with `max_open` (`engine/docs/sources.md:10`); the rest stay in the summary
+   once, as sources cap theirs with `max_open` (`engine/docs/sources.md`); the rest stay in the summary
    with their numbers. A refactor over `[size] cap` is offered a split like any ticket. A kind that keeps
    returning gets a "make it a check" ticket; when that check is a sensor or rule in `.rail/config.toml`, the
    ticket is PERSON, as such tickets are today.
@@ -260,8 +260,8 @@ applies to its paths and its situation.
 | Stage | Learned | Today (confirmed) | Change |
 |---|---|---|---|
 | Out-of-scope problems | Bugs and smells noticed in passing | `Noticed:` lines under `## Look at`, which the brief asks for; nothing collects them | The sweep collects them, and the "not tested" lines |
-| Review | Findings and answers | The sweep collects parked findings and the checks of fixed ones (`sweep.py:97-121`) | The sweep also collects declined findings, grouped by kind |
-| A person's word | `rail accept` notes, pull request comments | The briefs until the next ship (`state.py:180-183`) | The sweep collects every note since the last sweep and files a ticket for each that reads as a standing rule |
+| Review | Findings and answers | The sweep collects parked findings and the checks of fixed ones (`sweep.py`) | The sweep also collects declined findings, grouped by kind |
+| A person's word | `rail accept` notes, pull request comments | The briefs until the next ship (`state.py`) | The sweep collects every note since the last sweep and files a ticket for each that reads as a standing rule |
 | Repeated failures | Failure signatures | Counted within one ticket | The sweep flags a signature that recurs across tickets and files a check or an `AGENTS.md` line |
 | Worker runs | Commands that failed before the right one, commands not found, denied calls, files re-read | Lost with the worker's context | The counts in each `worked` event, from a run log kept in the local cache (`proposals/worker.md`, "What the runs teach"); a pattern in three or more tickets gives the sweep a task, and the agent files a ticket for it |
 | Work left for later | `TODO` and `FIXME` comments | A structure rule: each names the open ticket that will do it, `TODO(NN)` | The sweep files a removal ticket when that ticket merged or was dropped and the comment is still there |
@@ -341,7 +341,7 @@ more than a few dozen tickets to show; the worker's cost, until `rail work` (`pr
 - That `tsrs`, the beta type-aware backend `@cloudflare/oxlint-config` uses, is stable enough for a default.
 
 - That git's moved-line detection can be read reliably from a diff: it is a feature of coloured output
-  (`--color-moved`), and `rules.added` asks for `--no-color` on purpose (`rules.py:23`, confirmed).
+  (`--color-moved`), and `rules.added` asks for `--no-color` on purpose (`rules.py`, confirmed).
 - That each tool's one-line format holds for every rule a profile turns on (jscpd's `xcode` reporter was read in
   source; the others in docs), and that each tool's exit codes are as the profile declares them.
 - That lizard parses all four languages well enough to compare one function before and after.
