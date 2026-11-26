@@ -81,6 +81,7 @@ PERSON tickets where the person changed nothing, by why they were PERSON: access
 | `a person's acts, median for a ticket` | The acts the journal records for a ticket: each approval of a contract, an amend or a merge and each continued wait (`accepted` by a person, `continued`), and each finding a person decided (`rail answer --owner`). In JSON, `acts`: `total`, `median`, `none` |
 | `tickets with no act of a person` | Merged tickets with none of those acts |
 | `Merged tickets that name the ticket that caused them` | Merged tickets with `caused_by` set. Read it beside `caused a fix ticket`: a fix that names no cause leaves the ticket that caused it counted as held. In JSON, `outcomes.names_cause` |
+| `Failed dev deploys reverted` | The merged revert tickets the intake filed after a failed smoke check, and the median minutes from the issue's opening (`opened` on the `requested` event) to the revert's merge: how long dev stayed broken. Shown when there is one. In JSON, `dev_broken`: `reverts`, `median_minutes` |
 | `BY WORKER`, `BY LANGUAGE` | The outcome counts by the model and effort of the ticket's last worker run (`worked` events; `(no worker run)` when a session did the work), and by each `[[profiles]]` entry whose paths the ticket's scope reaches (`rail docs languages`). A group of fewer than five merged tickets is summed into `other`, and a split with no group of five isn't shown. In JSON, `outcomes.by_worker` and `outcomes.by_profile` |
 | `merged` | Merged tickets, by tier |
 | `the reviewer read it` | Tickets with at least one `review` run |

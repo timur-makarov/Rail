@@ -113,6 +113,8 @@ file one with `rail add`.
   after the merge; `caused_by` is NN; `external_id` is `revert#` and the pull request's number, so one pull
   request has one revert open at a time. The engine comments on the pull request and takes the label off. A
   pull request that merged no ticket gets the comment and no ticket.
+- **After a failed deploy to dev** the intake files the revert itself, with `external_id` `smoke#` and the
+  issue's number, and the fix ticket comes `after` it (`rail docs environments`).
 - **Its tier** follows its paths like any ticket's. A revert of a change on a kind's paths is PERSON: the
   label counted as the approval of its contract, and a person still merges it.
 - **Its squash commit** carries `Reverts: <sha>`, which `rail stats` counts as a revert of NN.

@@ -685,13 +685,15 @@ def cmd_adopt(project, args):
     return result
 
 
-def stub(title, request, external_id, caused_by=""):
-    """An intake ticket: the request verbatim, with the contract and tier for the agent to write."""
+def stub(title, request, external_id, caused_by="", after=(), why=""):
+    """An intake ticket: the request verbatim, with the contract and tier for the agent to write. `after` and `why`
+    come from the engine, for the fix after a failed dev deploy."""
     # The request is quoted: a heading in it ("## Done Contract") must not become a section of the ticket.
     quoted = "\n".join(("> " + line).rstrip() for line in request.strip().splitlines())
     return "\n".join(["+++", f"title = {json.dumps(title)}", 'tier = ""', "scope_paths = []",
+                      *([f"after = {json.dumps(list(after))}"] if after else []),
                       f"external_id = {json.dumps(external_id)}", f"caused_by = {json.dumps(caused_by)}", "+++", "",
-                      "## Request", quoted, "", "## Why", "", "## Done Contract", ""])
+                      "## Request", quoted, "", "## Why", *([why] if why else []), "", "## Done Contract", ""])
 
 
 def caused_by(project, request):
@@ -704,7 +706,7 @@ def caused_by(project, request):
     return ticket.group(1) if ticket else ""
 
 
-def intake_one(project, facts, title, request, external_id, channel, trusted=False, filed_by=None):
+def intake_one(project, facts, title, request, external_id, channel, trusted=False, filed_by=None, smoke=None):
     """Make a ticket unless a ticket for this external id is open or merged. Returns its id, or None.
 
     A request that is a whole ticket (it starts with the `+++` front matter, as a grilling bot files it) becomes the
@@ -732,16 +734,115 @@ def intake_one(project, facts, title, request, external_id, channel, trusted=Fal
     else:
         extra = {"filed_by": filed_by}
     extra["hidden_removed"] = hidden
-    nn, _, _ = create_ticket(project, stub(title, request, external_id, caused_by(project, request)), via="intake",
-                             channel=channel, key=external_id, **extra)
+    smoke = smoke or {}
+    extra.update({k: smoke[k] for k in ("smoke", "opened") if smoke.get(k)})
+    text = stub(title, request, external_id, caused_by(project, request), smoke.get("after", ()), smoke.get("why", ""))
+    nn, _, _ = create_ticket(project, text, via="intake", channel=channel, key=external_id, **extra)
     return nn
 
 
+SMOKE_MARK = "<!-- rail-smoke: {number} -->"   # on the brake the engine sets after a failed dev deploy
+CHAIN_MARK = "<!-- rail-smoke-chain -->"       # on the comment that says the engine files no second fix
+
+
+def smoke_first(project, facts, issue):
+    """An issue that starts with `Commit: <sha>` reports a failed dev deploy of the ticket that commit merged. The
+    change comes out first: a revert ticket, and a brake on what that ticket's scope holds until the revert merges.
+    The fix ticket then does the work again, after the revert. A chain ends: when the failed change was itself the
+    fix after a failed deploy, or a revert, the engine files no further fix and a person decides.
+    Returns (what the fix ticket gets, or None when none is to be filed; the ids of the tickets made here)."""
+    from . import revert
+    from .forge import ForgeError
+
+    number, forge = issue["number"], project.forge
+    cause = facts.get(caused_by(project, issue.get("body") or ""))
+    if not cause or not cause.t.merged or not cause.ticket:
+        return {}, []
+    made, key, sha, title = [], f"smoke#{number}", cause.t.merged, cause.ticket.title
+    opened = {"smoke": True, "opened": issue.get("created_at")}
+    was_revert = cause.ticket.get("kind") == "revert"
+    chained = was_revert or bool((cause.t.last("requested") or {}).get("smoke"))
+    if any(f.ticket and f.ticket.get("external_id") == f"github#{number}" and f.state != "dropped" for f in facts.values()):
+        return {}, []  # this issue was taken in before: the fix is there, and so is whatever went with it
+    rev = next((f for f in facts.values() if f.ticket and (
+        f.ticket.get("external_id") == key or (f.ticket.get("kind") == "revert" and f.state != "dropped"
+                                                and str(f.ticket.get("reverts")) == cause.id))), None)
+    rev_id, rev_open = (rev.id, rev.state not in ("merged", "dropped")) if rev else (None, False)
+    paths = revert.files(project, sha)
+    if not rev and paths and not was_revert:  # reversing a revert would put the reverted change back
+        why = (f"The dev smoke check failed on a deploy of commit {sha[:12]}, which merged ticket {cause.id} ({title}):"
+               f" issue #{number}. This ticket takes that change out again, so that dev works while the fix is made.")
+        rev_id, _, _ = create_ticket(project, revert.text(cause.id, title, sha, paths, key, why), via="intake",
+                                     channel="github", key=key, opened=issue.get("created_at"))
+        rev_open = bool(rev_id)
+        made += [rev_id] if rev_id else []
+    try:
+        if rev_open and not any(stop.get("smoke") == number for stop in forge.stops()):
+            forge.open_issue(
+                f"Rail stopped work on what ticket {cause.id} changed: its deploy to dev failed (#{number})",
+                f"The dev smoke check failed on commit {sha[:12]}, which merged ticket {cause.id} ({title}): issue"
+                f" #{number}. Ticket {rev_id} reverts that change. Until it merges, no other ticket whose scope overlaps"
+                f" these paths is worked on, so that nothing is built on the change that failed. Rail closes this"
+                f" issue when the revert has merged or was dropped; closing it yourself lifts the brake at once.\n\n"
+                f"paths: {', '.join(cause.ticket.scope or paths)}\n\n{SMOKE_MARK.format(number=number)}\n{ENGINE_MARK}",
+                ["rail:stop"])
+            forge.forget_stops()
+        if chained and not any(CHAIN_MARK in (c.get("body") or "") for c in forge.comments(number)):
+            what = (f"ticket {cause.id} is a revert, and reversing it would put back the change it took out" if was_revert
+                    else f"ticket {cause.id} was itself the fix after a failed deploy, so the same work failed on dev twice")
+            did = f"Ticket {rev_id} reverts the change. " if rev_id else ""
+            forge.comment(number, f"{did}Rail files no fix for this one: {what}. A person decides what comes next."
+                                  f" Label this issue `rail` again to have an agent try once more.\n\n{CHAIN_MARK}\n"
+                                  f"{ENGINE_MARK}")
+            forge.add_labels(number, ["rail:needs-you"])
+            forge.remove_label(number, "rail")
+            return None, made
+    except ForgeError:
+        return None, made  # GitHub is out of reach for a moment: the next run goes on from here, the fix included
+    redo = (f"The dev smoke check failed on a deploy of commit {sha[:12]}, which merged ticket {cause.id} ({title})."
+            + (f" Ticket {rev_id} takes that change out first. This ticket does ticket {cause.id}'s work again, so that"
+               f" the smoke check passes." if rev_id else ""))
+    return dict(opened, after=[rev_id] if rev_open else [], why=redo), made
+
+
+def close_smoke_stops(project, facts):
+    """The brake the engine set after a failed dev deploy lifts when its revert has merged or was dropped."""
+    from .forge import ForgeError
+
+    forge = project.forge
+    if not (forge and forge.ok):
+        return False
+    closed = False
+    for stop in forge.stops():
+        if stop.get("smoke") is None:
+            continue
+        rev = next((f for f in facts.values() if f.ticket and f.ticket.get("external_id") == f"smoke#{stop['smoke']}"), None)
+        if rev and rev.state not in ("merged", "dropped"):
+            continue
+        try:
+            forge.close_issue(stop["number"])
+            closed = True
+        except ForgeError:
+            pass
+    if closed:
+        forge.forget_stops()
+    return closed
+
+
 def intake_issue(project, facts, issue):
+    """Take one issue in. Returns the ids of the tickets it made: the fix after a failed dev deploy comes with the
+    revert that goes first."""
     from .forge import TRUSTED
 
-    return intake_one(project, facts, issue["title"], issue.get("body") or "", f"github#{issue['number']}", "github",
-                      trusted=issue.get("author_association") in TRUSTED, filed_by=(issue.get("user") or {}).get("login"))
+    smoke, made = smoke_first(project, facts, issue)
+    if smoke is None:
+        return made
+    if made:
+        _, facts = load(project)
+    nn = intake_one(project, facts, issue["title"], issue.get("body") or "", f"github#{issue['number']}", "github",
+                    trusted=issue.get("author_association") in TRUSTED, filed_by=(issue.get("user") or {}).get("login"),
+                    smoke=smoke)
+    return made + ([nn] if nn else [])
 
 
 def cmd_intake(project, args):
@@ -755,8 +856,9 @@ def cmd_intake(project, args):
             raise RailError("the forge can't be reached: rail intake github needs a GitHub remote and gh", code="UNAVAILABLE")
         for issue in project.forge.issues("rail"):
             key = f"github#{issue['number']}"
-            nn = intake_issue(project, facts, issue)
-            (created if nn else skipped).append(nn or key)
+            made = intake_issue(project, facts, issue)
+            created += made
+            skipped += [] if made else [key]
             tickets, facts = load(project)
     elif args.source:
         raise RailError(f"unknown intake source '{args.source}'; use github, or --external-id with --title and --brief")
@@ -1064,9 +1166,10 @@ def auto_intake(project, facts):
     receipts = []
     for issue in issues:
         key = f"github#{issue['number']}"
-        nn = intake_issue(project, facts, issue)
-        if nn:
+        made = intake_issue(project, facts, issue)
+        for nn in made:
             receipts.append({"step": "intake", "status": "ran", "result": "pass", "detail": f"ticket {nn} from {key}"})
+        if made:
             _, facts = load(project)
     return receipts
 
@@ -1134,7 +1237,10 @@ def cmd_next(project, args):
     tools.sync_issues(project, project.tools_missing())
     asked = file_reverts(project, facts)
     took_in += asked
-    if took_in or red_base_ticket(project, facts):
+    if took_in:
+        tickets, facts = load(project)
+    # The engine's own brake lifts once its revert has merged; a ticket it held may go on in this same run.
+    if close_smoke_stops(project, facts) or red_base_ticket(project, facts):
         tickets, facts = load(project)
     leftovers = cleanup(project, tickets, facts)
     explicit = requested(project, args)

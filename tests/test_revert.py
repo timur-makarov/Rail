@@ -280,3 +280,120 @@ class Label(RailTest):
         self.assertEqual(github.pr(9)["labels"], [])
         self.assertIn("Rail filed no revert", github.read()["comments"]["9"][-1]["body"])
         self.assertEqual(a.rail("status")["tickets"], [])
+
+
+def smoke_issue(github, number, sha, at="2026-11-11T10:00:00Z"):
+    """What the project's CD opens when the smoke check fails after a deploy to dev."""
+    github.update(lambda s: s["issues"].append({
+        "number": number, "title": "Smoke check failed on dev", "body": f"Commit: {sha}\n\nGET /health returned 500.",
+        "labels": ["rail"], "state": "open", "created_at": at, "author_association": "NONE"}))
+
+
+def events_of(p, nn):
+    return [json.loads(row) for row in p.git("show", f"{branch_of(p, nn)}:.rail/journal/{nn}-events.jsonl").splitlines()]
+
+
+def stops(github):
+    return [i for i in github.read()["issues"] if "rail:stop" in i["labels"]]
+
+
+class Smoke(RailTest):
+    """A failed dev deploy reverts first: the change comes out, a brake holds its paths, and the fix comes after."""
+
+    def failed_deploy(self):
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        a.add(ticket(title="Other", check="grep -q def src/calc.py"))  # the same scope: the brake will hold it
+        a.rail("next")
+        a.fix_calc("1")
+        through_github(a, github, "1", "1-fix-add")
+        sha = github.pr(1)["merge_commit_sha"]
+        smoke_issue(github, 30, sha)
+        return a, github, sha
+
+    def test_the_change_comes_out_first_and_the_fix_comes_after_it(self):
+        a, github, sha = self.failed_deploy()
+        answer = a.rail("next", "--ticket", "3")
+        self.assertEqual([s["detail"] for s in answer["steps"] if s["step"] == "intake"],
+                         ["ticket 3 from github#30", "ticket 4 from github#30"])
+        self.assertEqual(answer["reason"]["code"], "REVERT_SHIP")
+        revert = a.git("show", f"{branch_of(a, 3)}:.rail/tickets/3.md")
+        for line in ('title = "Revert ticket 1: Fix add"', 'kind = "revert"', 'reverts = "1"', 'external_id = "smoke#30"',
+                     'scope_paths = ["src/calc.py"]',
+                     f"The dev smoke check failed on a deploy of commit {sha[:12]}, which merged ticket 1 (Fix add):"
+                     " issue #30. This ticket takes that change out again, so that dev works while the fix is made."):
+            self.assertIn(line, revert)
+        fix = a.git("show", f"{branch_of(a, 4)}:.rail/tickets/4.md")
+        for line in ('after = ["3"]', 'external_id = "github#30"', 'caused_by = "1"', "> GET /health returned 500.",
+                     "Ticket 3 takes that change out first. This ticket does ticket 1's work again, so that the smoke"
+                     " check passes."):
+            self.assertIn(line, fix)
+        asked = events_of(a, 3)[0]
+        self.assertEqual((asked["via"], asked["opened"], asked.get("smoke")), ("intake", "2026-11-11T10:00:00Z", None))
+        asked = events_of(a, 4)[0]
+        self.assertEqual((asked["opened"], asked["smoke"]), ("2026-11-11T10:00:00Z", True))
+
+        # The engine's own brake: what ticket 1's scope holds waits; the revert goes on under it; the fix waits its turn.
+        brake = stops(github)
+        self.assertEqual([(i["state"], i["title"]) for i in brake], [
+            ("open", "Rail stopped work on what ticket 1 changed: its deploy to dev failed (#30)")])
+        self.assertIn("\n\npaths: src/**\n\n<!-- rail-smoke: 30 -->", brake[0]["body"])
+        self.assertEqual(a.rail("next", "--ticket", "2")["reason"]["code"], "STOPPED")
+        a.rail("next")
+        self.assertEqual(len(a.rail("status")["tickets"]), 4)   # taken in once
+        self.assertEqual(len(stops(github)), 1)                 # and one brake
+
+        through_github(a, github, "3")
+        body = next(p for p in github.read()["pulls"] if p["head"].startswith("3-"))["body"]
+        self.assertIn("Part of #30", body)   # the fix closes the issue, not the revert
+        self.assertNotIn("Closes #30", body)
+        self.assertIn(f"Reverts: {sha}", body)
+        after = a.rail("next", "--ticket", "2")
+        self.assertEqual(stops(github)[0]["state"], "closed")  # the revert is in: the brake lifts by itself
+        self.assertNotEqual(after["reason"]["code"], "STOPPED")
+        broken = a.rail("stats")["stats"]["dev_broken"]
+        self.assertEqual(broken["reverts"], 1)
+        self.assertGreater(broken["median_minutes"], 0)
+        self.assertIn("Failed dev deploys reverted: 1, a median of", a.rail("stats", raw=True).stdout)
+
+    def test_a_fix_that_fails_on_dev_too_is_reverted_and_no_further_fix_is_filed(self):
+        a, github, sha = self.failed_deploy()
+        a.rail("next", "--ticket", "3")
+        through_github(a, github, "3")
+        written = os.path.join(self.tmp, "4.md")
+        with open(written, "w") as f:
+            f.write(ticket(title="Fix add again", front=('external_id = "github#30"', 'caused_by = "1"', 'after = ["3"]'),
+                           body="\n## Request\nGET /health returned 500.\n"))
+        a.rail("amend", "4", "--file", written)
+        self.assertEqual(a.rail("next", "--ticket", "4")["state"], "implementing")
+        a.fix_calc("4")
+        through_github(a, github, "4")
+        again = next(p for p in github.read()["pulls"] if p["head"].startswith("4-"))["merge_commit_sha"]
+        smoke_issue(github, 31, again)
+
+        a.rail("next", "--ticket", "5")
+        tickets = {t["ticket"]: t for t in a.rail("status")["tickets"]}
+        self.assertEqual(sorted(tickets), ["1", "2", "3", "4", "5"])  # the revert of the fix, and no ticket 6
+        self.assertIn('reverts = "4"', a.git("show", f"{branch_of(a, 5)}:.rail/tickets/5.md"))
+        issue = next(i for i in github.read()["issues"] if i["number"] == 31)
+        self.assertEqual(sorted(issue["labels"]), ["rail:needs-you"])
+        said = github.read()["comments"]["31"][-1]["body"]
+        self.assertIn("Ticket 5 reverts the change. Rail files no fix for this one: ticket 4 was itself the fix after a"
+                      " failed deploy, so the same work failed on dev twice. A person decides what comes next. Label this"
+                      " issue `rail` again to have an agent try once more.", said)
+        # A person's label asks for one more try: the fix is filed, after the revert.
+        github.update(lambda s: next(i for i in s["issues"] if i["number"] == 31)["labels"].append("rail"))
+        a.rail("next", "--ticket", "5")
+        self.assertIn('after = ["5"]', a.git("show", f"{branch_of(a, 6)}:.rail/tickets/6.md"))
+
+    def test_a_failed_deploy_of_a_revert_is_left_to_a_person(self):
+        a, github, sha = self.failed_deploy()
+        a.rail("next", "--ticket", "3")
+        through_github(a, github, "3")
+        reverted = next(p for p in github.read()["pulls"] if p["head"].startswith("3-"))["merge_commit_sha"]
+        smoke_issue(github, 31, reverted)
+        a.rail("next", "--ticket", "4")
+        self.assertEqual(len(a.rail("status")["tickets"]), 4)  # no revert of the revert, and no fix
+        self.assertIn("Rail files no fix for this one: ticket 3 is a revert, and reversing it would put back the change"
+                      " it took out.", github.read()["comments"]["31"][-1]["body"])
+        self.assertEqual(len(stops(github)), 1)  # the first failure's brake, closed; none for this one

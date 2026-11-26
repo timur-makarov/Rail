@@ -161,6 +161,8 @@ The source only files tickets. The runner above picks them up on its own schedul
   taking one in changes no code, and what a worker already changed stays saved in its worktree. Only someone
   who may triage the repository can set a label, so a stranger's issue stops nothing. With no remote there
   is no brake.
+  The engine sets one brake itself: on the scope of a ticket whose deploy to dev failed, until its revert has
+  merged (`rail docs environments`).
 - **Merge a PERSON ticket:** the merge button.
 - Each pull request ends with `Claude-Session:` and a link to the session that worked the ticket.
 

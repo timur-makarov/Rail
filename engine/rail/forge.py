@@ -453,6 +453,13 @@ class Forge:
             for issue in sorted(found, key=lambda i: i["number"]):
                 line = STOP_PATHS.search(issue.get("body") or "")
                 paths = [p.strip("`") for p in re.split(r"[,\s]+", line.group(1).strip())] if line else []
+                smoke = re.search(r"<!-- rail-smoke: (\d+) -->", issue.get("body") or "")
                 self._stops.append({"number": issue["number"], "title": issue.get("title") or "",
-                                    "url": issue.get("html_url") or "", "paths": [p for p in paths if p]})
+                                    "url": issue.get("html_url") or "", "paths": [p for p in paths if p],
+                                    # the engine's own brake names the smoke check's issue it was set for
+                                    **({"smoke": int(smoke.group(1))} if smoke else {})})
         return self._stops
+
+    def forget_stops(self):
+        """The engine set or lifted a brake itself: read them again."""
+        self._stops = None

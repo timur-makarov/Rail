@@ -272,6 +272,18 @@ def grilling(tickets, states, merged_at, start):
     return {"groups": groups, "channels": dict(sorted(channels.items())), "agents": dict(sorted(agents.items()))}
 
 
+def dev_broken(tickets, merged_at, start):
+    """How long dev stayed broken after a failed deploy: from the smoke check's issue to the merge of the revert the
+    intake filed for it. The requested event keeps the issue's own time as `opened`."""
+    minutes = []
+    for nn, t in tickets.items():
+        req = t.last("requested") or {}
+        if (str(req.get("external_id") or "").startswith("smoke#") and req.get("opened") and nn in merged_at
+                and (start is None or merged_at[nn] >= start)):
+            minutes.append(max(0.0, (merged_at[nn] - parse_iso(req["opened"]).timestamp()) / 60))
+    return {"reverts": len(minutes), "median_minutes": round(statistics.median(minutes), 1) if minutes else None}
+
+
 def by_source(project, tickets, states, merged_at, reverted, start):
     """What became of each source's tickets: those requested on or after `start`, as the grilling counts them."""
     from . import sources
@@ -460,6 +472,7 @@ def collect(project, tickets, since=None, states=None, now=None):
         "outcomes": {"held_days": held_days, "tiers": {tier: _outcome_done(row) for tier, row in outcomes.items()},
                      "names_cause": names_cause, "by_worker": _split(by_worker), "by_profile": _split(by_profile)},
         "time": timing.collect(tickets, merged_at, counted),
+        "dev_broken": dev_broken(tickets, merged_at, start),
         # Commands that both failed and passed on the same code, in the merged tickets: flakes of the runs counted.
         "flakes": {name: dict(row, share=round(row["flakes"] / row["runs"], 3) if row["runs"] else None)
                    for name, row in sorted(flaky.items()) if row["flakes"]},
@@ -645,6 +658,10 @@ def render_outcomes(data):
         ["tickets with no act of a person", *[r["acts"]["none"] for r in rows]]])
     lines.append(f"Merged tickets that name the ticket that caused them (caused_by): {out['names_cause']} of"
                  f" {data['merged']}.")
+    broken = data.get("dev_broken") or {}
+    if broken.get("reverts"):
+        lines.append(f"Failed dev deploys reverted: {broken['reverts']}, a median of {broken['median_minutes']:g} minutes"
+                     f" from the smoke check's issue to the revert's merge.")
     head = ["merged", "reverted", "caused a fix", "first try", "cost each"]
     for title, split in (("BY WORKER", out["by_worker"]), ("BY LANGUAGE", out["by_profile"])):
         if split:

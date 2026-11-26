@@ -112,14 +112,17 @@ def check(project, t, tickets, patch_id, ref):
         " scope_paths, and ship again. A revert made by hand is accepted once verify has failed on the exact one.")
 
 
-def text(nn, title, sha, paths, pr, said):
-    """The revert ticket a rail:revert label files, for ticket NN merged by pull request `pr`."""
+def text(nn, title, sha, paths, source, said):
+    """The revert ticket for ticket NN. `source` is the number of the pull request a person labelled rail:revert,
+    with `said` what people wrote there; or the external id of another source, with `said` its one-line reason."""
+    labelled = isinstance(source, int)
+    external = f"revert#{source}" if labelled else source
     front = ["+++", f"title = {json.dumps(f'Revert ticket {nn}: {title}')}", 'tier = "AUTO"', 'kind = "revert"',
-             f"reverts = {json.dumps(nn)}", f"caused_by = {json.dumps(nn)}", f"external_id = {json.dumps(f'revert#{pr}')}",
+             f"reverts = {json.dumps(nn)}", f"caused_by = {json.dumps(nn)}", f"external_id = {json.dumps(external)}",
              f"scope_paths = {json.dumps(paths)}", "+++", ""]
-    why = [f"A person put the label {LABEL} on pull request #{pr}, which merged ticket {nn} ({title}) as commit"
-           f" {sha[:12]}. This ticket takes that change out again."]
-    if said:
+    why = [f"A person put the label {LABEL} on pull request #{source}, which merged ticket {nn} ({title}) as commit"
+           f" {sha[:12]}. This ticket takes that change out again."] if labelled else [said]
+    if said and labelled:
         why += ["", "What people who can push said on that pull request after the merge:", ""]
         why += ["> " + line for comment in said for line in (comment.splitlines() + [""])][:-1]
     done = [f"The change is the reverse of ticket {nn}'s change ({sha[:12]}) on the project's own files. The engine"

@@ -101,9 +101,10 @@ class Intake(RailTest):
         github.update(lambda s: s["issues"].append({"number": 30, "title": "Smoke check failed on dev",
                                                     "body": f"Commit: {sha}\n\nGET /health returned 500.",
                                                     "labels": ["rail"], "state": "open"}))
-        nn = a.rail("intake", "github")["created"][0]
+        revert, nn = a.rail("intake", "github")["created"]  # the revert goes first (test_revert), then the fix
         text = a.git("show", f"{nn}-github-30-smoke-check-failed-on-dev:.rail/tickets/{nn}.md")
         self.assertIn('caused_by = "1"', text)
+        self.assertIn(f'after = ["{revert}"]', text)
 
     def test_any_tracker_comes_in_with_an_external_id(self):
         p = self.fixture()
