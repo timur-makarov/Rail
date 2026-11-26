@@ -436,8 +436,9 @@ def requested_event(nn, ticket, via, channel, **extra):
 
 
 def with_kinds(project, text):
-    """The ticket text with the tier its scope's paths set, and, when they set one, a person_reason naming the first
-    kind they reach, unless the ticket has one already. Text whose front matter or tier is malformed is left to lint."""
+    """The ticket text with the tier its scope's paths set, and, when they set one, a person_reason naming every kind
+    they reach, each as "kind: path" with the first path that reaches it, parts separated by "; ", unless the ticket
+    has one already. Text whose front matter or tier is malformed is left to lint."""
     ticket = Ticket(text)
     if ticket.errors or ticket.tier not in TIERS:
         return text
@@ -447,8 +448,10 @@ def with_kinds(project, text):
     if tier != ticket.tier:
         text = with_tier(text, tier)
     if not ticket.get("person_reason"):
-        kind, path, _ = found[0]
-        text = with_field(text, "person_reason", f"{kind}: {path}")
+        first = {}
+        for kind, path, _ in found:
+            first.setdefault(kind, path)
+        text = with_field(text, "person_reason", "; ".join(f"{kind}: {path}" for kind, path in first.items()))
     return text
 
 
