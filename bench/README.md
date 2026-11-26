@@ -1,7 +1,7 @@
 # The bench
 
-The bench measures Rail against plain coding agents on real issues with hidden tests. The plan it is built from is
-the fulltest `PLAN.md`, sections 3 to 5. It needs Python 3.11 and git, and nothing outside the standard library.
+The bench measures Rail against plain coding agents on real issues with hidden tests. It needs Python 3.11 and git,
+and nothing outside the standard library.
 
 Run it as `bench/bench VERB ...` from anywhere. Everything it builds goes into the store: `$BENCH_STORE`, or
 `store` in `bench/config.toml`, or `~/.rail-bench`.

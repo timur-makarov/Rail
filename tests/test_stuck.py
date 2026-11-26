@@ -1,5 +1,5 @@
 """STUCK: an AUTO ticket at the retry cap is dropped with a record, and a drop never removes anything before its mark
-is written. A PERSON ticket keeps every wait (proposals/responsibility.md, Part 4)."""
+is written. A PERSON ticket keeps every wait."""
 
 import json
 import os
