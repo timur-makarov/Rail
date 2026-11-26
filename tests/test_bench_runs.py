@@ -56,6 +56,8 @@ class FullRun(BenchTest):
         self.assertEqual((res["contract_runs"], res["worker_runs"], res["review_rounds"]), (1, 1, 1))
         self.assertEqual([s["name"] for s in r.stages()], ["intake", "contract", "work-1", "review-1", "end"])
         self.assertEqual(r.stream_files(), ["001-contract.jsonl", "002-worker.jsonl"])
+        self.assertEqual([(w["code"], w["role"]) for w in res["worked"]], [("TICKET_LINT", "contract"),
+                                                                              ("IMPLEMENT", "worker")])
         with open(dump) as f:
             env = json.load(f)
         self.assertNotIn("GH_TOKEN", env)
@@ -234,6 +236,12 @@ class Plain(BenchTest):
         s = self.situation()
         sealed.build(self.store, s)
         return sealed.fix_diff(self.store, s)
+
+    def test_a_brief_on_the_contract_model_runs_as_the_contract_role(self):
+        # Rail runs the sweep's ticket filing on [worker] contract, as it does the contract: so does the bench.
+        self.assertEqual({code: driver.role_of(code) for code in driver.WORK_CODES},
+                         {code: "contract" if code in ("TICKET_LINT", "SWEEP_TICKETS") else "worker"
+                          for code in driver.WORK_CODES})
 
     def test_the_done_rule(self):
         ok = {"type": "result", "subtype": "success", "is_error": False}

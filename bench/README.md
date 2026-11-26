@@ -74,7 +74,7 @@ command = "claude -p --output-format stream-json --verbose ... --tools {tools} -
 model = "claude-sonnet-5-5"
 effort = "medium"
 
-[contract]    # Rail's contract writer: a model and effort only; it runs through the worker's command
+[contract]    # Rail's contract writer and the sweep's ticket filer: a model and effort; through the worker's command
 [review]      # Rail's reviewer: command and model
 [consult]     # Rail's consult: command and model
 
