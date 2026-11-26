@@ -398,7 +398,9 @@ ROWS = [
                f" finding that names something wrong: an input or a sequence that fails, or a doc that no longer"
                f" matches the code (set caused_by when a ticket caused it); a finding about style, naming or where a"
                f" test lives gets no ticket. Open one ticket \"make it a check: ...\" for"
-               f" each kind of proposed check. Drop duplicates. Change no code here. Then run: rail advance {f.id}"),
+               f" each kind of proposed check. Open one ticket for each pattern in the worker runs, for what would have"
+               f" told the worker: a setup or provision command, a line in the project's part of AGENTS.md, or a guide's"
+               f" text. Drop duplicates. Change no code here. Then run: rail advance {f.id}"),
     ("SETUP_FAILED",       "agent", "agent_task",  lambda f: f.state == "implementing" and f.setup_failed,
      _setup_failed),
     ("VERIFY_ASSUMPTIONS", "agent", "agent_task",  lambda f: f.state == "implementing" and f.open_assumptions,

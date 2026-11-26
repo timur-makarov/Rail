@@ -352,6 +352,31 @@ class Sweep(RailTest):
         self.assertIn("Sweep: since", p.git("log", "-1", "--format=%b", "main"))
         self.assertEqual([t["title"] for t in p.rail("status")["tickets"]][-1], "Add subtract")
 
+    def test_a_dead_end_in_three_tickets_worker_runs_gives_the_sweep_a_task(self):
+        p = self.fixture(config=WORK + "\n[sweep]\nevery = 3\n")
+        lost = [["Bash", {"command": "uv run pytest -x"}, "failed", "Exit code 1\nno tests ran"],
+                ["Bash", {"command": "make test"}, "failed", "Exit code 127\ncommand not found: make"]]
+        for nn, scope, path in (("1", "src/**", "src/calc.py"), ("2", "src/**", "src/calc.py"), ("3", "src/**", "src/calc.py")):
+            text = FIXED + f"# {nn}\n"
+            p.add(ticket(title=f"Fix add {nn}", scope=(scope,), check=f"grep -q '# {nn}' {path}"))
+            p.rail("next")
+            # Only the first two runs miss make: twice is no pattern.
+            p.queue_work({"write": {path: text}, "calls": lost if nn != "3" else lost[:1]})
+            p.rail("work", nn)
+            p.rail("advance", nn)
+            self.assertEqual(p.rail("advance", nn)["state"], "merged")
+        self.assertEqual(p.rail("next")["reason"]["code"], "SWEEP")
+        swept = p.rail("sweep")
+        self.assertEqual(swept["reason"]["code"], "SWEEP_TICKETS")  # every change was reviewed, and still there is a task
+        self.assertIn("Open one ticket for each pattern in the worker runs", swept["action"]["brief"])
+        self.assertEqual(swept["steps"][-1]["detail"],
+                         "no review run: 0 parked findings, 0 proposed checks, 1 patterns in the worker runs")
+        with open(os.path.join(p.worktree("4"), ".rail", "journal", "4-summary.md")) as f:
+            summary = f.read()
+        self.assertIn("## Patterns in the worker runs\n- `pytest` failed before it first passed, in 3 tickets (1, 2, 3)",
+                      summary)
+        self.assertNotIn("make", summary)
+
 
 class AfterDropped(RailTest):
     """Ticket 2 comes after ticket 1, and ticket 1 is dropped: on AUTO the decision is the contract writer's, and a

@@ -24,6 +24,10 @@ reviewers proposed are below: report a parked one again when it is real, and gro
 
 
 NOTHING = "nothing to file"  # the detail of a harvest step that found nothing: the ticket merges with no task
+PATTERN_TICKETS = 3  # the same dead end in the worker runs of this many merged tickets is a pattern
+# What a worker run counts (rail docs journal, the `worked` event), as the summary says it.
+DEAD_ENDS = {"failed": "`{key}` failed before it first passed", "not_found": "`{key}` wasn't on the machine",
+             "denied": "a call was denied (`{key}`)", "reread": "`{key}` was read more than twice in a run"}
 
 
 def since_last(project):
@@ -124,6 +128,26 @@ def history(project, merged):
     return unique, dict(checks)
 
 
+def patterns(project, merged):
+    """The dead ends that recur in the worker runs of the tickets merged since the last sweep: a command that failed
+    before it first passed, one the machine doesn't have, a denied call or a file read again and again, in
+    PATTERN_TICKETS tickets or more. Each is something the project could have told the worker. Returns
+    [(kind, key, ticket ids)], the most tickets first. Read from the `worked` events, which keep a short key per
+    item, so the run logs (never committed) aren't needed."""
+    ids = sorted(set(merged), key=int)
+    blobs = gitx.read_blobs([f"{project.base_ref}:{events_path(nn)}" for nn in ids], project.root)
+    seen = defaultdict(list)
+    for nn in ids:
+        keys = set()
+        for e in parse_events(blobs.get(f"{project.base_ref}:{events_path(nn)}")):
+            if e.get("event") == "worked" and isinstance(e.get("keys"), dict):
+                keys.update((kind, key) for kind, found in e["keys"].items() if kind in DEAD_ENDS for key in found)
+        for item in keys:
+            seen[item].append(nn)
+    found = [(kind, key, where) for (kind, key), where in seen.items() if len(where) >= PATTERN_TICKETS]
+    return sorted(found, key=lambda x: (-len(x[2]), x[0], x[1]))
+
+
 def brief(project, commits, parked, checks):
     from .review import DO_NOT_REPORT, SECURITY, project_conventions
 
@@ -144,7 +168,7 @@ def brief(project, commits, parked, checks):
     return "\n".join(parts) + "\n"
 
 
-def summary(nn, start, commits, merged, problems, counts, entry, parked, checks):
+def summary(nn, start, commits, merged, problems, counts, entry, parked, checks, recurring=()):
     review = (entry["summary"] if entry else "(the review run failed)") if commits else \
         "(no review run: nothing merged without a review)"
     lines = [f"# Sweep {nn}", "", f"Since {start[:12]}: {len(merged)} tickets merged; {len(commits)} commits merged"
@@ -156,25 +180,30 @@ def summary(nn, start, commits, merged, problems, counts, entry, parked, checks)
         where = f"{f['file']}:{f['line']}" if f.get("line") else f["file"]
         lines.append(f"- {f['id']} ({f['severity']}) {where}: {f['claim']}" + (f" Check: {f['check']}" if f.get("check") else ""))
     lines += ["", "## Parked and open advisory findings", *([f"- ticket {n} {fid}: {c}" for n, fid, c in parked] or ["(none)"]),
-              "", "## Proposed checks, by kind", *([f"- {c} ({', '.join(w)})" for c, w in checks.items()] or ["(none)"])]
+              "", "## Proposed checks, by kind", *([f"- {c} ({', '.join(w)})" for c, w in checks.items()] or ["(none)"]),
+              "", "## Patterns in the worker runs",
+              *([f"- {DEAD_ENDS[kind].format(key=key)}, in {len(where)} tickets ({', '.join(where)})"
+                 for kind, key, where in recurring] or ["(none)"])]
     return "\n".join(lines) + "\n"
 
 
 def run(project, f, receipt):
-    """The free part, the parked findings and proposed checks, and one review pass with the sweep brief when
-    something merged without a review. With nothing unreviewed there is no model run: a passed `harvest` step says
+    """The free part, the parked findings and proposed checks, the patterns in the worker runs, and one review pass
+    with the sweep brief when something merged without a review. With nothing unreviewed there is no model run: a passed `harvest` step says
     so, and its detail says when nothing at all was found. Writes NN-summary.md into `receipt`."""
     from . import review
 
     start, commits, merged = since_last(project)
     problems, counts = free_part(project)
     parked, checks = history(project, merged)
+    recurring = patterns(project, merged)
     entry = None
     if commits:
         entry = review.run(project, f, "sweep", receipt, prompt=brief(project, commits, parked, checks))
     else:
-        receipt.record("harvest", True, f.patch_id, NOTHING if not (problems or parked or checks) else
-                       f"no review run: {len(parked)} parked findings, {len(checks)} proposed checks")
+        receipt.record("harvest", True, f.patch_id, NOTHING if not (problems or parked or checks or recurring) else
+                       f"no review run: {len(parked)} parked findings, {len(checks)} proposed checks,"
+                       f" {len(recurring)} patterns in the worker runs")
     receipt.files[f".rail/journal/{f.id}-summary.md"] = summary(f.id, start, commits, merged, problems, counts, entry,
-                                                               parked, checks)
+                                                               parked, checks, recurring)
     return entry
