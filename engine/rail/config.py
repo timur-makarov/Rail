@@ -9,7 +9,7 @@ from .ticket import KINDS
 from .util import RailError
 
 REVIEW_COMMAND = (
-    "claude -p --safe-mode --effort high --system-prompt-file .rail/engine/reviewer.md "
+    "claude -p --safe-mode --effort high --autocompact 400000 --system-prompt-file .rail/engine/reviewer.md "
     "--tools Read,Grep,Glob,Bash,Edit,Write --allowedTools Bash,Edit,Write "
     "--disallowedTools 'Bash(git push *)' --output-format json "
     "--json-schema \"$(cat .rail/engine/review-v1.json)\""
@@ -20,7 +20,7 @@ REVIEW_COMMAND = (
 WORKER_COMMAND = (
     'claude -p --output-format stream-json --verbose ${RAIL_MODEL:+--model "$RAIL_MODEL"} '
     '${RAIL_EFFORT:+--effort "$RAIL_EFFORT"} --permission-mode auto --permission-prompts none --max-turns 300 '
-    '--max-budget-usd 15 ${RAIL_SESSION:+--resume "$RAIL_SESSION"}'
+    '--max-budget-usd 15 --autocompact 400000 ${RAIL_SESSION:+--resume "$RAIL_SESSION"}'
 )
 
 DEFAULTS = {
