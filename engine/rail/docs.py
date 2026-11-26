@@ -6,6 +6,7 @@ so they can't drift from what the engine reads.
 
 import os
 import re
+import tomllib
 
 from . import config as configmod
 from .ticket import KINDS
@@ -191,12 +192,32 @@ def read_part(spec, *roots):
     return None
 
 
+TERMS = os.path.join(os.path.dirname(DOCS), "terms.toml")
+
+
+def terms():
+    """Rail's terms, as engine/terms.toml lists them: [{term, means, not, page}]."""
+    with open(TERMS, "rb") as f:
+        return tomllib.load(f)["terms"]
+
+
+def terms_page():
+    lines = ["# Terms", "", "One word for one thing. Rail's own text keeps to this list, and a test in Rail's suite fails"
+             " when a word in the last column stands in it. Use the same words in a ticket, a guide or a source: the"
+             " agents that read them know these.", "", "| Term | Means | Defined in | Not |", "|---|---|---|---|"]
+    for t in terms():
+        lines.append(f"| {t['term']} | {t['means']} | `rail docs {t['page']}` | {', '.join(t['not'])} |")
+    return "\n".join(lines) + "\n"
+
+
 def topics():
     pages = sorted(f[:-3] for f in os.listdir(DOCS) if f.endswith(".md")) if os.path.isdir(DOCS) else []
-    return pages + ["config", "cli"]
+    return pages + ["config", "cli", "terms"]
 
 
 def page(topic, parser):
+    if topic == "terms":
+        return terms_page()
     if topic == "config":
         return config_page()
     if topic == "cli":
@@ -211,7 +232,7 @@ def page(topic, parser):
 def index():
     lines = ["# Rail docs", "", "Read a topic with: rail docs TOPIC", ""]
     for topic in topics():
-        title = "Config reference" if topic == "config" else "CLI reference" if topic == "cli" else topic
+        title = {"config": "Config reference", "cli": "CLI reference", "terms": "Terms"}.get(topic, topic)
         path = os.path.join(DOCS, f"{topic}.md")
         if os.path.exists(path):
             with open(path) as f:

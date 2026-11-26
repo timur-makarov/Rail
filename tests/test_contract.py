@@ -302,7 +302,7 @@ class ReviewOutput(RailTest):
                 failed = p.rail("advance", "1", expect=3)
                 details = [s["detail"] for s in failed["steps"] if s["step"] == "review"]
                 self.assertEqual((failed["state"], failed["owner"], failed["reason"]["code"], details),
-                                 ("reviewing", "human", "STUCK_REVIEW", [f"invalid output: {reason}"] * 2))
+                                 ("reviewing", "person", "STUCK_REVIEW", [f"invalid output: {reason}"] * 2))
                 p.rail("accept", "1")
         self.assertNotIn("1-review.json", p.git("ls-tree", "-r", "--name-only", "1-fix-add", ".rail/journal"))  # no run kept
 

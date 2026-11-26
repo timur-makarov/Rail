@@ -129,7 +129,7 @@ class Approvals(RailTest):
         self.assertEqual(a.rail("advance", "2")["state"], "merged")
 
         waiting = a.rail("next")
-        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("human", "WAITING_HUMAN"))
+        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("person", "WAITING_PERSON"))
         self.assertEqual(waiting["waits"][0]["needs"], "APPROVE_CONTRACT")
         self.assertIn("rail:needs-you", github.pr(1)["labels"])
 
@@ -147,7 +147,7 @@ class Approvals(RailTest):
         self.assertIn("rail:needs-you", github.pr(1)["labels"])
         github.ci("3-change-the-config", "success")
         ready = a.rail("next")
-        self.assertEqual((ready["owner"], ready["waits"][0]["needs"]), ("human", "MERGE_BY_PERSON"))
+        self.assertEqual((ready["owner"], ready["waits"][0]["needs"]), ("person", "MERGE_BY_PERSON"))
         self.assertIn("rail:needs-you", github.pr(1)["labels"])
         self.assertEqual(github.pr(1)["title"], "3: change the config")
         github.person_merges(1)
@@ -164,7 +164,7 @@ class Approvals(RailTest):
         a.rail("next")
         github.label(1, "rail:hold")
         held = a.rail("next")
-        self.assertEqual((held["owner"], held["waits"][0]["needs"]), ("human", "HOLD"))
+        self.assertEqual((held["owner"], held["waits"][0]["needs"]), ("person", "HOLD"))
         github.update(lambda s: s.setdefault("comments", {}).__setitem__("1", [
             {"body": "Use the shared helper.", "created_at": "2099-01-01T00:00:00Z", "user": {"login": "owner"},
              "author_association": "OWNER"}]))
@@ -405,7 +405,7 @@ class Merges(RailTest):
         github.ci("1-fix-add", "success")
         github.update(lambda s: s.__setitem__("fail_merge", "Repository rule violations found"))
         refused = a.rail("advance", "1", expect=3)
-        self.assertEqual((refused["owner"], refused["reason"]["code"]), ("human", "MERGE_FAILED"))
+        self.assertEqual((refused["owner"], refused["reason"]["code"]), ("person", "MERGE_FAILED"))
         self.assertIn("Repository rule violations found", refused["action"]["brief"])
 
     def test_a_pr_closed_by_hand_drops_the_ticket(self):
@@ -504,7 +504,7 @@ class Desk(RailTest):
         github.ci("2-fix-add", "success")
         a.rail("advance", "2")
         waiting = a.rail("next")
-        self.assertEqual(waiting["reason"]["code"], "WAITING_HUMAN")
+        self.assertEqual(waiting["reason"]["code"], "WAITING_PERSON")
         self.assertIn("the label rail:go approves it", waiting["waits"][0]["brief"])
         self.assertIn("pull/1", waiting["waits"][0]["brief"])
 
@@ -532,7 +532,7 @@ class Desk(RailTest):
             f.write(ticket(title="Rework the config", tier="PERSON", scope=("src/config/**",),
                            check="test -f src/config/app.toml", front=('external_id = "github#12"',)))
         waiting = a.rail("amend", "1", "--file", written)
-        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("human", "APPROVE_CONTRACT"))
+        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("person", "APPROVE_CONTRACT"))
         self.assertEqual(github.pr(1)["title"], "1: [contract] Rework the config")
         self.assertIn("pull/1", waiting["action"]["brief"])
         # The person's inbox is the label: the command that meets the wait puts it on, not only a bare rail next.
@@ -580,7 +580,7 @@ class Scale(RailTest):
     def test_a_contract_pull_request_older_than_the_100_newest_still_reads_its_rail_go(self):
         a, b, github = self.github_pair()
         a.add(ticket(tier="PERSON"))
-        self.assertEqual(a.rail("next")["reason"]["code"], "WAITING_HUMAN")
+        self.assertEqual(a.rail("next")["reason"]["code"], "WAITING_PERSON")
         self.dummies(github, 120)
         github.label(1, "rail:go")
         self.assertEqual(a.rail("next")["reason"]["code"], "IMPLEMENT")

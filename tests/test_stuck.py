@@ -67,7 +67,7 @@ class Stuck(RailTest):
         p.rail("accept", "1")
         p.rail("next")
         capped = fail_twice(p)
-        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("person", "RETRY_CAP"))
         self.assertTrue(os.path.exists(p.worktree("1")))
 
 

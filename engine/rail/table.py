@@ -376,7 +376,7 @@ ROWS = [
     ("DROPPED",            "none",  "rest",        lambda f: f.state == "dropped",
      lambda f: f"Ticket {f.id} was dropped."),
     # A person's brake, an open issue labelled rail:stop, comes before every row that sends anyone to the ticket.
-    ("STOPPED",            "human", "human_wait",  lambda f: f.stopped and f.state not in ("merged", "dropped"),
+    ("STOPPED",            "person", "person_wait",  lambda f: f.stopped and f.state not in ("merged", "dropped"),
      lambda f: stop_brief(f.stopped, f"ticket {f.id}")),
     # A rebase stopped in the ticket's worktree. Until it ends the engine writes nothing to the ticket: git moves
     # the branch when the rebase finishes. Another session's fresh work is still left alone (CLAIMED_ELSEWHERE).
@@ -389,7 +389,7 @@ ROWS = [
     ("GO",                 "agent", "script",      lambda f: f.over_budget and "rail:go" in f.labels
                                                    and f.state not in ("merged", "dropped"),
      lambda f: f"rail next --ticket {f.id}"),
-    ("BUDGET",             "human", "human_wait",  lambda f: f.over_budget and f.state not in ("merged", "dropped"),
+    ("BUDGET",             "person", "person_wait",  lambda f: f.over_budget and f.state not in ("merged", "dropped"),
      lambda f: f"Ticket {f.id} has spent ${f.spent:.2f} since a person last acted, over [worker] ticket_usd"
                f" (${f.project.config['worker']['ticket_usd']:g}): {_spent(f)}. These are the costs the runs reported,"
                f" not the bill. To let it go on, with the count starting again: rail accept {f.id}, or the rail:go label"
@@ -410,7 +410,7 @@ ROWS = [
      lambda f: f"rail next --ticket {f.id}"),
     ("ACCEPT_AUTO",        "agent", "script",      lambda f: f.state == "new" and f.auto,
      lambda f: f"rail next --ticket {f.id}"),
-    ("APPROVE_CONTRACT",   "human", "human_wait",  lambda f: f.state == "new",
+    ("APPROVE_CONTRACT",   "person", "person_wait",  lambda f: f.state == "new",
      lambda f: f"Approve the contract of ticket {f.id} ({f.tier}): read {ticket_path(f.id)} on branch {f.t.name},"
                f" then run: rail accept {f.id}. To change it, say what to change. To reject it, run: rail drop {f.id} --by person"
                + (f" On GitHub: {_pr(f)} shows the contract; the label rail:go approves it, a comment asks for a"
@@ -422,35 +422,35 @@ ROWS = [
                f" decide whether ticket {f.id} still stands without it. If it does, remove {_join(f.after_dropped)}"
                f" from `after`: write the whole ticket to a file and run rail amend {f.id} \"why it stands without"
                f" it\" --file FILE. If it doesn't, drop it: rail drop {f.id} --reason \"why\"."),
-    ("AFTER_DROPPED",      "human", "human_wait",  lambda f: f.state == "accepted" and f.after_dropped,
+    ("AFTER_DROPPED",      "person", "person_wait",  lambda f: f.state == "accepted" and f.after_dropped,
      lambda f: f"Ticket {f.id} comes after ticket {_join(f.after_dropped)}, which was dropped. A person decides:"
                f" remove it from `after` (rail amend {f.id} \"why\" --file FILE), or drop ticket {f.id}."),
     ("WAITING_AFTER",      "none",  "rest",        lambda f: f.state == "accepted" and f.after_open,
      lambda f: f"Ticket {f.id} waits for ticket {_join(f.after_open)} to merge."),
     ("SCOPE_OVERLAP",      "none",  "rest",        lambda f: f.state == "accepted" and f.overlaps,
      lambda f: f"Ticket {f.id} can't be claimed while ticket {_join(f.overlaps)} changes the same paths."),
-    ("TOOL_MISSING",       "human", "human_wait",  lambda f: f.state == "accepted" and f.tools_missing,
+    ("TOOL_MISSING",       "person", "person_wait",  lambda f: f.state == "accepted" and f.tools_missing,
      lambda f: tools.wait_brief(f.id, f.tools_missing)),
     ("CLAIM",              "agent", "script",      lambda f: f.state == "accepted",
      lambda f: f"rail next --ticket {f.id}"),
-    ("APPROVE_AMEND",      "human", "human_wait",  lambda f: f.amend_pending,
+    ("APPROVE_AMEND",      "person", "person_wait",  lambda f: f.amend_pending,
      lambda f: f"The Done Contract of ticket {f.id} changed (rail amend)."
                + (f" The agent's reason: {f.amend_reason}" if f.amend_reason else "") + f" Read {ticket_path(f.id)} on branch {f.t.name},"
                f" then approve it: rail accept {f.id}." + _go(f)),
-    ("RETRY_CAP",          "human", "human_wait",  lambda f: f.state in OPEN and f.capped and not f.auto,
+    ("RETRY_CAP",          "person", "person_wait",  lambda f: f.state in OPEN and f.capped and not f.auto,
      _capped),
-    ("STUCK_REVIEW",       "human", "human_wait",  lambda f: f.state == "reviewing" and f.stuck_review,
+    ("STUCK_REVIEW",       "person", "person_wait",  lambda f: f.state == "reviewing" and f.stuck_review,
      lambda f: f"The review of ticket {f.id} failed twice in a row with no verdict: it timed out (timeout_secs) or its"
                f" output was invalid. A person looks at why, for example a command that waits for input or a reviewer"
                f" that can't return review/v1, then continues it: rail accept {f.id}." + _go(f)),
-    ("FINDING_UPHELD",     "human", "human_wait",  lambda f: f.ledger.disputed_again(),
+    ("FINDING_UPHELD",     "person", "person_wait",  lambda f: f.ledger.disputed_again(),
      lambda f: f"The refuter upheld {_join(f.ledger.disputed_again())} on ticket {f.id}, and the agent still disputes it."
                f" A person decides: rail answer {f.id} F1 declined \"why\" --owner, rail answer {f.id} F1 parked"
                f" \"why\" --owner when this change didn't cause it, or rail accept {f.id} \"how to fix it\"."),
-    ("MERGE_FAILED",       "human", "human_wait",  lambda f: f.state == "merge-ready" and _merge_stale(f),
+    ("MERGE_FAILED",       "person", "person_wait",  lambda f: f.state == "merge-ready" and _merge_stale(f),
      lambda f: f"The merge of {_pr(f)} was requested and hasn't landed. A person looks at the pull request, then"
                f" continues: rail accept {f.id}." + _go(f)),
-    ("HOLD",               "human", "human_wait",  lambda f: "rail:hold" in f.labels,
+    ("HOLD",               "person", "person_wait",  lambda f: "rail:hold" in f.labels,
      lambda f: f"A person holds ticket {f.id} with the label rail:hold on {_pr(f)}. They continue it with the"
                f" label rail:go, or: rail accept {f.id} \"note\""),
     # A claim protects work in flight. The waits above show from any session, and a shipped ticket (in CI, ready to
@@ -524,7 +524,7 @@ ROWS = [
     ("MERGE",              "agent", "script",      lambda f: f.state == "merge-ready" and (f.auto or f.merge_approved)
                                                    and not (f.project.remote and not f.auto),
      lambda f: f"rail advance {f.id}"),  # it merges, and removes the worktree: run it from the project's root
-    ("MERGE_BY_PERSON",    "human", "human_wait",  lambda f: f.state == "merge-ready",
+    ("MERGE_BY_PERSON",    "person", "person_wait",  lambda f: f.state == "merge-ready",
      _merge_by_person),
 ]
 

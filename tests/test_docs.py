@@ -1,6 +1,8 @@
 """rail docs: the framework's docs, read from the engine."""
 
+import ast
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -53,7 +55,7 @@ class Loop(RailTest):
     def test_the_loop_ticket_and_state_pages_cover_what_an_agent_needs(self):
         p = self.fixture()
         loop = p.rail("docs", "loop")["text"]
-        for text in ("rail next --json", "rail advance --json", "owner", "human_wait", "Exit codes"):
+        for text in ("rail next --json", "rail advance --json", "owner", "person_wait", "Exit codes"):
             self.assertIn(text, loop)
         tickets = p.rail("docs", "tickets")["text"]
         for text in ("rail add", "Check:", "ASSUMED", "rail amend", "rail/ids"):
@@ -115,3 +117,78 @@ class Operations(RailTest):
         stats = p.rail("docs", "stats")["text"]
         for text in ("rail stats --since", "Hit rate", "merged with no review", "BY MODEL"):
             self.assertIn(text, stats)
+
+
+def prose(text):
+    """A markdown text's lines with what stands in a code span or a fenced block blanked out."""
+    out, fenced = [], False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            out.append("")
+        else:
+            out.append("" if fenced else re.sub(r"`[^`]*`", " ", line))
+    return out
+
+
+def misused(terms, text):
+    """[(line number, word, term)] for each word a term's `not` lists that stands in the text's prose."""
+    found = []
+    for n, line in enumerate(prose(text), 1):
+        for t in terms:
+            for word in t["not"]:
+                if re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", line, re.I):
+                    found.append((n, word, t["term"]))
+    return found
+
+
+class Terms(RailTest):
+    """One word for one thing: Rail's own text keeps to engine/terms.toml."""
+
+    def texts(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        paths = [os.path.join("engine", "reviewer.md"), os.path.join("seed", "AGENTS.md"),
+                 os.path.join("seed", "tickets", "TEMPLATE.md")]
+        for folder in (os.path.join("engine", "docs"), os.path.join("engine", "guides")):
+            paths += [os.path.join(folder, name) for name in sorted(os.listdir(os.path.join(root, folder)))
+                      if name.endswith(".md")]
+        skills = os.path.join("seed", "skills")
+        paths += [os.path.join(skills, name, "SKILL.md") for name in sorted(os.listdir(os.path.join(root, skills)))]
+        for path in paths:
+            with open(os.path.join(root, path)) as f:
+                yield path, f.read()
+        # What the table writes into briefs: its string literals, each as one line of prose.
+        with open(os.path.join(root, "engine", "rail", "table.py")) as f:
+            tree = ast.parse(f.read())
+        yield "engine/rail/table.py", "\n".join(
+            node.value.replace("\n", " ") for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str))
+
+    def test_rails_own_text_uses_no_word_the_terms_rule_out(self):
+        engine()
+        from rail import docs
+        terms = docs.terms()
+        bad = [f"{path}:{n}: '{word}', where Rail says '{term}'"
+               for path, text in self.texts() for n, word, term in misused(terms, text)]
+        self.assertEqual(bad, [])
+
+    def test_the_check_finds_a_planted_word_and_leaves_a_code_span_alone(self):
+        engine()
+        from rail import docs
+        terms = docs.terms()
+        text = "A ticket waits.\nThen a human approves it.\nThe value `human` is gone.\n```\nhuman\n```\nNon-humans too.\n"
+        self.assertEqual(misused(terms, text), [(2, "human", "person")])
+        self.assertEqual(misused(terms, "Its acceptance criteria are the Definition of Done."),
+                         [(1, "acceptance criteria", "Done Contract"), (1, "definition of done", "Done Contract")])
+
+    def test_every_term_names_a_page_that_exists_and_rail_docs_prints_the_list(self):
+        p = self.fixture()
+        engine()
+        from rail import docs
+        terms = docs.terms()
+        self.assertEqual([t["term"] for t in terms if t["page"] not in docs.topics()], [])
+        self.assertEqual(len({t["term"] for t in terms}), len(terms))
+        page = p.rail("docs", "terms")["text"]
+        self.assertIn("| person | Whoever answers for the repository", page)
+        self.assertIn("| `rail docs kinds` | human, humans, operator, maintainer |", page)
+        self.assertIn("- terms: Terms", p.rail("docs", raw=True).stdout)

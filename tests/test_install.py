@@ -156,7 +156,7 @@ class Skills(RailTest):
 class Launcher(RailTest):
     def test_inside_a_project_rail_runs_the_projects_own_engine(self):
         p = self.fixture()
-        p.write(".rail/bin/rail", "#!/usr/bin/env python3\nprint('{\"schema_version\": 1, \"ok\": true, \"marker\": \"project\"}')\n")
+        p.write(".rail/bin/rail", "#!/usr/bin/env python3\nprint('{\"schema_version\": 2, \"ok\": true, \"marker\": \"project\"}')\n")
         self.assertEqual(json.loads(p.rail("next", raw=True).stdout)["marker"], "project")
 
     def test_outside_a_project_only_init_is_offered(self):
@@ -229,7 +229,7 @@ class Doctor(RailTest):
         p.write("CLAUDE.local.md", "local notes\n")
         failed = p.rail("doctor", expect=3)
         self.assertEqual({s["step"]: s.get("result") for s in failed["steps"]}["CLAUDE.local.md"], "fail")
-        self.assertEqual(failed["owner"], "human")
+        self.assertEqual(failed["owner"], "person")
 
 
 class CI(RailTest):

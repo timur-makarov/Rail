@@ -82,7 +82,7 @@ it. The advice given at the budget is in the answer of
 
 ## Waits
 
-A ticket waits for a person (`owner: human`) for an approval, a person's merge, a review that timed out or gave
+A ticket waits for a person (`owner: person`) for an approval, a person's merge, a review that timed out or gave
 invalid output twice in a row, or an amended Done Contract; and a PERSON ticket also for the retry budget or cap,
 a finding the refuter upheld, and a ticket it comes after that was dropped. On an AUTO ticket those three are no
 wait: at the cap the ticket is dropped (above); a finding the refuter upheld stands, and disputing it again comes

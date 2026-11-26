@@ -69,7 +69,8 @@ engine. These rules keep a page useful:
 
 - **Open with three lines:** what the page assumes, what it produces, and what done means.
 - **One word for one thing.** A *ticket* has a *contract*. A *worker* is the agent doing a ticket; the
-  *reviewer* is the fresh agent the engine starts; a *person* is a human. Don't swap in synonyms.
+  *reviewer* is the fresh agent the engine starts; a *person* is whoever answers for the repository. Don't swap
+  in synonyms.
 - **A strong word names its limit.** Write "never", "always" or "must" only with what it covers and why. A
   rule that a command can enforce belongs in a check, a structure rule or a hook, and then leaves the page.
 - **"Ask" says whom.** In an unattended session nobody answers. Say what the agent does instead: record an

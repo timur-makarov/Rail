@@ -27,7 +27,7 @@ class Kinds(RailTest):
     def test_a_kind_glob_makes_the_ticket_person_at_add_with_its_reason(self):
         p = self.fixture(config=ACCESS + CONFIG, files=AUTH)
         added = p.add(ticket(title="Check the role", scope=("src/auth/**",)))
-        self.assertEqual((added["tier"], added["state"], added["owner"]), ("PERSON", "new", "human"))
+        self.assertEqual((added["tier"], added["state"], added["owner"]), ("PERSON", "new", "person"))
         meta = front(p, "1-check-the-role")
         self.assertIn('tier = "PERSON"', meta)
         self.assertIn('person_reason = "access: src/auth/x.py"', meta)

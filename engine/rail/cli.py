@@ -26,7 +26,7 @@ STALE_DAYS = 3
 
 def answer(ticket=None, state=None, owner="none", action=None, code="NO_WORK", steps_=None, cwd=None, **extra):
     result = {
-        "schema_version": 1, "ok": True, "ticket": ticket, "state": state, "owner": owner, "cwd": cwd,
+        "schema_version": 2, "ok": True, "ticket": ticket, "state": state, "owner": owner, "cwd": cwd,
         "action": action or {"kind": "rest", "brief": ""}, "reason": {"code": code}, "steps": steps_ or [],
     }
     result.update(extra)
@@ -132,7 +132,7 @@ def guide(project, code, action, f=None):
 def from_facts(f, steps_=None, code=None, **extra):
     row_code, owner, action = first_match(f)
     worker(f, action, row_code)
-    if row_code not in ("STOPPED", "TOOL_MISSING") and (owner == "human" or person_next(f)):
+    if row_code not in ("STOPPED", "TOOL_MISSING") and (owner == "person" or person_next(f)):
         label_wait(f.project, f, row_code)  # the person's inbox is this label, whichever command met the wait
     named = guide(f.project, row_code, action, f)
     if named:
@@ -348,7 +348,7 @@ def wait_code(f):
     labels, f.labels = f.labels, f.labels - {"rail:go"}
     try:
         code, owner, _ = first_match(f)
-        return code if owner == "human" else ""
+        return code if owner == "person" else ""
     finally:
         f.labels = labels
 
@@ -1135,8 +1135,8 @@ def cmd_next(project, args):
     stopped = None
     if stop:
         from .table import stop_brief
-        stopped = answer(owner="human", code="STOPPED", steps=took_in, leftovers=leftovers,
-                         action={"kind": "human_wait", "brief": stop_brief(stop, "any ticket")})
+        stopped = answer(owner="person", code="STOPPED", steps=took_in, leftovers=leftovers,
+                         action={"kind": "person_wait", "brief": stop_brief(stop, "any ticket")})
     # The whole repository is stopped: no ticket is looked at, but a revert, which a brake never stops. With
     # --ticket NN the ticket's own row says so.
     reverting = any(f.revert and f.state not in ("merged", "dropped") for f in facts.values())
@@ -1171,7 +1171,7 @@ def cmd_next(project, args):
         update_pr(project, f, took_in)
         if code in ("STOPPED", "TOOL_MISSING"):
             continue  # the person set the brake and knows; a missing tool gets one issue of its own, not one a ticket
-        if owner == "human" or person_next(f):
+        if owner == "person" or person_next(f):
             label_wait(project, f, code)
         elif owner == "agent" and f.pr_open and "rail:needs-you" in f.labels:
             # The wait ended without a rail:go (the base moved under a pull request that waited for its merge, say):
@@ -1207,7 +1207,7 @@ def cmd_next(project, args):
         code, owner, action = first_match(f)
         if owner == "none" and f.state in ("new", "accepted") + OPEN and code != "CLAIMED_ELSEWHERE":
             resting.append(f"- {f.id}: {action['brief']}")  # so a runner offered none of them knows why
-        if owner == "human":
+        if owner == "person":
             waits.append({"ticket": f.id, "needs": code, "brief": action["brief"],
                           **({"pr": f.pr["html_url"]} if f.pr else {})})
         elif f.held:  # also with a rail:go on it that answers no wait: the session at work reads it
@@ -1233,11 +1233,11 @@ def cmd_next(project, args):
     if waits and all(w["needs"] == "TOOL_MISSING" for w in waits):
         # One thing is missing, however many tickets wait for it: say it once.
         brief = tools.wait_brief(", ".join(w["ticket"] for w in waits), project.tools_missing()) + others
-        return answer(owner="human", code="TOOL_MISSING", action={"kind": "human_wait", "brief": brief},
+        return answer(owner="person", code="TOOL_MISSING", action={"kind": "person_wait", "brief": brief},
                       steps_=took_in, **extra)
     if waits:
         brief = "Tickets wait for a person:\n" + "\n".join(f"- {w['ticket']}: {w['brief']}" for w in waits) + others
-        return answer(owner="human", code="WAITING_HUMAN", action={"kind": "human_wait", "brief": brief},
+        return answer(owner="person", code="WAITING_PERSON", action={"kind": "person_wait", "brief": brief},
                       steps_=took_in, **extra)
     from . import sweep
     is_due, _, commits, merged = sweep.due(project)
@@ -1406,7 +1406,7 @@ def forge_merge(project, f, receipts):
     nf = facts[f.id]
     if nf.state != "merge-ready":
         return from_facts(nf, receipts)  # a conflict or a red check: back to implementing
-    return answer(f.id, nf.state, "human", {"kind": "human_wait", "brief": f"GitHub refused the merge of PR #{pr['number']}:"
+    return answer(f.id, nf.state, "person", {"kind": "person_wait", "brief": f"GitHub refused the merge of PR #{pr['number']}:"
                   f" {why}. A person looks, then continues: rail accept {f.id}"}, "MERGE_FAILED", receipts, nf.cwd,
                   tier=nf.tier)
 
@@ -1453,7 +1453,7 @@ def cmd_advance(project, args):
             receipts += run.steps
             if not merged:
                 if run.failure and run.failure[0] == "merge":
-                    return answer(nn, f.state, "human", {"kind": "human_wait", "brief": run.failure[1]}, "MERGE_FAILED",
+                    return answer(nn, f.state, "person", {"kind": "person_wait", "brief": run.failure[1]}, "MERGE_FAILED",
                                   receipts, f.cwd, tier=f.tier)
                 break
             tickets, facts = load(project)
@@ -1490,7 +1490,7 @@ def cmd_advance(project, args):
                 if advice:
                     brief += f"\n\n{advice}"
                 code_, owner_, action_ = first_match(nf)
-                if owner_ == "human" or code_ == "STUCK":  # a person's wait, or the engine's drop at the cap
+                if owner_ == "person" or code_ == "STUCK":  # a person's wait, or the engine's drop at the cap
                     return from_facts(nf, receipts)
                 action = worker(nf, {"kind": "agent_task", "brief": brief})
                 # A rebase that stopped on a conflict has its own page; any other failure gets one once it repeats.
@@ -1520,7 +1520,7 @@ def cmd_status(project, args):
         code, owner, action = first_match(f)
         last = t.events[-1]["at"] if t.events else ""
         note = ""
-        if owner == "human":
+        if owner == "person":
             note = f"waiting: {code.lower().replace('_', ' ')}"
         elif f.held:
             note = f"another session's work, quiet {f.quiet_minutes} min"
@@ -2000,8 +2000,8 @@ def cmd_provision(project, args):
         brief = ("This is your own machine, so Rail installs nothing here." + (
             f" In a cloud session and in CI it runs:\n  {command}\nInstall the same tools your own way."
             if command else " No provision command is set ([commands] provision in .rail/config.toml)."))
-        return answer(owner="human" if command else "none", code="PROVISION_LOCAL",
-                      action={"kind": "human_wait" if command else "rest", "brief": brief})
+        return answer(owner="person" if command else "none", code="PROVISION_LOCAL",
+                      action={"kind": "person_wait" if command else "rest", "brief": brief})
     if _provision_wanted(project) is None:
         other = ("" if not cloud() or _sets_up_machine(project) else
                  " The link and the machine's hooks call the engine in the project's own checkout, and that one isn't"
@@ -2038,8 +2038,8 @@ def cmd_doctor(project, args):
     found = doctor.checks(project)
     missing = [f"- {name}: {detail}" for name, passed, detail in found if passed is False]
     brief = "Everything Rail needs is in place." if not missing else "Fix these:\n" + "\n".join(missing)
-    return answer(code="DOCTOR", action={"kind": "rest" if not missing else "human_wait", "brief": brief},
-                  owner="none" if not missing else "human", steps_=doctor.as_steps(found))
+    return answer(code="DOCTOR", action={"kind": "rest" if not missing else "person_wait", "brief": brief},
+                  owner="none" if not missing else "person", steps_=doctor.as_steps(found))
 
 
 def cmd_ci(project, args):
@@ -2264,7 +2264,7 @@ def main(argv=None):
             result = globals()[f"cmd_{args.verb}"](Project(here), args)
         code = 3 if any(s.get("result") == "fail" for s in result.get("steps", [])) else 0
     except RailError as e:
-        result = {"schema_version": 1, "ok": False, "reason": {"code": e.code, "message": str(e)}}
+        result = {"schema_version": 2, "ok": False, "reason": {"code": e.code, "message": str(e)}}
         code = 2
     except RateLimited as e:
         result, code = github_limit(e), 0

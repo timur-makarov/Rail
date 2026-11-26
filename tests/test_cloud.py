@@ -26,7 +26,7 @@ class Provision(RailTest):
     def test_on_a_persons_own_machine_rail_installs_nothing(self):
         p = self.project()
         told = p.rail("provision", env_extra=self.vm)
-        self.assertEqual((told["owner"], told["reason"]["code"]), ("human", "PROVISION_LOCAL"))
+        self.assertEqual((told["owner"], told["reason"]["code"]), ("person", "PROVISION_LOCAL"))
         self.assertIn(f"echo ran >> {self.log}", told["action"]["brief"])
         self.assertFalse(os.path.exists(self.log))
         self.assertEqual(p.rail("next", env_extra=self.vm)["reason"]["code"], "NO_WORK")  # and next doesn't ask for it

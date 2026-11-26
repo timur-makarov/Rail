@@ -442,7 +442,7 @@ class Budget(RailTest):
         self.assertEqual(p.rail("work", "1")["reason"]["code"], "WORKED")
         waiting = p.rail("next", "--ticket", "1", expect=None)
         self.assertEqual((waiting["owner"], waiting["reason"]["code"], waiting["action"]["kind"]),
-                         ("human", "BUDGET", "human_wait"))
+                         ("person", "BUDGET", "person_wait"))
         self.assertIn("Ticket 1 has spent $1.50 since a person last acted, over [worker] ticket_usd ($1): worker"
                       " claude-sonnet-5-5 $1.50.", waiting["action"]["brief"])
         self.assertEqual(p.rail("work", "1", expect=None)["reason"]["code"], "BUDGET")  # and no worker starts

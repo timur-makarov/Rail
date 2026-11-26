@@ -193,14 +193,14 @@ class Fixture:
 
 def check_shape(answer):
     """Every verb answers in the same shape."""
-    assert answer["schema_version"] == 1, answer
+    assert answer["schema_version"] == 2, answer
     if not answer["ok"]:
         assert answer["reason"]["code"] and answer["reason"]["message"], answer
         return
     for key in ("ticket", "state", "owner", "cwd", "action", "reason", "steps"):
         assert key in answer, (key, answer)
-    assert answer["owner"] in ("agent", "human", "none"), answer
-    assert answer["action"]["kind"] in ("script", "agent_task", "human_wait", "rest"), answer
+    assert answer["owner"] in ("agent", "person", "none"), answer
+    assert answer["action"]["kind"] in ("script", "agent_task", "person_wait", "rest"), answer
     for step in answer["steps"]:
         assert step["status"] in ("ran", "could_not_run", "not_run", "unavailable"), step
         assert ("result" in step) == (step["status"] in ("ran", "could_not_run")), step

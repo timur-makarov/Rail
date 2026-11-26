@@ -38,7 +38,7 @@ class Stop(RailTest):
 
         stopped = a.rail("next")
         self.assertEqual((stopped["reason"]["code"], stopped["owner"], stopped["action"]["kind"], stopped["ticket"]),
-                         ("STOPPED", "human", "human_wait", None))
+                         ("STOPPED", "person", "person_wait", None))
         self.assertEqual(stopped["action"]["brief"], (
             "A person stopped Rail: issue #40 (Stop: the deploy is broken) is open with the label rail:stop. Nothing"
             " is done on any ticket until that issue is closed or loses the label; a run that then starts goes on by"
@@ -52,7 +52,7 @@ class Stop(RailTest):
         before = a.git("rev-parse", "1-fix-add")
         for verb in ("advance", "work"):
             answer = a.rail(verb, "1", expect=None)
-            self.assertEqual((answer["reason"]["code"], answer["owner"]), ("STOPPED", "human"), answer)
+            self.assertEqual((answer["reason"]["code"], answer["owner"]), ("STOPPED", "person"), answer)
         self.assertEqual(a.git("rev-parse", "1-fix-add"), before)
         self.assertEqual(a.work_log(), [])
         self.assertEqual(a.git("status", "--porcelain", cwd=a.worktree("1")).strip(), "M src/calc.py")  # the work waits
@@ -63,7 +63,7 @@ class Stop(RailTest):
         status = a.rail("status")
         self.assertEqual(status["stops"], [{"number": 40, "title": "Stop: the deploy is broken", "paths": [],
                                             "url": "https://github.com/acme/app/issues/40"}])
-        self.assertEqual([t["owner"] for t in status["tickets"]], ["human", "human"])
+        self.assertEqual([t["owner"] for t in status["tickets"]], ["person", "person"])
         self.assertTrue(a.rail("status", raw=True).stdout.startswith("STOPPED by issue #40 (Stop: the deploy is broken)\n"))
         self.assertGreaterEqual(len(github.read().get("calls", [])), calls)
 

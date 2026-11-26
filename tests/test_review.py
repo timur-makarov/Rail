@@ -187,7 +187,7 @@ class Review(RailTest):
         upheld = p.rail("advance", "1", expect=3)
         self.assertEqual((upheld["steps"][-1]["step"], upheld["steps"][-1]["detail"]), ("refuter", "run 2: upheld F1"))
         waiting = p.rail("answer", "1", "F1", "declined", "Still fine.")
-        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("human", "FINDING_UPHELD"))
+        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("person", "FINDING_UPHELD"))
         owner = p.rail("answer", "1", "F1", "declined", "Negative inputs never happen here.", "--owner")
         self.assertEqual((owner["state"], owner["reason"]["code"]), ("reviewing", "REVIEW"))  # the security seat next
 
@@ -201,7 +201,7 @@ class Review(RailTest):
         p.queue_reviews(clean(), found(leak), clean("Nothing is logged at all."))
         ready = p.rail("advance", "1")
         self.assertEqual([s["step"] for s in ready["steps"]][-3:], ["review", "security", "refuter"])
-        self.assertEqual((ready["state"], ready["owner"], ready["reason"]["code"]), ("merge-ready", "human", "MERGE_BY_PERSON"))
+        self.assertEqual((ready["state"], ready["owner"], ready["reason"]["code"]), ("merge-ready", "person", "MERGE_BY_PERSON"))
         briefs = [b["brief"] for b in p.briefs()]
         self.assertIn("Security is the security seat's job", briefs[0])
         self.assertIn("You are the security seat.", briefs[1])
@@ -233,7 +233,7 @@ class Review(RailTest):
         details = [s.get("detail") for s in review_steps(stuck)]
         self.assertIn("src/missing.py isn't a tracked file", details[0])
         self.assertEqual(details[1], "invalid output: the output is not JSON")
-        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "STUCK_REVIEW"))
+        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("person", "STUCK_REVIEW"))
         self.assertIn("its output was invalid", stuck["action"]["brief"])
         runs = [e for e in events(p, "1-fix-add", "step") if e["step"] == "review"]
         self.assertEqual([e.get("counted") for e in runs], [False, False])  # the worker ladder reads only counted ones
@@ -311,7 +311,7 @@ class Review(RailTest):
         p.queue_reviews("timeout", "timeout")
         stuck = p.rail("advance", "1", expect=3)
         self.assertEqual([s.get("detail") for s in stuck["steps"] if s["step"] == "review"], ["timeout", "timeout"])
-        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "STUCK_REVIEW"))
+        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("person", "STUCK_REVIEW"))
         timeouts = [e for e in events(p, "1-fix-add", "step") if e["step"] == "review"]
         self.assertEqual([e.get("counted") for e in timeouts], [False, False])
         self.assertEqual(p.rail("accept", "1", "the test server waited on stdin")["reason"]["code"], "REVIEW")
@@ -334,8 +334,8 @@ class Retry(RailTest):
         self.assertIn("retry_cap at 'checks', change", advice)
         p.write("src/calc.py", "def add(a, b):\n    return a ** b\n", base=p.worktree("1"))
         capped = p.rail("advance", "1", expect=3)
-        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("human", "RETRY_CAP"))
-        self.assertEqual(p.rail("next")["reason"]["code"], "WAITING_HUMAN")
+        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("person", "RETRY_CAP"))
+        self.assertEqual(p.rail("next")["reason"]["code"], "WAITING_PERSON")
         p.rail("accept", "1", "the check wants plain addition")
         continued = p.rail("next")
         self.assertEqual(continued["reason"]["code"], "STEP_FAILED")
@@ -351,12 +351,12 @@ class Retry(RailTest):
         p.rail("next")
         p.rail("advance", "1", expect=3)  # the check fails: the budget of 1 is used, consult advises
         p.rail("advance", "1", expect=3)  # the attempt after consult fails too
-        self.assertEqual(p.rail("next")["reason"]["code"], "WAITING_HUMAN")
+        self.assertEqual(p.rail("next")["reason"]["code"], "WAITING_PERSON")
         path = os.path.join(p.worktree("1"), ".rail", "tickets", "1.md")
         p.write(".rail/tickets/1.md", read(path).replace("== 5", "== 5 and calc.add(1, 1) == 2"), base=p.worktree("1"))
         self.assertEqual(p.rail("amend", "1", "the check missed a case")["reason"]["code"], "APPROVE_AMEND")
         approved = p.rail("accept", "1")
-        self.assertNotEqual(approved["owner"], "human", approved["reason"]["code"] + " " + approved["action"]["brief"][:300])
+        self.assertNotEqual(approved["owner"], "person", approved["reason"]["code"] + " " + approved["action"]["brief"][:300])
 
     def calc(self, p, body):
         p.write("src/calc.py", f"def add(a, b):\n    {body}\n", base=p.worktree("1"))
@@ -389,7 +389,7 @@ class Retry(RailTest):
             self.assertEqual(p.rail("advance", "1", expect=3)["reason"]["code"], "STEP_FAILED", n)
         self.calc(p, "return a - b")
         capped = p.rail("advance", "1", expect=3)  # 5: never the same twice in a row, and still a person looks
-        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("person", "RETRY_CAP"))
         self.assertIn("'checks' failed 5 times since it last passed, whatever the output ([retry] cap)",
                       capped["action"]["brief"])
         self.assertEqual(events(p, "1-fix-add", "consulted"), [])
@@ -400,7 +400,7 @@ class Retry(RailTest):
         again = p.rail("advance", "1", expect=3)
         self.assertIn("consult says change", again["action"]["brief"])
         stuck = p.rail("advance", "1", expect=3)
-        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("person", "RETRY_CAP"))
         self.assertIn("'checks' failed the same way 2 times in a row, then once more after consult ([retry] budget)",
                       stuck["action"]["brief"])
 
@@ -464,7 +464,7 @@ class Contract(RailTest):
         text = read(path).replace("== 5", "== 5 and calc.add(0, 0) == 0")
         p.write(".rail/tickets/1.md", text, base=p.worktree("1"))
         waiting = p.rail("amend", "1", "the check was wrong")
-        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("human", "APPROVE_AMEND"))
+        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("person", "APPROVE_AMEND"))
         self.assertEqual(p.rail("accept", "1")["reason"]["code"], "IMPLEMENT")
 
 

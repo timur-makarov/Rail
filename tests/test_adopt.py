@@ -192,10 +192,10 @@ class Adopted(RailTest):
         draft = fill(p.rail("adopt", "proto")["draft"], checks=(CHECK_ADD, "grep -q 201 api/handlers.py"))
         adopted = p.rail("adopt", "proto", draft)
         self.assertEqual((adopted["state"], adopted["owner"], adopted["reason"]["code"], adopted["tier"]),
-                         ("new", "human", "APPROVE_CONTRACT", "PERSON"))
+                         ("new", "person", "APPROVE_CONTRACT", "PERSON"))
         self.assertTrue(adopted["action"]["brief"].startswith("Ticket 1 holds the work of branch proto"))
         self.assertIn("rail accept 1", adopted["action"]["brief"])
-        self.assertEqual(p.rail("next")["reason"]["code"], "WAITING_HUMAN")
+        self.assertEqual(p.rail("next")["reason"]["code"], "WAITING_PERSON")
         self.assertEqual(p.rail("accept", "1")["reason"]["code"], "IMPLEMENT")
         shipped = p.rail("advance", "1")
         self.assertEqual((shipped["state"], shipped["reason"]["code"]), ("merge-ready", "MERGE_BY_PERSON"))

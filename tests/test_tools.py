@@ -50,7 +50,7 @@ class Missing(RailTest):
         p = self.fixture(config=CONFIG + TOOLS)
         p.add(ticket())
         waiting = p.rail("next", env_extra={"RAIL_TEST_ERRORS_TOKEN": "t"})
-        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("human", "TOOL_MISSING"))
+        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("person", "TOOL_MISSING"))
         self.assertEqual([(w["ticket"], w["needs"]) for w in waiting["waits"]], [("1", "TOOL_MISSING")])
         self.assertEqual(p.rail("status")["tickets"][0]["state"], "accepted")
         brief = waiting["action"]["brief"]

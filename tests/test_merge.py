@@ -271,7 +271,7 @@ class RemoteMerge(RailTest):
         self.assertEqual(a.rail("status")["tickets"][0]["note"], "waiting: merge failed")
         waiting = a.rail("next", "--ticket", "1")
         self.assertEqual((waiting["owner"], waiting["reason"]["code"], waiting["action"]["kind"]),
-                         ("human", "MERGE_FAILED", "human_wait"))
+                         ("person", "MERGE_FAILED", "person_wait"))
         self.assertIn("was requested and hasn't landed", waiting["action"]["brief"])
         self.assertIn("rail accept 1", waiting["action"]["brief"])
         self.assertIn("rail:needs-you", github.pr(1)["labels"])
@@ -296,7 +296,7 @@ class RemoteMerge(RailTest):
         a.rail("next")
         self.assertIn("rail:needs-you", github.pr(1)["labels"])
         waiting = a.rail("next")
-        self.assertEqual((waiting["owner"], [w["needs"] for w in waiting["waits"]]), ("human", ["MERGE_FAILED"]))
+        self.assertEqual((waiting["owner"], [w["needs"] for w in waiting["waits"]]), ("person", ["MERGE_FAILED"]))
         self.assertIn("was requested and hasn't landed", waiting["waits"][0]["brief"])
         self.assertNotIn("holds ticket 1", waiting["waits"][0]["brief"])
         self.assertEqual(a.rail("status")["tickets"][0]["note"], "waiting: merge failed")
@@ -338,8 +338,8 @@ class LocalMerge(RailTest):
         p.write("src/calc.py", "def add(a, b):\n    return a - b  # my own edit\n")  # uncommitted, in the main checkout
         refused = p.rail("advance", "1", expect=3)
         self.assertEqual((refused["state"], refused["owner"], refused["reason"]["code"]),
-                         ("merge-ready", "human", "MERGE_FAILED"))
-        self.assertEqual(refused["action"]["kind"], "human_wait")
+                         ("merge-ready", "person", "MERGE_FAILED"))
+        self.assertEqual(refused["action"]["kind"], "person_wait")
         self.assertEqual(failed_step(refused)[0], "merge")
         self.assertIn("src/calc.py", refused["action"]["brief"])
         self.assertEqual(p.git("rev-parse", "main"), before)

@@ -7,9 +7,9 @@ agent writes the code.
 rail next --json -> do action.brief -> rail advance --json -> repeat
 ```
 
-- `owner` says who acts: `agent`, `human` or `none`. When it isn't `agent`, tell the person what is
+- `owner` says who acts: `agent`, `person` or `none`. When it isn't `agent`, tell the person what is
   needed, then take the next ticket or stop.
-- `action.kind` is `agent_task` (do the brief), `script` (run `action.command`), `human_wait` (a person
+- `action.kind` is `agent_task` (do the brief), `script` (run `action.command`), `person_wait` (a person
   acts; the brief says what) or `rest` (nothing to do).
 - `action.model` and `action.effort` name the model and effort for an `agent_task` that is a ticket's work,
   from `[worker] ladder` (`person_ladder` for a PERSON ticket). The rung is the number of failed attempts at

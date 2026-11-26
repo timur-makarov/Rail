@@ -247,7 +247,7 @@ def notify():
     waits = {}
     for f in facts.values():
         code, owner, _ = first_match(f)
-        if owner == "human":
+        if owner == "person":
             waits[f.id] = (code, f.pr["html_url"] if f.pr else None)
     announced = json.loads(project.cache_read("notify", "announced") or "{}")
     new = [(nn, code, url) for nn, (code, url) in waits.items() if announced.get(nn) != code]

@@ -322,7 +322,7 @@ class RailDriver:
                 self.after(self.script(self.state["pending"]))
             elif kind == "script":
                 self.after(self.script(action["command"]))
-            elif kind == "human_wait":
+            elif kind == "person_wait":
                 waits = answer.get("waits") or [{"ticket": ticket, "needs": code}]
                 rows = self.status()
                 wait = waits[0]

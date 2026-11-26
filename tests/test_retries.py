@@ -35,7 +35,7 @@ class Consult(RailTest):
         self.assertIn("retry_cap at 'setup', change", advice)
         self.assertIn("The check expects a + b.", advice)
         stuck = p.rail("next", "--ticket", "1", expect=3)  # once more after consult
-        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("person", "RETRY_CAP"))
         self.assertIn("'setup' failed the same way 2 times in a row, then once more after consult ([retry] budget)",
                       stuck["action"]["brief"])
         self.assertEqual(len(events(p, "consulted")), 1)
@@ -63,7 +63,7 @@ class Consult(RailTest):
         first = p.rail("advance", "1", expect=3)
         self.assertEqual((first["owner"], first["reason"]["code"]), ("agent", "STEP_FAILED"))
         stuck = p.rail("advance", "1", expect=3)  # the same failure again
-        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("person", "RETRY_CAP"))
         self.assertIn("'checks' failed the same way 2 times in a row ([retry] budget)", stuck["action"]["brief"])
         self.assertNotIn("consult", stuck["action"]["brief"])
         self.assertEqual(events(p, "consulted"), [])
@@ -84,7 +84,7 @@ class Consult(RailTest):
         self.assertEqual(len(events(p, "consulted")), 3)
         p.rail("advance", "1", expect=3)
         stuck = p.rail("advance", "1", expect=3)  # the budget, and no consult left to ask
-        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("person", "RETRY_CAP"))
         self.assertIn("'checks' failed the same way 2 times in a row ([retry] budget)", stuck["action"]["brief"])
         self.assertEqual(len(events(p, "consulted")), 3)
 
@@ -105,7 +105,7 @@ class Consult(RailTest):
         self.assertIn("consult says stop: The check contradicts the Why.", second["action"]["brief"])
         self.assertIn("The check contradicts the Why.", p.git("show", "1-fix-add:.rail/journal/1-advice.md"))
         third = p.rail("advance", "1", expect=3)  # the attempt after consult fails too
-        self.assertEqual((third["owner"], third["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertEqual((third["owner"], third["reason"]["code"]), ("person", "RETRY_CAP"))
         self.assertIn("then once more after consult", third["action"]["brief"])
 
     def test_a_consult_pack_that_answers_nothing_readable_counts_as_stop(self):
@@ -160,7 +160,7 @@ class Checks(RailTest):
         self.assertEqual([(e["trigger"], e["step"]) for e in events(p, "consulted")], [("retry_cap", "checks")])
         self.assertEqual(second["owner"], "agent")
         stuck = p.rail("advance", "1", expect=3)
-        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertEqual((stuck["owner"], stuck["reason"]["code"]), ("person", "RETRY_CAP"))
 
     def test_a_ship_where_every_check_line_passes_resets_the_budget(self):
         p = self.fixture()
@@ -171,7 +171,7 @@ class Checks(RailTest):
         p.write("src/later.py", "", base=p.worktree("1"))
         shipped = p.rail("advance", "1")
         self.assertEqual(events(p, "consulted"), [])
-        self.assertNotEqual(shipped["owner"], "human")
+        self.assertNotEqual(shipped["owner"], "person")
 
 
 class Ladder(RailTest):

@@ -208,7 +208,7 @@ class Ship(RailTest):
         p = self.fixture(files={"db/migrations/001.sql": "create table t (id int);\n",
                                 "ARCHITECTURE.md": ARCHITECTURE + "| db | db/** | schema and migrations |\n"})
         added = p.add(ticket(title="Add a column", scope=("db/**", "src/**")))
-        self.assertEqual((added["tier"], added["state"], added["owner"]), ("PERSON", "new", "human"))
+        self.assertEqual((added["tier"], added["state"], added["owner"]), ("PERSON", "new", "person"))
         p.rail("accept", "1")
         p.rail("next")
         p.fix_calc("1")
@@ -219,7 +219,7 @@ class Ship(RailTest):
         text = read(path).replace('tier = "PERSON"', 'tier = "PERSON"\nreversibility = "expand-contract"\nrollback = "drop column c"')
         p.write(".rail/tickets/1.md", text, base=p.worktree("1"))
         ready = p.rail("advance", "1")
-        self.assertEqual((ready["state"], ready["owner"], ready["reason"]["code"]), ("merge-ready", "human", "MERGE_BY_PERSON"))
+        self.assertEqual((ready["state"], ready["owner"], ready["reason"]["code"]), ("merge-ready", "person", "MERGE_BY_PERSON"))
         self.assertEqual([s["step"] for s in ready["steps"]][-2:], ["review", "security"])
 
     def test_base_moved_rebases_and_ships_again_before_merge(self):
@@ -309,7 +309,7 @@ class Commands(RailTest):
         second = p.rail("advance", "1", expect=3)  # the budget: consult advises, one more attempt
         self.assertIn("consult says", second["action"]["brief"])
         capped = p.rail("advance", "1", expect=3)
-        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("human", "RETRY_CAP"))
+        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("person", "RETRY_CAP"))
         self.assertIn("Its last attempt at 'verify' (could not run (exit 127: command not found)) could not run",
                       capped["action"]["brief"])
 
@@ -388,10 +388,10 @@ class Approval(RailTest):
     def test_a_person_tickets_contract_waits_for_a_person_then_runs(self):
         p = self.fixture()
         added = p.add(ticket(tier="PERSON"))
-        self.assertEqual((added["state"], added["owner"], added["action"]["kind"]), ("new", "human", "human_wait"))
+        self.assertEqual((added["state"], added["owner"], added["action"]["kind"]), ("new", "person", "person_wait"))
         self.assertIn("rail accept 1", added["action"]["brief"])
         waiting = p.rail("next")
-        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("human", "WAITING_HUMAN"))
+        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("person", "WAITING_PERSON"))
         self.assertEqual(waiting["waits"][0]["ticket"], "1")
         self.assertEqual(p.rail("advance", "1")["reason"]["code"], "APPROVE_CONTRACT")
         accepted = p.rail("accept", "1", "keep the API stable")
@@ -441,7 +441,7 @@ class Parallel(RailTest):
         p.rail("accept", "2")  # PERSON: a person decides; on AUTO the agent does (test_stuck.py)
         p.rail("drop", "1", "--reason", "not needed")
         waiting = p.rail("next")
-        self.assertEqual((waiting["owner"], waiting["waits"][0]["needs"]), ("human", "AFTER_DROPPED"))
+        self.assertEqual((waiting["owner"], waiting["waits"][0]["needs"]), ("person", "AFTER_DROPPED"))
 
     def test_overlapping_scope_is_not_claimed_and_claims_belong_to_sessions(self):
         p = self.fixture()
