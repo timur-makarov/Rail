@@ -29,6 +29,9 @@ GRILL_KEYS = {"channel": "channel", "agent": "agent", "person": "person", "start
 VACUOUS = {"", "true", ":", "exit 0", "/bin/true", "/usr/bin/true", "pass", "ok", "works"}
 _CHECK = re.compile(r"^\s*[-*]\s+Check:\s*(.*)$")
 _ASSUMED = re.compile(r"^\s*[-*]\s+ASSUMED:\s*(.*)$")
+_DECIDED = re.compile(r"^\s*[-*]\s+VERIFIED:\s*decided, not checked\s*:\s*(\S.*)$", re.I)
+_NOT_TESTED = re.compile(r"^\s*(?:[-*]\s+)?not tested:\s*(\S.*)$", re.I)
+_NOTICED = re.compile(r"^\s*(?:[-*]\s+)?Noticed:\s*(\S.*)$")
 _DECIDED_BARE = re.compile(r"^\s*[-*]\s+VERIFIED:\s*decided, not checked\s*:?[\s.]*$", re.I)
 
 
@@ -115,6 +118,31 @@ class Ticket:
     def checks(self):
         """The runnable command of each 'Check:' line (the text inside the backticks)."""
         return [p[1:-1].strip() for p in self.check_lines() if _ticked(p)]
+
+    def why_line(self):
+        """The first line of `## Why`."""
+        return next((line.strip() for line in self.sections.get("Why", "").splitlines() if line.strip()), "")
+
+    def decided(self):
+        """What each 'VERIFIED: decided, not checked:' row decided: a choice nobody checked, with its reason."""
+        return self._rows(_DECIDED, "Assumptions")
+
+    def tried(self):
+        """The lines of `## Tried`: what an attempt at this ticket tried and why it didn't work."""
+        return [re.sub(r"^[-*]\s+", "", line.strip()) for line in self.sections.get("Tried", "").splitlines()
+                if line.strip()]
+
+    def not_tested(self):
+        """What the 'not tested: X, because Y' lines say, wherever the worker wrote them."""
+        return self._rows(_NOT_TESTED)
+
+    def noticed(self):
+        """What the 'Noticed:' lines say: problems seen outside the ticket and left alone."""
+        return self._rows(_NOTICED)
+
+    def _rows(self, pattern, section=None):
+        text = self.sections.get(section, "") if section else "\n".join(self.sections.values())
+        return [m.group(1).strip() for m in map(pattern.match, text.splitlines()) if m]
 
     def open_assumptions(self):
         lines = self.sections.get("Assumptions", "").splitlines()

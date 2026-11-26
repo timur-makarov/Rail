@@ -13,7 +13,7 @@ from .project import event, events_path, ticket_path
 from .state import raised_tier
 from .util import cloud
 from .ticket import Ticket, lint, rank
-from .util import MISSING_HELP, could_not_run, match_any, minutes_since, run_shell, tail
+from .util import MISSING_HELP, could_not_run, match_any, minutes_since, run_shell, tail, tried_help
 
 # A step's status: it ran and passed or failed, or the shell could not start its command (could_not_run, a failure
 # that checked nothing). Both are attempts, and both count toward the step's retry budget.
@@ -377,7 +377,9 @@ def ship_failed_brief(t, run):
         from . import sensors
         told = "" if sensors.HELP in output else f"\n\n{MISSING_HELP}"  # a sensor that crashed says so itself
         return f"Ship of ticket {t.id} could not run '{step}'.\n{output}{told} Then run: rail advance {t.id}"
-    return f"Ship of ticket {t.id} failed at '{step}'.\n{output}\n\nFix it in the worktree, then run: rail advance {t.id}"
+    tried = tried_help(step, ticket_path(t.id))
+    return (f"Ship of ticket {t.id} failed at '{step}'.\n{output}\n\nFix it in the worktree, then run: rail advance {t.id}"
+            + (f"\n{tried}" if tried else ""))
 
 
 # --- merge -------------------------------------------------------------------------

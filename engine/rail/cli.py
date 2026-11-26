@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 
-from . import areas, gitx, guard, hooks, rules, steps
+from . import areas, gitx, guard, hooks, history, rules, steps
 from .project import Project, event, events_path, ticket_path
 from .state import OPEN, derive, floor, ticket_kinds
 from .table import TRANSITIONS, first_match
@@ -1559,8 +1559,9 @@ def cmd_context(project, args):
     if key:
         tickets = project.tickets()
         t = project.find(key, tickets)
-        found = areas.context(project, t.ref or project.base_ref, t.ticket.scope if t.ticket else [])
-        return answer(t.id, code="CONTEXT", **found)
+        scope = t.ticket.scope if t.ticket else []
+        found = areas.context(project, t.ref or project.base_ref, scope)
+        return answer(t.id, code="CONTEXT", history=history.of(project, scope, skip=t.id), **found)
     return answer(code="CONTEXT", **areas.context(project, project.base_ref))
 
 

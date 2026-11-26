@@ -126,10 +126,10 @@ class Init(RailTest):
                       " `verify` into [commands]. The repository's own commands win over a default", brief)
         self.assertIn("rail init found python (**), typescript (web/**)", p.rail("next", cloud=True)["action"]["brief"])
         ids = [r["id"] for r in config["rules"]]
-        self.assertEqual(ids, ["no-new-suppressions", "shortcut-names-its-ticket", "sensor-marker-names-its-ticket",
+        self.assertEqual(ids, ["no-new-suppressions", "shortcut-names-its-ticket", "sensor-marker-names-its-ticket", "todo-names-its-ticket",
                                "no-new-python-suppressions",
                                "no-new-typescript-suppressions"])
-        self.assertEqual(config["rules"][3], profile("python")["rules"][0])
+        self.assertEqual(config["rules"][4], profile("python")["rules"][0])
         self.assertIn("\n[tests]", read(p.path(".rail/config.toml")))  # the seed's own comment stays
 
         domains = json.loads(read(p.path(".claude/settings.json")))["sandbox"]["network"]["allowedDomains"]

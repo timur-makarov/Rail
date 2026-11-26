@@ -156,7 +156,8 @@ what is there and counts it, as after any attempt.
 
 - `rail status`: every ticket, its state and owner, LAST (the age of its last journal event) and NOTE (what it
   waits for, a stale warning, or its pull request), then leftovers to clean up.
-- `rail context NN`: the `## Areas` rows a ticket touches, and a directory digest.
+- `rail context NN`: the `## Areas` rows a ticket touches, a directory digest, and what earlier tickets on
+  the same paths left (`rail docs tickets`, "What a ticket carries on").
 - `rail adopt BRANCH`: put work already on a branch with no ticket onto the rail (`rail docs adopt`).
 - `rail stats`: what the tickets' journals and the base branch say: tickets by tier, how many were reverted,
   how often every check was green on the base before the work, failed steps, the reviewer's cost and hit

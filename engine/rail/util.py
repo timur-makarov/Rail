@@ -123,6 +123,15 @@ AFTER_SHELL = []  # called after every shell command: what the engine remembers 
 COULD_NOT_RUN = {126: "found but could not be run", 127: "command not found"}
 
 
+def tried_help(step, ticket):
+    """What a brief says after a failed attempt at the work itself: verify, a Check: line or a sensor. A failed lint
+    or scope check is a slip, not an attempt."""
+    if step not in ("verify", "checks", "sensors"):
+        return ""
+    return (f"Before you try again, write one line under \"## Tried\" in {ticket}: what you tried and how it failed."
+            " The next attempt reads it, and it may start with none of what you know now.")
+
+
 # What to do about it, for the agent's brief.
 MISSING_HELP = ("Nothing was checked: the shell couldn't start the command or a tool it calls, which isn't on this"
                 " machine or isn't executable. If your change removed, renamed or broke it, put it back. Otherwise"

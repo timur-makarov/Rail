@@ -26,8 +26,9 @@ fix = "Create migrations with make migration."
 - A rule prevents mistakes; real dependency analysis belongs in `verify`, with any checker the project likes.
   A tool whose findings should fail only on new lines is a sensor (`rail docs sensors`).
 - A finding a rule already covers is not a review finding.
-- The seed ships three rules: no new suppressions or skipped tests, a `SHORTCUT` marker must carry its
-  ticket's number, and so must a `SENSOR` marker (`rail docs sensors`). `SHORTCUT` is how an agent says "I cut
+- The seed ships four rules: no new suppressions or skipped tests, a `SHORTCUT` marker must carry its
+  ticket's number, so must a `SENSOR` marker (`rail docs sensors`), and a `TODO` or `FIXME` must name the
+  ticket that will do the work (`rail docs tickets`). `SHORTCUT` is how an agent says "I cut
   this corner on purpose": `SHORTCUT(41): linear scan, fine under 1,000 rows; index it past that`. A rule is a
   text match, so it refuses the marker without a number; it can't find a shortcut nobody marked.
 - `rail init` adds one rule per language it finds, forbidding that language's suppression markers in its own

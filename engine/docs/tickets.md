@@ -30,6 +30,7 @@ kind = ""                          # "revert" on a ticket that takes another one
 ## Assumptions
 - ASSUMED: sessions are stored server-side.
 ## Look at
+## Tried
 ```
 
 - **The Done Contract** needs at least one `Check:` line with its command in backticks. A check that
@@ -42,7 +43,10 @@ kind = ""                          # "revert" on a ticket that takes another one
 - **ASSUMED rows** are verified after the claim: change `ASSUMED:` to `VERIFIED:` and say how. A row
   nobody can check in the code or the docs is a choice: the worker decides it and writes `VERIFIED: decided,
   not checked:`, the reason, and what it costs if wrong. An open row blocks ship.
-- **Look at** is written before ship: what a reader of the change should check.
+- **Look at** is written before ship: what a reader of the change should check. Two kinds of line there are
+  read by the engine: `not tested: X, because Y`, and `Noticed:` for a problem seen outside the ticket and left
+  alone.
+- **Tried** is written after a failed attempt: one line for what was tried and how it failed.
 - The ticket file and the journal are outside `scope_paths` on purpose: editing the ticket (VERIFIED rows,
   Look at) never fails the scope check. That holds for the ticket's own file only. Another ticket's file on
   its branch fails the scope check: a new ticket comes in through `rail add`, on its own branch.
@@ -66,6 +70,26 @@ kind = ""                          # "revert" on a ticket that takes another one
 - **The contract** (Done Contract, scope and tier) freezes at acceptance. `rail amend NN "why"` changes it.
 - **`## Grilling`** is optional: the record of questioning the person who asked for the ticket, written by the
   agent that did it (`rail docs grill`). Ticket lint checks its shape, and `rail stats` counts it.
+
+## What a ticket carries on
+
+A worker starts with none of what the last one knew: a new session, the next rung of the worker ladder, or
+another ticket months later. So the engine puts what was learned into the brief, where it applies.
+
+- **Why, and what was decided.** The implement brief carries the ticket's `## Why` and each `VERIFIED: decided,
+  not checked:` row: the choices made when the ticket was written, which nobody could check.
+- **What was tried.** After a ship fails at `verify`, at a `Check:` line or at a sensor, the brief asks for one
+  line under `## Tried`. Every later brief for that ticket's work lists those lines, so the next attempt doesn't
+  repeat one. Consult gets the ticket without `## Tried` and `## Look at`: it is asked for a second opinion,
+  and the worker's own story would lead it.
+- **What earlier tickets left.** The implement brief lists the last five merged tickets whose change touched
+  the ticket's `scope_paths`, newest first: the title, the first line of `## Why`, the decided rows, and the
+  `not tested:` and `Noticed:` lines. Under them are up to ten `SHORTCUT(NN)`, `TODO(NN)` and `FIXME(NN)`
+  markers that stand in those paths on the base branch. `rail context NN` gives the same as `history`.
+- **Work left for later names its ticket.** The seed rule `todo-names-its-ticket` refuses a new `TODO:` or
+  `FIXME:` with no number: file the work with `rail add`, then write `TODO(NN): what is left`. `SHORTCUT(NN)`
+  names the ticket that cut the corner; `TODO(NN)` names the one that will do the work. The rule is a text
+  match (`rail docs rules`): it doesn't check that ticket NN exists.
 
 ## A revert is a ticket
 

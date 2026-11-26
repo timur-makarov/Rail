@@ -26,7 +26,11 @@ external_id = ""                   # "github#123" or "PROJ-123"
 - ASSUMED: (a fact the work rests on; after the claim, verify it and change ASSUMED to VERIFIED; if it can't be checked, decide it and write "decided, not checked:")
 
 ## Look at
-(written before ship: what a reader of the change should check)
+(written before ship: what a reader of the change should check; "not tested: X, because Y" for what you didn't
+test; "Noticed:" for a problem outside this ticket that you left alone)
+
+## Tried
+(written after a failed attempt: one line for what was tried and how it failed)
 
 ## Split
 (optional work breakdown)

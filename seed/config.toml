@@ -143,3 +143,9 @@ id = "sensor-marker-names-its-ticket"     # a sensor's violation answered on pur
 forbid = ["SENSOR:", "SENSOR()", "SENSOR(NN)", "SENSOR(TODO)"]
 allow = [".claude/**", ".rail/engine/**"] # the guides and the docs write the marker's form
 fix = "Write SENSOR(NN): with this ticket's number and why the sensor is wrong about this line."
+
+[[rules]]
+id = "todo-names-its-ticket"              # work left for later names the open ticket that will do it: TODO(NN):
+forbid = ["TODO:", "FIXME:", "TODO()", "FIXME()", "TODO(NN)", "FIXME(NN)", "# TODO ", "// TODO ", "# FIXME ", "// FIXME "]
+allow = [".claude/**", ".rail/engine/**"] # the guides and the docs write the marker's form
+fix = "File the work with rail add, then write TODO(NN): with that ticket's number and what is left. Or do it now."

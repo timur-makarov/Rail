@@ -5,10 +5,12 @@ consult); `next` makes the move, derives the facts again, and reads the table on
 """
 
 import json
+import os
 
-from . import flakes, gitx
+from . import flakes, gitx, history
 from .project import advice_path, ticket_path
-from .util import MISSING_HELP
+from .ticket import Ticket
+from .util import MISSING_HELP, tried_help
 
 TRANSITIONS = {"ACCEPT_AUTO", "CLAIM", "RESUME", "CONSULT", "GO", "REBASE_BEHIND", "CONTRACT_MERGED", "STUCK"}
 MERGE_PATIENCE = 600  # seconds a requested merge may take before a person looks
@@ -94,12 +96,35 @@ def _base_green(f):
             f" the Done Contract in {ticket_path(f.id)}, then run rail amend {f.id} \"why\".")
 
 
+def _ticket_now(f):
+    """The ticket as the worktree has it: the agent writes ## Tried and ## Look at there before a ship commits them."""
+    if f.worktree:
+        try:
+            with open(os.path.join(f.worktree, ticket_path(f.id)), encoding="utf-8") as copy:
+                return Ticket(copy.read())
+        except OSError:
+            pass
+    return f.ticket
+
+
+def _tried(f):
+    """What earlier attempts at this ticket tried, for an agent that starts with none of their context."""
+    tried = _ticket_now(f).tried()
+    if not tried:
+        return []
+    return ["Tried before on this ticket, and it didn't work (## Tried in the ticket):", *[f"- {t}" for t in tried]]
+
+
 def _implement(f):
     out_of_scope = f.ticket.sections.get("Out of scope", "")
+    decided = f.ticket.decided()
     lines = [
         f"Implement ticket {f.id}: {f.ticket.title}",
         f"Work in {f.cwd}, on branch {f.t.branch}. The ticket is {ticket_path(f.id)}.",
-        "", "Done Contract:", _done_contract(f), "",
+        "", "Why:", f.ticket.sections.get("Why", ""), "",
+        *(["Decided when the ticket was written, and not checked. Keep to each one, or write in the ticket why it is"
+           " wrong:", *[f"- {row}" for row in decided], ""] if decided else []),
+        "Done Contract:", _done_contract(f), "",
     ]
     if _base_green(f):
         lines += [_base_green(f), ""]
@@ -111,8 +136,14 @@ def _implement(f):
     for extra in (_size(f), _migration(f)):
         if extra:
             lines.append(extra)
+    past = history.text(history.of(f.project, f.ticket.scope, skip=f.id))
+    for extra in (_tried(f), past):
+        if extra:
+            lines += ["", *extra]
     lines += [
-        "Before you ship, write \"## Look at\" in the ticket: what a reader of this change should check.",
+        *([""] if _tried(f) or past else []),
+        "Before you ship, write \"## Look at\" in the ticket: what a reader of this change should check. A problem you"
+        " see outside this ticket is not yours to fix here: leave it, and write a line there that starts \"Noticed:\".",
         f"When the Done Contract holds, run: rail advance {f.id}",
     ]
     return "\n".join(lines) + _save_note(f) + _findings(f, "Open review findings:") + _note(f)
@@ -204,8 +235,10 @@ def _step_failed(f):
         return (f"The last ship of ticket {f.id} could not run '{e.get('step')}': {e.get('detail', '')}{end}"
                 f"{told} Then run: rail advance {f.id}".replace("\n\n Then", "\n\nThen")
                 ) + _findings(f, "Open review findings:") + _note(f)
+    tried = "".join(f"\n{line}" for line in _tried(f))
     return (f"The last ship of ticket {f.id} failed at '{e.get('step')}': {e.get('detail', '')}{end}Nothing has changed"
-            f" since. Fix the cause in {f.cwd}, then run: rail advance {f.id}") + _advice(f, e.get("step")) \
+            f" since. Fix the cause in {f.cwd}, then run: rail advance {f.id}\n"
+            f"{tried_help(e.get('step'), ticket_path(f.id))}{tried}".rstrip()) + _advice(f, e.get("step")) \
         + _findings(f, "Open review findings:") + _note(f)
 
 
