@@ -90,6 +90,8 @@ READERS = {
     "tests.paths": "nothing yet: globs of the files that hold tests and their runner's settings, which rail init"
                    " writes from the language profiles it finds (rail docs languages)",
     "rules": "ship and CI: structure rules on added lines and files (rail docs rules)",
+    "sensors": "ship and CI, last: each entry runs a tool when the change touches its paths, and a line of its output"
+               " on a line the change adds fails the step (rail docs sensors)",
     "profiles": "nothing yet: the language profiles rail init found, each a name and the paths that hold its files"
                 " (rail docs languages)",
     "guides.start": "next and advance: the page whose text a ticket's first IMPLEMENT brief carries, once per"

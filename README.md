@@ -44,7 +44,8 @@ PERSON ticket waits for a person.
 **The engine decides what "done" means.** `rail advance` commits the change and runs the ship checks in
 order: a rebase onto the base branch, ticket lint, open assumptions, scope, structure rules, the migration
 fields of a migration ticket (`reversibility` and `rollback`), size, the architecture map (the `## Areas`
-table in `ARCHITECTURE.md`), the project's own `verify` command (tests, lint, scans), and each `Check:` line. A failure sends the ticket back with the output. A failure counts as stuck only when it
+table in `ARCHITECTURE.md`), the project's own `verify` command (tests, lint, scans), each `Check:` line, and any
+sensor the project has set up (a tool whose findings fail only on the lines the change adds). A failure sends the ticket back with the output. A failure counts as stuck only when it
 repeats: when a step fails the same way twice in a row, a second opinion (`rail consult`) advises once, and
 after one more failure the ticket is stuck. Five failures at one step are stuck whatever they were. A stuck AUTO
 ticket is dropped with a record (nothing merged, so nothing needs undoing), and its issue says why; label the issue
@@ -218,6 +219,7 @@ the pages, which are also in [`engine/docs/`](engine/docs):
 | States, retries and waits | [`states`](engine/docs/states.md), [`retries`](engine/docs/retries.md) |
 | Cloud sessions, and running with no session open | [`cloud`](engine/docs/cloud.md), [`github-runner`](engine/docs/github-runner.md) |
 | GitHub settings and pull requests | [`github`](engine/docs/github.md) |
+| Structure rules and sensors | [`rules`](engine/docs/rules.md), [`sensors`](engine/docs/sensors.md) |
 | The guards | [`guards`](engine/docs/guards.md) |
 | Guides named in the brief, and the skills | [`guides`](engine/docs/guides.md) |
 | The journal's files and events | [`journal`](engine/docs/journal.md) |

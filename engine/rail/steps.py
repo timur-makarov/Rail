@@ -77,6 +77,8 @@ class Run:
 
     def not_run(self, *names):
         for name in names:
+            if name == "sensors" and not self.project.config["sensors"]:
+                continue  # a project with no sensor has no such step
             self.steps.append({"step": name, "status": "not_run"})
 
     @property
@@ -197,7 +199,8 @@ def scratch(project, commit):
 
 # --- ship and CI -------------------------------------------------------------------
 
-CHECKS = ["ticket-lint", "assumptions", "scope", "rules", "migration", "size", "doc-lint", "verify", "checks"]
+CHECKS = ["ticket-lint", "assumptions", "scope", "rules", "migration", "size", "doc-lint", "verify", "checks",
+          "sensors"]
 
 
 def _stop(run, step):
@@ -290,7 +293,11 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
             return _stop(run, "checks")
     for command in ticket.checks():
         if not run_command(project, cwd, nn, "checks", command, run, patch_id, label=command, again=again):
-            return None
+            return _stop(run, "checks")
+    # Last, so that verify and the Done Contract speak first.
+    from . import sensors
+    if not sensors.step(project, nn, ref, cwd, run, patch_id, changed):
+        return None
     return tier
 
 
@@ -344,7 +351,7 @@ def ship(project, f, run):
         if red:
             run.events[-1]["counted"] = False
             run.events[-1]["detail"] = "red base"
-            run.steps[-1 if run.steps[-1]["step"] == "verify" else -2]["detail"] = "red base"
+            [s for s in run.steps if s["step"] == "verify"][-1]["detail"] = "red base"
             project.cache_write("red-base", "base", gitx.rev(project.base_ref, project.root))
             project.cache_write("red-base", "output", red)
             run.failure = ("verify", "verify fails on the base branch too, so this attempt doesn't count. rail next"
@@ -367,7 +374,9 @@ def ship(project, f, run):
 def ship_failed_brief(t, run):
     step, output = run.failure
     if any(s.get("status") == "could_not_run" for s in run.steps):
-        return f"Ship of ticket {t.id} could not run '{step}'.\n{output}\n\n{MISSING_HELP} Then run: rail advance {t.id}"
+        from . import sensors
+        told = "" if sensors.HELP in output else f"\n\n{MISSING_HELP}"  # a sensor that crashed says so itself
+        return f"Ship of ticket {t.id} could not run '{step}'.\n{output}{told} Then run: rail advance {t.id}"
     return f"Ship of ticket {t.id} failed at '{step}'.\n{output}\n\nFix it in the worktree, then run: rail advance {t.id}"
 
 

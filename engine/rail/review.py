@@ -276,6 +276,8 @@ def brief(project, f, role, ledger, disputed=None):
     guidance = review_guidance(project, ref)
     patch = project.patch_id(ref)
     flaky = list(dict.fromkeys(flakes.name(x) for x in flakes.of(t.events) if x["patch_id"] == patch))
+    from . import sensors
+    marked = sensors.markers(project, ref)
     parts = [
         f"# Review brief: ticket {t.id}, {f.tier}", "", f"This run's job: {job}", "",
         "## The ticket", ticket_text.strip(), "",
@@ -285,6 +287,10 @@ def brief(project, f, role, ledger, disputed=None):
         *(["## Flaky checks on this change",
            "Each of these both failed and passed on this same code. It may be an old flake, or a race this change"
            " brought in:", *[f"- `{name}`" for name in flaky], ""] if flaky and role != "refuter" else []),
+        *(["## Sensor markers this change adds",
+           "Each line below tells a sensor that its violation there is wrong or accepted. Judge the reason: a marker"
+           " with no reason that holds is a finding.", *[f"- {line}" for line in marked], ""]
+          if marked and role in ("review", "security") else []),
         "## The diff", "```diff", diff, "```", "",
         "## Areas this change touches", "| Area | Paths | Holds |", "|---|---|---|", rows, "",
         "Directories:", found["digest"], "",

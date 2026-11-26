@@ -92,7 +92,7 @@ also takes in issues labelled `rail`, and every command that meets a wait labels
 
 In the ticket's worktree, `advance` commits your in-scope changes and ships: it rebases onto a moved base,
 then runs ticket lint, the ASSUMED rows, scope, structure rules, the migration fields, size, doc-lint,
-`verify` and each `Check:` line. Then it runs the review, unless every changed file is in
+`verify`, each `Check:` line, and the sensors the change touches (`rail docs sensors`). Then it runs the review, unless every changed file is in
 `[review] skip_paths` (see [review](review.md)).
 
 **Over the size cap, a split is offered.** When an AUTO ticket's change is over `[size] cap` and no file on a

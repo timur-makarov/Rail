@@ -53,6 +53,10 @@ rewrite the prompt of its own review, and `rail doctor` says so.
 brief of the review and of the security seat lists it under "Flaky checks on this change": it may be an old
 flake, or a race the change brought in (`rail docs retries`).
 
+**Sensor markers.** A `SENSOR(NN): why` comment tells a sensor that its violation on that line is wrong or
+accepted (`rail docs sensors`). The brief of the review and of the security seat lists each marker the change
+adds under "Sensor markers this change adds", and asks for the reason to be judged.
+
 **When the checks can't show the work.** When every `Check:` line already passed on the base branch before
 the work began (the `base_checks` event, `rail docs loop`), the review run's brief says so, and asks the
 reviewer to look at whether the change is tested.

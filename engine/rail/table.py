@@ -197,8 +197,13 @@ def _step_failed(f):
         output = f"{output}\n\n{flakes.TOLD}".strip()  # another machine's ship: the journal still says so
     end = f".\n{output}\n\n" if output else ". "
     if e.get("status") == "could_not_run":
+        from . import sensors
+        # A sensor that ended with an exit it doesn't declare crashed or is set up wrongly: no tool is missing.
+        crashed = e.get("step") == "sensors" and "could not run (" not in (e.get("detail") or "")
+        told = MISSING_HELP if not crashed else "" if sensors.HELP in output else sensors.HELP
         return (f"The last ship of ticket {f.id} could not run '{e.get('step')}': {e.get('detail', '')}{end}"
-                f"{MISSING_HELP} Then run: rail advance {f.id}") + _findings(f, "Open review findings:") + _note(f)
+                f"{told} Then run: rail advance {f.id}".replace("\n\n Then", "\n\nThen")
+                ) + _findings(f, "Open review findings:") + _note(f)
     return (f"The last ship of ticket {f.id} failed at '{e.get('step')}': {e.get('detail', '')}{end}Nothing has changed"
             f" since. Fix the cause in {f.cwd}, then run: rail advance {f.id}") + _advice(f, e.get("step")) \
         + _findings(f, "Open review findings:") + _note(f)

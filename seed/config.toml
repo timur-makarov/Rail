@@ -6,7 +6,7 @@ base_branch = "main"                      # reader: claim, ship, CI, merge
 # merges it. PERSON, only for a change a revert doesn't undo (rail docs kinds): a person approves the contract and
 # merges; a security seat reviews as well.
 # reader: add and amend (matched against scope_paths) and ship (changed files). A ticket that touches one is PERSON
-person_paths = [".rail/bin/**", ".rail/engine/**", ".rail/config.toml"]   # the kind controls: Rail's own gates
+person_paths = [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".rail/sensors/**"]   # the kind controls: Rail's own gates
 migration_paths = ["**/migrations/**"]    # the kind data-loss; tickets touching them need reversibility and rollback
 
 [kinds]                                   # reader: add, amend and ship. A ticket whose scope or changed files match is
@@ -118,6 +118,14 @@ contract = ".claude/skills/rail-blast-radius/SKILL.md"
 split = ".claude/skills/rail-slice/SKILL.md#2. Three tests for each draft#When the engine offered the split"
 setup = ".claude/skills/rail-verify/SKILL.md"
 
+# [[sensors]]                             # reader: ship and CI, last; a tool whose output lines fail the ship when
+# id = "duplication"                      # they are on lines the change adds (rail docs sensors). None is on by default
+# paths = ["src/**"]                      # runs only when the change touches these
+# command = 'jscpd --config "$RAIL_SENSORS/jscpd.json" --reporters xcode .'   # RAIL_SENSORS: the base branch's .rail/sensors/
+# ok_exit = [0]                           # no violations
+# violations_exit = [1]                   # violations printed, one a line: path:line: message
+# fix = "Call the code that already does this, or move both copies into one function."
+
 [[rules]]                                 # reader: ship and CI; structure rules on added lines (rail docs rules)
 id = "no-new-suppressions"
 forbid = ["eslint-disable", "@ts-ignore", "# noqa", ".skip("]
@@ -129,3 +137,9 @@ id = "shortcut-names-its-ticket"          # a corner cut on purpose is marked SH
 forbid = ["SHORTCUT:", "SHORTCUT()", "SHORTCUT(NN)", "SHORTCUT(TODO)"]
 allow = [".claude/**", ".rail/engine/**"] # the guides and the docs write the marker's form
 fix = "Write SHORTCUT(NN): with this ticket's number, the known limit, and what to do when it is reached."
+
+[[rules]]
+id = "sensor-marker-names-its-ticket"     # a sensor's violation answered on purpose is marked SENSOR(NN): with the ticket's number
+forbid = ["SENSOR:", "SENSOR()", "SENSOR(NN)", "SENSOR(TODO)"]
+allow = [".claude/**", ".rail/engine/**"] # the guides and the docs write the marker's form
+fix = "Write SENSOR(NN): with this ticket's number and why the sensor is wrong about this line."

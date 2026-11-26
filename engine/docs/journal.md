@@ -82,6 +82,7 @@ reason. Ticket lint refuses a `VERIFIED: decided, not checked:` row with nothing
 | `doc-lint` | Ship, CI | `ARCHITECTURE.md` no longer matches the tree |
 | `verify` | Ship, CI | The command fails. When it fails on the base branch too, the event has `counted: false` |
 | `checks` | Ship, CI | A `Check:` line fails; `detail` names it |
+| `sensors` | Ship, CI, last, when the change touches a sensor's `paths` | A sensor reports a violation on a line the change adds; `detail` counts them and names the sensors. `could_not_run` when a sensor ends with an exit it doesn't declare (`rail docs sensors`) |
 | `review`, `security` | `advance` | The run leaves a blocking finding open. A run past `timeout_secs` fails with `detail: "timeout"`, and a run whose output is invalid with `detail: "invalid output: ..."`, both with `counted: false`. No run and no step when the change needs no review |
 | `refuter` | `advance`; `rail answer` | The refuter upholds the finding. A pass means it dismissed it. On an AUTO ticket, `rail answer` writes a failed `refuter` step, with no run, when the author disputes a finding a refuter already upheld: the verdict stands, and the dispute counts toward the retry cap |
 | `sweep` | `rail sweep` | Never |

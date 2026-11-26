@@ -68,6 +68,8 @@ A command the shell couldn't start (exit 127: not found; 126: found but not exec
 `could_not_run`, not as a failure of the change: nothing was checked. It still counts as an attempt, so a
 missing tool can't loop for ever, and a verify that couldn't run is never taken for a red base. Install the
 tool to go on, and open a ticket so that `[commands] provision` (or `setup`) installs it on every machine.
+A sensor that ends with an exit code it doesn't declare is `could_not_run` too, with a brief of its own: the
+tool crashed or is set up wrongly, and nothing needs installing (`rail docs sensors`).
 
 ## Consult
 

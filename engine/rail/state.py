@@ -9,7 +9,7 @@ from .util import globs_overlap, match_any, minutes_since
 
 OPEN = ("implementing", "reviewing", "in-ci", "merge-ready")  # claimed and not finished
 SHIP_STEPS = ("rebase", "ticket-lint", "assumptions", "scope", "change", "rules", "migration", "size", "doc-lint", "verify",
-              "checks")
+              "checks", "sensors")
 
 
 def kind_paths(config):

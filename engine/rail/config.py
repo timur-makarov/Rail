@@ -25,7 +25,7 @@ WORKER_COMMAND = (
 
 DEFAULTS = {
     "base_branch": "main",
-    "person_paths": [".rail/bin/**", ".rail/engine/**", ".rail/config.toml"],  # the kind `controls`
+    "person_paths": [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".rail/sensors/**"],  # the kind `controls`
     "migration_paths": ["**/migrations/**"],  # the kind `data-loss`
     # Paths that hold each kind of change a revert doesn't undo (rail docs kinds).
     "kinds": {kind: [".github/workflows/**", ".claude/**"] if kind == "runs-with-secrets" else [] for kind in KINDS},
@@ -48,14 +48,16 @@ DEFAULTS = {
     # project whose config has no [guides] table gets no guide.
     "guides": {key: "" for key in ("start", "stuck", "findings", "conflict", "contract", "split", "setup")},
     "rules": [],
+    "sensors": [],
     "profiles": [],
 }
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 RULE_KEYS = {"id": str, "files": str, "forbid": list, "only_in": str, "allow": list, "fix": str, "why": str}
 PROFILE_KEYS = {"name": str, "paths": str}
+SENSOR_KEYS = {"id": str, "paths": list, "command": str, "ok_exit": list, "violations_exit": list, "fix": str}
 # Arrays of tables: each item's keys and types, and the key every item needs.
-TABLE_ARRAYS = {"rules": (RULE_KEYS, "id"), "profiles": (PROFILE_KEYS, "name")}
+TABLE_ARRAYS = {"rules": (RULE_KEYS, "id"), "profiles": (PROFILE_KEYS, "name"), "sensors": (SENSOR_KEYS, "id")}
 
 
 def _suggest(key, known):
@@ -140,4 +142,12 @@ def load(root):
         else:
             raise RailError(f"config: unknown key '{key}'{_suggest(key, DEFAULTS)}")
     _check_ladder(config)
+    for n, sensor in enumerate(config["sensors"]):
+        if not sensor.get("command", "").strip():
+            raise RailError(f"config: sensors[{n}] needs a command")
+        for key in ("ok_exit", "violations_exit"):
+            if not all(isinstance(code, int) and not isinstance(code, bool) for code in sensor.get(key, [])):
+                raise RailError(f"config: sensors[{n}].{key} must be a list of exit codes")
+        if not all(isinstance(path, str) for path in sensor.get("paths", [])):
+            raise RailError(f"config: sensors[{n}].paths must be a list of strings")
     return config
