@@ -220,6 +220,16 @@ class Report(unittest.TestCase):
         self.assertIn("seed 3", text)
         self.assertIn("| a | 22%", text)
 
+    def test_a_run_on_the_contract_model_counts_as_the_contract_role(self):
+        # The sweep's ticket filing runs on [worker] contract: the driver records the role; an older result has none.
+        r = result("a", "s1", 1)
+        r["worked"] += [{"code": "SWEEP_TICKETS", "cost_usd": 0.3, "turns": 4, "role": "contract"},
+                        {"code": "SWEEP_TICKETS", "cost_usd": 0.2, "turns": 2}]
+        cost = report.cost([r])
+        self.assertAlmostEqual(cost["contract"]["cost_usd"], 0.1 + 0.3 + 0.2)
+        self.assertEqual(cost["contract"]["turns"], 3 + 4 + 2)
+        self.assertAlmostEqual(cost["worker"]["cost_usd"], 0.5)
+
     def test_tainted_again_and_unlocked_runs_are_left_out_or_apart_and_counted(self):
         results = [result("a", "s1", 1), result("a", "s1", 2, tainted=True), result("a", "s1", 3, again=True),
                    result("b", "s1", 1), result("a", "s2", 1, locked=False), result("b", "s2", 1, locked=False)]
