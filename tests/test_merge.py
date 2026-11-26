@@ -360,6 +360,9 @@ class RailCI(RailTest):
         self.assertEqual(result["reason"]["code"], "CI_NO_TICKET")
         self.assertEqual(failed_step(result), ("verify", "exit 1"))
         self.assertIn("No ticket on branch bump-deps", result["action"]["brief"])
+        # The run's log is where a person reads why: the failing command's output is in the answer.
+        self.assertIn("Failed at 'verify':", result["action"]["brief"])
+        self.assertIn("SyntaxError", result["action"]["brief"])
 
     def test_ci_fails_a_change_that_needs_a_higher_tier_than_it_shipped_as(self):
         # The ticket shipped AUTO; on the pull request's head the project's config makes its change a person's.

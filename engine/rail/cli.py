@@ -2208,6 +2208,8 @@ def cmd_ci(project, args):
         elif not verify:
             run.not_run("verify")
         brief = f"No ticket on branch {branch}. Its paths would make it {tier}."
+        if not run.ok:  # the run's log is all a person has of this failure: no ticket's journal records it
+            brief += f"\nFailed at '{run.failure[0]}':\n{run.failure[1]}{tools.ci_note(project)}"
         return answer(code="CI_NO_TICKET", action={"kind": "rest", "brief": brief}, steps_=run.steps, tier=tier)
 
     from .project import parse_events
