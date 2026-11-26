@@ -9,10 +9,10 @@ from .ticket import KINDS
 from .util import RailError
 
 REVIEW_COMMAND = (
-    "claude -p --safe-mode --effort high --autocompact 400000 --system-prompt-file .rail/engine/reviewer.md "
+    "claude -p --safe-mode --effort high --autocompact 400000 --system-prompt-file \"$RAIL_REVIEW_PROMPT\" "
     "--tools Read,Grep,Glob,Bash,Edit,Write --allowedTools Bash,Edit,Write "
     "--disallowedTools 'Bash(git push *)' --output-format json "
-    "--json-schema \"$(cat .rail/engine/review-v1.json)\""
+    "--json-schema \"$(cat \"$RAIL_REVIEW_SCHEMA\")\""
 )
 
 # The worker `rail work` starts. Every flag lives here, so another vendor's CLI fits too: the engine reads the JSON keys

@@ -77,8 +77,9 @@ ignore = []
 
 [review]                                  # reader: advance; runs in the ticket's worktree with the brief on stdin
 # the command runs through bash -o pipefail, as every command here does; --json-schema takes the schema's text, not a
-# path. The engine resets the worktree afterwards
-command = '''claude -p --safe-mode --effort high --autocompact 400000 --system-prompt-file .rail/engine/reviewer.md --tools Read,Grep,Glob,Bash,Edit,Write --allowedTools Bash,Edit,Write --disallowedTools 'Bash(git push *)' --output-format json --json-schema "$(cat .rail/engine/review-v1.json)"'''
+# path. RAIL_REVIEW_PROMPT and RAIL_REVIEW_SCHEMA are the paths of .rail/engine/reviewer.md and review-v1.json as the
+# base branch has them, so a ticket can't rewrite the prompt of its own review. The engine resets the worktree afterwards
+command = '''claude -p --safe-mode --effort high --autocompact 400000 --system-prompt-file "$RAIL_REVIEW_PROMPT" --tools Read,Grep,Glob,Bash,Edit,Write --allowedTools Bash,Edit,Write --disallowedTools 'Bash(git push *)' --output-format json --json-schema "$(cat "$RAIL_REVIEW_SCHEMA")"'''
 
 model = "claude-opus-5-5"                 # the model the reviewer, refuter and security seat run on; empty is the
                                           # CLI's default. The effort is --effort in the command

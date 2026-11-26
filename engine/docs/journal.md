@@ -159,8 +159,8 @@ One file per ticket. The engine appends one entry per run.
 ## What a reviewer returns: `review/v1`
 
 Every run of `[review] command` returns this shape: the review, the security seat, the refuter and the
-sweep. The schema is `.rail/engine/review-v1.json`; the default command passes its text to
-`claude -p --json-schema`.
+sweep. The schema is `.rail/engine/review-v1.json`; the default command passes the base branch's copy of
+its text (`RAIL_REVIEW_SCHEMA`, `rail docs review`) to `claude -p --json-schema`.
 
 | Field | Holds | Read by |
 |---|---|---|

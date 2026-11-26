@@ -37,9 +37,17 @@ holds the earlier findings and your answers.
 
 **`REVIEW.md`** is review guidance a project writes for itself: what to always flag, what never to report.
 The brief takes the one at the repository root and one in each directory above a file the change touches
-(`src/api/REVIEW.md` when `src/api/x.py` changed), root first, from the ticket's branch. Together they are
+(`src/api/REVIEW.md` when `src/api/x.py` changed), root first. Together they are
 cut at 8,000 characters, and the brief names the files that were cut. Every run gets them: the review, the
 security seat and the refuter.
+
+**What the reviewer is told comes from the base branch, not from the ticket.** The `REVIEW.md` files are read
+from the base, so one that a ticket adds or edits counts from the next ticket on; the ticket's own review sees
+that change only in the diff. Before each run the engine also writes the base's `.rail/engine/reviewer.md` and
+`.rail/engine/review-v1.json` to a temporary folder and passes their paths as `RAIL_REVIEW_PROMPT` and
+`RAIL_REVIEW_SCHEMA`; the seed's command reads them from there. The command runs in the ticket's worktree,
+where those two files are the ticket's own copies: a command that names them by their path there lets a change
+rewrite the prompt of its own review, and `rail doctor` says so.
 
 **When the checks can't show the work.** When every `Check:` line already passed on the base branch before
 the work began (the `base_checks` event, `rail docs loop`), the review run's brief says so, and asks the

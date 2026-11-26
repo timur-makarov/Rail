@@ -11,12 +11,24 @@ import os
 import sys
 import time
 
+
+
+def held(name):
+    """The text of the file the engine names in that variable, or None."""
+    try:
+        with open(os.environ[name]) as f:
+            return f.read()
+    except (KeyError, OSError):
+        return None
+
+
 brief = sys.stdin.read()
 log = os.environ.get("RAIL_FAKE_LOG")
 if log:
     with open(log, "a") as f:
         f.write(json.dumps({"cwd": os.getcwd(), "brief": brief, "consult": "--consult" in sys.argv,
-                            "model": os.environ.get("ANTHROPIC_MODEL")}) + "\n")
+                            "model": os.environ.get("ANTHROPIC_MODEL"), "prompt": held("RAIL_REVIEW_PROMPT"),
+                            "schema": held("RAIL_REVIEW_SCHEMA")}) + "\n")
 if "--consult" in sys.argv:
     print("The check expects a + b. Change the operator.\nVERDICT: change")
     sys.exit(0)

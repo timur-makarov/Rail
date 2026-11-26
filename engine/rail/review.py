@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shlex
+import tempfile
 
 from . import areas, gitx
 from .project import event, review_path, ticket_path
@@ -199,17 +200,20 @@ def project_conventions(project, ref):
 
 
 def review_guidance(project, ref):
-    """The project's REVIEW.md files at the ticket's ref: the root one, then one in each directory above a changed
-    file, shallowest first. Empty when there is none. Cut at GUIDANCE_LIMIT characters, saying which files were."""
+    """The project's REVIEW.md files: the root one, then one in each directory above a file the ticket changed,
+    shallowest first. They are read from the base branch, not from the ticket's: the change under review doesn't
+    write what its own review is told, and a REVIEW.md it adds or edits counts from the next ticket on. Empty when
+    there is none. Cut at GUIDANCE_LIMIT characters, saying which files were."""
     dirs = {""}
     for path in project.changed_files(ref):
         parts = path.split("/")[:-1]
         dirs.update("/".join(parts[:n]) for n in range(1, len(parts) + 1))
     paths = [f"{d}/REVIEW.md" if d else "REVIEW.md" for d in sorted(dirs, key=lambda d: (d.count("/") + bool(d), d))]
-    blobs = gitx.read_blobs([f"{ref}:{p}" for p in paths], project.root)
+    base = project.base_ref
+    blobs = gitx.read_blobs([f"{base}:{p}" for p in paths], project.root)
     parts, cut, room = [], [], GUIDANCE_LIMIT
     for path in paths:
-        text = (blobs.get(f"{ref}:{path}") or "").strip()
+        text = (blobs.get(f"{base}:{path}") or "").strip()
         if not text:
             continue
         if len(text) > room:
@@ -296,6 +300,28 @@ def brief(project, f, role, ledger, disputed=None):
 
 # --- running and reading a review -------------------------------------------------------------
 
+REVIEWER_FILES = {"RAIL_REVIEW_PROMPT": "reviewer.md", "RAIL_REVIEW_SCHEMA": "review-v1.json"}
+
+
+def reviewer_files(project, folder):
+    """{RAIL_REVIEW_PROMPT, RAIL_REVIEW_SCHEMA}: paths of the reviewer's system prompt and of the schema its answer
+    must match, as the base branch has them, written into `folder` for one run. The review command runs in the
+    ticket's worktree, where both files are the ticket's own copies: read from there, a change could rewrite the
+    prompt of its own review. A base branch without them (a project that keeps no engine there) gets the running
+    engine's."""
+    held = gitx.read_blobs([f"{project.base_ref}:.rail/engine/{name}" for name in REVIEWER_FILES.values()], project.root)
+    env = {}
+    for var, name in REVIEWER_FILES.items():
+        text = held.get(f"{project.base_ref}:.rail/engine/{name}")
+        if text is None:
+            with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), name)) as f:
+                text = f.read()
+        env[var] = os.path.join(folder, name)
+        with open(env[var], "w") as f:
+            f.write(text)
+    return env
+
+
 
 def _structured(stdout):
     """The review/v1 object from the CLI's JSON (`structured_output`), plus the model and cost when given."""
@@ -368,8 +394,10 @@ def run(project, f, role, receipt, disputed=None, prompt=None):
     ledger = Ledger(t.events, doc)
     prompt = prompt or brief(project, f, role, ledger, disputed)
     timeout = project.config["commands"]["timeout_secs"]
-    code, output, ms = run_shell(project.config["review"]["command"], wt,
-                                 {"RAIL_TICKET": t.id, **model_env(project.config["review"]["model"])}, timeout, stdin=prompt)
+    with tempfile.TemporaryDirectory(prefix="rail-review-") as held:
+        code, output, ms = run_shell(project.config["review"]["command"], wt,
+                                     {"RAIL_TICKET": t.id, **model_env(project.config["review"]["model"]),
+                                      **reviewer_files(project, held)}, timeout, stdin=prompt)
     # Tracked files back as they were; the reviewer's untracked scratch files stay for the evidence re-runs.
     gitx.git(["reset", "--quiet", "--hard", head], wt)
     try:

@@ -78,6 +78,14 @@ def checks(project):
                       f" ({ceiling // 60000} min, BASH_MAX_TIMEOUT_MS in .claude/settings.json's env; 10 when unset):"
                       " the Bash call that runs rail work would end first. Lower it, or raise the ceiling"))
 
+    old = [name for name in ("reviewer.md", "review-v1.json") if f".rail/engine/{name}" in project.config["review"]["command"]]
+    if old:
+        found.append(("review command", False,
+                      f"[review] command reads .rail/engine/{' and '.join(old)} from the ticket's worktree, so a ticket"
+                      " that changes them is reviewed by its own copy. Use the paths the engine passes, which hold the"
+                      ' base branch\'s: --system-prompt-file "$RAIL_REVIEW_PROMPT" and --json-schema'
+                      ' "$(cat "$RAIL_REVIEW_SCHEMA")"'))
+
     agents = os.path.join(root, "AGENTS.md")
     has_section = os.path.exists(agents) and any(l.strip() == "## Rail" for l in open(agents).read().splitlines())
     found.append(("AGENTS.md", has_section, "has the ## Rail section" if has_section else "no ## Rail section: run rail init"))
