@@ -129,7 +129,8 @@ and goes on with ARM's roles. So two arms can be compared from the same contract
 
 Each role (worker, contract, review, consult) has its own cost proxy. The proxy logs only the path, the status
 and the tokens of each call. It never logs a header or a body. It refuses Claude Code's
-`/v1/code/agent-proxy/ws` tunnel. A consult the worker asks for is counted as the worker's.
+`/v1/code/agent-proxy/ws` tunnel. A consult the worker asks for is counted as the worker's. A `rail work` run
+whose brief Rail gives `[worker] contract`'s model (the contract, and the sweep's tickets) is the contract role's.
 
 On Linux as root, each child runs in a network of its own that reaches only the proxies. Elsewhere the run goes on
 unlocked, and its result says so. `network_lock = "required"` refuses to run unlocked.
