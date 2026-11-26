@@ -141,6 +141,9 @@ class Fixture:
         env.pop("GITHUB_ACTIONS", None)
         env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
         env["RAIL_CLOUD"] = "1" if cloud else "0"  # the suite itself may run inside a cloud session
+        # No bytecode files: a check that imports src/calc.py right after a test rewrote it, in the same second and at
+        # the same size, would run the stale .pyc and fail a correct change.
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         # What provision writes on a cloud machine goes to a scratch home and bin folder, never the real ones.
         scratch = os.path.join(os.path.dirname(self.root), "machine")
         env["RAIL_BIN_DIR"] = os.path.join(scratch, "bin")
