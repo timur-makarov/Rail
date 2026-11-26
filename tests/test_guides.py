@@ -241,6 +241,14 @@ class Init(RailTest):
         for name in ("rail-build", "rail-findings", "rail-conflict"):  # the engine's pages now: briefs carry them
             self.assertFalse(os.path.exists(p.path(SKILL.format(name))), name)
 
+    def test_an_include_line_takes_a_heading_with_spaces(self):
+        heading = "Writing or changing a guide"
+        with open(os.path.join(ROOT, "engine", "docs", "guides.md")) as f:
+            want = docs.part(f.read(), "guides.md#" + heading)
+        self.assertTrue(want.startswith("## " + heading))
+        got = include(f"Before\n<!-- include engine/docs/guides.md#{heading} -->\nAfter\n")
+        self.assertEqual(got, f"Before\n{want}\nAfter\n")
+
     def test_init_puts_the_page_a_skill_includes_into_the_skill(self):
         p = Fixture(os.path.join(self.tmp, "fresh"), init=False)
         p.rail("init")
