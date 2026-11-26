@@ -17,6 +17,8 @@ LABELS = {
     "rail:hold": ("b60205", "Rail: a person stopped this ticket; rail:go continues it"),  # only a person sets it
     # only a person sets it, on an issue: the brake for the whole repository, or for the paths its body names
     "rail:stop": ("b60205", "Rail: while an issue with this label is open, Rail does nothing here"),
+    # only a person sets it, on a merged pull request; the engine removes it once the revert ticket is filed
+    "rail:revert": ("b60205", "Rail: on a merged pull request, files a ticket that reverts it"),
 }
 
 STOP_PATHS = re.compile(r"(?im)^[ \t]*paths:[ \t]*(\S.*)$")
@@ -412,6 +414,13 @@ class Forge:
         """Every open issue with the label, however many pages they fill."""
         found = pages(f"repos/{self.repo}/issues?labels={label}&state=open&per_page={PAGE}")
         return [i for i in found if "pull_request" not in i]
+
+    def asked_reverts(self):
+        """The merged pull requests a person labelled rail:revert, each in full. The issues endpoint lists pull
+        requests too, and only it filters by label."""
+        found = pages(f"repos/{self.repo}/issues?labels=rail:revert&state=closed&per_page={PAGE}")
+        merged = [i for i in found if (i.get("pull_request") or {}).get("merged_at")]
+        return [self.call("GET", f"pulls/{i['number']}") for i in sorted(merged, key=lambda i: i["number"])]
 
     def stops(self):
         """A person's brake: the open issues labelled rail:stop, as [{number, title, url, paths}], oldest first.

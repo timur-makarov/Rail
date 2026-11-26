@@ -87,7 +87,7 @@ PERSON tickets where the person changed nothing, by why they were PERSON: access
 | `merged with no review` | The rest: every changed file was in `[review] skip_paths`, or no product file changed. The sweep reads these afterwards |
 | `no person acted` | AUTO tickets with no approval by a person, no continued wait, and no finding a person decided |
 | `shipped on the first try` | Tickets where no ship step failed before the first ship. A red base doesn't count against a ticket |
-| `reverted afterwards` | Tickets whose squash commit a later commit on the base branch reverts: one whose message says `This reverts commit <sha>.` (what `git revert` writes), or `Reverts owner/repo#N` (what GitHub's Revert button writes), where N is the ticket's pull request |
+| `reverted afterwards` | Tickets whose squash commit a later commit on the base branch reverts: one whose message says `This reverts commit <sha>.` (what `git revert` writes), `Reverts owner/repo#N` (what GitHub's Revert button writes), where N is the ticket's pull request, or the trailer `Reverts: <sha>` (what a revert ticket's squash carries, `rail docs tickets`) |
 | `median claim to merge` | From the first claim to the squash commit |
 | `Every check already green on the base` | Of the tickets with a `base_checks` event, those where every `Check:` line passed on the base before any work (`rail docs loop`) |
 | `Adopted from a branch with no ticket` | Tickets with an `adopted` event: work that came in through `rail adopt` (`rail docs adopt`). In JSON, `adopted`. Shown when there is one |

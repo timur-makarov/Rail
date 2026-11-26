@@ -15,7 +15,7 @@ from .project import event, parse_events
 from .util import shell
 
 # The answers whose brief a worker does: a ticket's agent work, after which the runner runs rail advance NN.
-CODES = ("TICKET_LINT", "VERIFY_ASSUMPTIONS", "IMPLEMENT", "STEP_FAILED", "RED_CHECK", "ANSWER_FINDINGS", "CONFLICT",
+CODES = ("TICKET_LINT", "VERIFY_ASSUMPTIONS", "IMPLEMENT", "REVERT", "STEP_FAILED", "RED_CHECK", "ANSWER_FINDINGS", "CONFLICT",
          "REBASING", "SPLIT", "SWEEP_TICKETS", "AFTER_DROPPED")
 # The line added to the brief. Inside the run, the verbs in REFUSED refuse (RAIL_WORKER is set).
 LAST_LINE = ("When you are done, or can't go on, reply in one line. Don't run `rail advance`: the runner runs it after"

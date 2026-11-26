@@ -282,6 +282,12 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
     else:
         run.not_run("verify")
 
+    if ticket.get("kind") == "revert":
+        # No Check: lines: the change is compared with the reverse of the reverted ticket's change.
+        from . import revert
+        passed, detail, output = revert.check(project, run.t, project.tickets(), patch_id, ref)
+        if not run.record("checks", passed, patch_id, detail, output=output):
+            return _stop(run, "checks")
     for command in ticket.checks():
         if not run_command(project, cwd, nn, "checks", command, run, patch_id, label=command, again=again):
             return None
@@ -421,6 +427,10 @@ def describe(project, t, ticket, tier):
         f"Ticket: {t.id}", f"Tier: {tier}",
         "Review: " + (("reviewer, security seat" if tier == "PERSON" else "reviewer") if reviewed else "none"),
     ]
+    from . import revert
+    reverted = revert.target(project, ticket, project.tickets())
+    if reverted and reverted[1]:
+        body.append(f"Reverts: {reverted[1]}")  # rail stats reads it: a squash has neither of git's revert wordings
     if external.startswith("github#"):
         # A ticket narrowed to the first part of its request leaves the issue open for the rest.
         word = "Part of" if ticket.sections.get("Split") else "Closes"

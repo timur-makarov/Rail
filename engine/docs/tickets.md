@@ -20,6 +20,7 @@ scope_paths = ["auth/**", "tests/auth/**"]
 after = ["12"]                     # waits for 12 to merge
 caused_by = ""                     # on a fix ticket
 external_id = "github#123"
+kind = ""                          # "revert" on a ticket that takes another one out; then reverts = "NN"
 +++
 
 ## Why
@@ -65,6 +66,33 @@ external_id = "github#123"
 - **The contract** (Done Contract, scope and tier) freezes at acceptance. `rail amend NN "why"` changes it.
 - **`## Grilling`** is optional: the record of questioning the person who asked for the ticket, written by the
   agent that did it (`rail docs grill`). Ticket lint checks its shape, and `rail stats` counts it.
+
+## A revert is a ticket
+
+A ticket with `kind = "revert"` and `reverts = "NN"` takes merged ticket NN out again. Put the label
+`rail:revert` on NN's merged pull request and the next `rail next` files it: the label is a person's word,
+since only someone who may triage the repository can set one, and it approves the contract. With no remote,
+file one with `rail add`.
+
+- **Its change** is the reverse of NN's squash commit on the project's own files. `.rail/tickets` and
+  `.rail/journal` are left alone: a whole `git revert` would delete NN's ticket and journal, which the scope
+  step refuses. The engine puts the reverse into the worktree at the claim, so `rail next` answers
+  `REVERT_SHIP`, a script: `rail advance`.
+- **Its contract is built in.** It needs no `Check:` line: at ship, `checks` compares the change with the
+  reverse of NN's, and `verify` runs as always. `scope_paths` are the files NN changed.
+- **A revert made by hand** is accepted in two cases, and the reviewer reads it like any change: the reverse
+  no longer applies, because later tickets changed the same lines; or it applies and `verify` failed on it,
+  because later work depends on what it removes. The answer is then `REVERT`, an agent's task, and the brief
+  says which case it is. While the exact reverse applies and has not failed `verify`, any other change fails
+  `checks`.
+- **What the label files:** the ticket's `## Why` quotes what people who can push wrote on NN's pull request
+  after the merge; `caused_by` is NN; `external_id` is `revert#` and the pull request's number, so one pull
+  request has one revert open at a time. The engine comments on the pull request and takes the label off. A
+  pull request that merged no ticket gets the comment and no ticket.
+- **Its tier** follows its paths like any ticket's. A revert of a change on a kind's paths is PERSON: the
+  label counted as the approval of its contract, and a person still merges it.
+- **Its squash commit** carries `Reverts: <sha>`, which `rail stats` counts as a revert of NN.
+- **A brake doesn't stop it** (`rail docs cloud`): `rail:stop` can't block its own way out.
 
 ## A ticket is its branch
 

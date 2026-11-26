@@ -230,6 +230,12 @@ def make_ready(project, t, run, fresh=False):
         found = steps.base_checks(project, t) if fresh and run.ok else None
         if found:
             project.append_events(t, [found], "base checks")
+        from . import revert
+        reverted = revert.target(project, t.ticket, project.tickets()) if fresh and run.ok else None
+        if reverted and reverted[1]:
+            # A revert's work is the engine's where it can be: the reverse goes into the worktree's files, for the
+            # ship to commit. Where it no longer applies, the brief asks an agent to undo the change by hand.
+            revert.apply(project, reverted[1], t.worktree)
 
 
 def contract_pr(f):
@@ -534,10 +540,11 @@ def with_kinds(project, text):
     return text
 
 
-def create_ticket(project, text, via="add", channel="session", parent=None, key=None, **extra):
+def create_ticket(project, text, via="add", channel="session", parent=None, key=None, approved=False, **extra):
     """Take the next ID and make the ticket's branch with the ticket file, without touching any checkout. The
-    journal starts with a `requested` event; an AUTO ticket that passes lint is accepted at once. The branch starts
-    from the base branch, or from `parent` (an adopted branch's head). Returns (id, branch, push result)."""
+    journal starts with a `requested` event; an AUTO ticket that passes lint is accepted at once, and so is a PERSON
+    one a person `approved` by asking for it with a label. The branch starts from the base branch, or from `parent`
+    (an adopted branch's head). Returns (id, branch, push result)."""
     base_tip = gitx.rev(project.base_ref, project.root)
     if not base_tip:
         raise RailError(f"the base branch '{project.base}' has no commits yet")
@@ -551,6 +558,8 @@ def create_ticket(project, text, via="add", channel="session", parent=None, key=
         events = []
         if not lint(ticket) and ticket.tier == "AUTO":
             events.append(accepted_event(project, nn, ticket, "AUTO", "engine", "lint"))
+        elif not lint(ticket) and approved:
+            events.append(accepted_event(project, nn, ticket, ticket.tier, "person", "label", wait="APPROVE_CONTRACT"))
         events.insert(0, requested_event(nn, ticket, via, channel, **extra))
         files[events_path(nn)] = "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events)
         return gitx.commit_files(project.root, parent or base_tip, files, f"{nn}: add ticket: {ticket.title}")
@@ -1055,6 +1064,56 @@ def auto_intake(project, facts):
     return receipts
 
 
+def file_reverts(project, facts):
+    """The label rail:revert on a merged pull request files a ticket that reverts the ticket it merged, once: the
+    label comes off when the pull request has been looked at, whatever came of it. Only someone who may triage the
+    repository can set a label, so it is a person's word, and it approves the revert's contract. Returns receipts."""
+    from . import revert
+    from .forge import ENGINE_MARK, TRUSTED, ForgeError
+
+    forge = project.forge
+    if not (forge and forge.ok):
+        return []
+    receipts = []
+    try:
+        asked = forge.asked_reverts()
+    except ForgeError:
+        return []
+    for pr in asked:
+        number, key = pr["number"], f"revert#{pr['number']}"
+        sha = pr.get("merge_commit_sha")
+        target = next((f for f in facts.values() if sha and f.t.merged == sha), None) or \
+            facts.get(revert.branch_ticket((pr.get("head") or {}).get("ref")))
+        paths = revert.files(project, target.t.merged) if target and target.t.merged else []
+        filed = next((f.id for f in facts.values()
+                      if f.ticket and f.ticket.get("external_id") == key and f.state != "dropped"), None)
+        try:
+            if filed:
+                said = None  # a second label while its revert is open or merged asks for nothing new
+            elif not paths:
+                said = ("Rail filed no revert: this pull request merged no ticket's change to the project's files"
+                        " that the base branch still holds as one commit.")
+                receipts.append({"step": "revert", "status": "not_run",
+                                 "detail": f"pull request #{number} merged no ticket's change: nothing to reverse"})
+            else:
+                comments = revert.said_after_merge(forge.comments(number), pr.get("merged_at"), TRUSTED, ENGINE_MARK,
+                                                   strip_hidden)
+                text = revert.text(target.id, target.ticket.title if target.ticket else target.t.label,
+                                   target.t.merged, paths, number, comments)
+                nn, _, _ = create_ticket(project, text, via="revert", channel="github", key=key, approved=True)
+                if nn:
+                    receipts.append({"step": "revert", "status": "ran", "result": "pass",
+                                     "detail": f"ticket {nn} reverts ticket {target.id}, from pull request #{number}"})
+                    _, facts = load(project)
+                said = f"Rail filed ticket {nn}, which reverts this pull request's change." if nn else None
+            if said:
+                forge.comment(number, f"{said}\n\n{ENGINE_MARK}")
+            forge.remove_label(number, revert.LABEL)
+        except ForgeError:
+            continue  # GitHub is out of reach for a moment: the label stays, and the next run reads it again
+    return receipts
+
+
 def cmd_next(project, args):
     project.sync()
     task = init_task(project)
@@ -1065,16 +1124,23 @@ def cmd_next(project, args):
         return task
     tickets, facts = load(project)
     took_in = auto_intake(project, facts)
+    asked = file_reverts(project, facts)
+    took_in += asked
     if took_in or red_base_ticket(project, facts):
         tickets, facts = load(project)
     leftovers = cleanup(project, tickets, facts)
     explicit = requested(project, args)
     stop = next((s for s in project.forge.stops() if not s["paths"]), None)
-    if stop and not explicit:
-        # The whole repository is stopped: no ticket is looked at. With --ticket NN the ticket's own row says so.
+    stopped = None
+    if stop:
         from .table import stop_brief
-        return answer(owner="human", code="STOPPED", steps=took_in, leftovers=leftovers,
-                      action={"kind": "human_wait", "brief": stop_brief(stop, "any ticket")})
+        stopped = answer(owner="human", code="STOPPED", steps=took_in, leftovers=leftovers,
+                         action={"kind": "human_wait", "brief": stop_brief(stop, "any ticket")})
+    # The whole repository is stopped: no ticket is looked at, but a revert, which a brake never stops. With
+    # --ticket NN the ticket's own row says so.
+    reverting = any(f.revert and f.state not in ("merged", "dropped") for f in facts.values())
+    if stopped and not explicit and not reverting:
+        return stopped
     rest = day_budget(project, tickets)
     if rest:
         return dict(rest, steps=took_in, leftovers=leftovers)
@@ -1132,6 +1198,8 @@ def cmd_next(project, args):
                 continue  # another session noted it first: it writes this contract
             return from_facts(f, took_in + receipts, leftovers=leftovers)
 
+    if stopped:
+        return stopped  # the reverts that went on have nothing for an agent now
     tickets, facts = load(project)
     waits, held, ci, resting = [], [], [], []
     for f in facts.values():

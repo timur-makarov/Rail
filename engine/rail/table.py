@@ -118,6 +118,31 @@ def _implement(f):
     return "\n".join(lines) + _save_note(f) + _findings(f, "Open review findings:") + _note(f)
 
 
+def _revert(f):
+    """A revert ticket's work, where the engine couldn't leave it done."""
+    r, nn = f.revert, f.id
+    if not r["sha"]:
+        return (f"Ticket {nn} reverts ticket {r['ticket']}, and no commit on the base branch merged a ticket"
+                f" {r['ticket']}: there is nothing to reverse. `reverts` names the id of a merged ticket. End this"
+                f" one: rail drop {nn} --reason \"ticket {r['ticket']} was never merged\"")
+    short = r["sha"][:12]
+    head = f"Ticket {nn} reverts ticket {r['ticket']}: take its change (commit {short}) out again. Work in {f.cwd}."
+    if r["applies"] and not r["failed"]:
+        from .revert import RESTORE
+        return (f"{head}\nThe reverse of that change still applies as it is, and the worktree holds something else."
+                f" Put the exact reverse in its place:\n  git restore --source={r['base'][:12]} --staged --worktree -- .\n"
+                f"  {RESTORE.format(sha=short)}\nThen run: rail advance {nn}\nIf verify fails on it, later work depends"
+                " on what that change removes: adapt the revert by hand, inside scope_paths, and run rail advance"
+                f" {nn} again. A revert made by hand is accepted once verify has failed on the exact one."
+                + _save_note(f) + _note(f))
+    why = ("Verify failed on the exact reverse of that change: later work depends on what it removes." if r["failed"] else
+           "The reverse of that change no longer applies, because later tickets changed the same lines.")
+    return (f"{head}\n{why} Undo"
+            f" by hand what ticket {r['ticket']} changed, and keep the later work: `git show {short}` shows the change."
+            f" Change only paths inside scope_paths: {_join(f.ticket.scope)}.\nWhen the project holds without that"
+            f" change, run: rail advance {nn}" + _save_note(f) + _findings(f, "Open review findings:") + _note(f))
+
+
 def _split(f):
     e, nn = f.split, f.id
     return "\n".join([
@@ -432,6 +457,12 @@ ROWS = [
      _split),
     ("STEP_FAILED",        "agent", "agent_task",  lambda f: f.state == "implementing" and f.last_fail and not f.dirty,
      _step_failed),
+    # A revert ticket: the engine put the reverse into the worktree at the claim, so the ship is all that is left;
+    # where it couldn't, an agent undoes the change by hand.
+    ("REVERT_SHIP",        "agent", "script",      lambda f: f.state == "implementing" and f.revert and f.revert["exact"],
+     lambda f: f"rail advance {f.id}"),
+    ("REVERT",             "agent", "agent_task",  lambda f: f.state == "implementing" and f.revert,
+     _revert),
     ("IMPLEMENT",          "agent", "agent_task",  lambda f: f.state == "implementing",
      _implement),
     ("ANSWER_FINDINGS",    "agent", "agent_task",  lambda f: f.state == "reviewing" and f.ledger.unanswered(),

@@ -22,7 +22,8 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   the subagent returns (`rail docs cloud`). `rail work NN` has the engine start that worker itself, as it
   starts the reviewer, and record what the run cost (below).
 - `reason.code` names the situation, and `reason.message` says it in a sentence on a refusal. The codes an
-  agent meets most: `IMPLEMENT` (do the ticket's work), `VERIFY_ASSUMPTIONS` (open `ASSUMED:` rows),
+  agent meets most: `IMPLEMENT` (do the ticket's work), `REVERT_SHIP` and `REVERT` (a revert ticket: the reverse is
+  in the worktree and only the ship is left, or it has to be undone by hand; `rail docs tickets`), `VERIFY_ASSUMPTIONS` (open `ASSUMED:` rows),
   `TICKET_LINT` (fix the ticket), `STEP_FAILED` (a ship step failed; the output is in the brief),
   `ANSWER_FINDINGS`, `REBASING` and `CONFLICT`, `SPLIT`, `RED_BASE` (the base branch fails `verify`),
   `WAITING_AFTER` and `SCOPE_OVERLAP` (another ticket goes first), `AFTER_DROPPED` on an AUTO ticket (decide
@@ -120,7 +121,7 @@ lost.
 
 `rail work NN` runs one attempt at a ticket's agent work, the way `advance` runs the reviewer. It builds the
 brief `next` would give for the ticket, and runs only when that is a ticket's work: `TICKET_LINT`,
-`VERIFY_ASSUMPTIONS`, `IMPLEMENT`, `STEP_FAILED`, `RED_CHECK`, `ANSWER_FINDINGS`, `CONFLICT`, `REBASING`,
+`VERIFY_ASSUMPTIONS`, `IMPLEMENT`, `REVERT`, `STEP_FAILED`, `RED_CHECK`, `ANSWER_FINDINGS`, `CONFLICT`, `REBASING`,
 `SPLIT`, a sweep's `SWEEP_TICKETS` (`rail docs sweep`), or `AFTER_DROPPED` on an AUTO ticket. For any other
 answer, such as `SETUP_FAILED` or a `BUDGET` wait, it runs nothing and returns that answer, and so it does when
 `[worker] command` is empty. Over `[worker] daily_usd` it starts no worker and answers `BUDGET_DAY`.

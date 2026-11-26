@@ -5,7 +5,7 @@ Code cloud session, where `gh pr` and `gh issue` (GraphQL) don't work.
 
 ## One-time setup
 
-`rail init` creates the labels `rail`, `rail:go`, `rail:needs-you`, `rail:hold` and `rail:stop`, and writes
+`rail init` creates the labels `rail`, `rail:go`, `rail:needs-you`, `rail:hold`, `rail:stop` and `rail:revert`, and writes
 `.rail/ruleset.json`.
 The rest is yours, in the repository's settings; a cloud session can't change them:
 

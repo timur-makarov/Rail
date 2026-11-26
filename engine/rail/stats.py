@@ -43,7 +43,7 @@ def _merge_times(project, tickets):
 def _reverted(project, tickets):
     """The merged tickets whose squash commit a later commit on the base branch reverts. git revert writes "This
     reverts commit <sha>."; GitHub's Revert button opens a pull request whose squash says "Reverts owner/repo#N",
-    where N is the pull request the ticket merged with."""
+    where N is the pull request the ticket merged with; a revert ticket's squash carries a "Reverts: <sha>" trailer."""
     shas = {t.merged: nn for nn, t in tickets.items() if t.merged}
     if not shas:
         return set()
@@ -52,11 +52,12 @@ def _reverted(project, tickets):
         sha, _, subject = line.partition(" ")
         if sha in shas and (m := re.search(r"\(#(\d+)\)$", subject.strip())):
             prs[m.group(1)] = shas[sha]
-    log = gitx.out(["log", project.base_ref, "--grep=This reverts commit ", "--grep=^Reverts ", "--format=%B%x1e"],
+    log = gitx.out(["log", project.base_ref, "--grep=This reverts commit ", "--grep=^Reverts", "--format=%B%x1e"],
                    project.root)
     found = set()
     for body in log.split("\x1e"):
-        for sha in re.findall(r"This reverts commit ([0-9a-f]{7,40})", body):
+        for sha in re.findall(r"This reverts commit ([0-9a-f]{7,40})", body) + \
+                re.findall(r"^Reverts: ([0-9a-f]{7,40})\s*$", body, re.M):
             found |= {nn for full, nn in shas.items() if full.startswith(sha)}
         for number in re.findall(r"^Reverts \S+#(\d+)", body, re.M):
             found |= {prs[number]} if number in prs else set()

@@ -11,7 +11,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from railtest import ARCHITECTURE, CONFIG, Fixture, RailTest, ticket  # noqa: E402
 
-LABELS = ["rail", "rail:go", "rail:needs-you", "rail:hold", "rail:stop"]
+LABELS = ["rail", "rail:go", "rail:needs-you", "rail:hold", "rail:stop", "rail:revert"]
 
 
 def read(path):
@@ -32,7 +32,7 @@ class Init(RailTest):
         a, b, github = self.github_pair(init=False)
         done = a.rail("init")
         self.assertEqual(steps(done)["labels"], {"step": "labels", "status": "ran", "result": "pass",
-                                                 "detail": "created rail, rail:go, rail:needs-you, rail:hold, rail:stop"})
+                                                 "detail": "created rail, rail:go, rail:needs-you, rail:hold, rail:stop, rail:revert"})
         self.assertEqual(sorted(github.read()["labels"]), sorted(LABELS))
         again = a.rail("init")
         self.assertEqual(steps(again)["labels"]["detail"], "all three exist")

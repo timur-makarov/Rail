@@ -171,6 +171,9 @@ def handle(state, method, path, body):
     if rest == ["issues"] and method == "GET":
         found = [i for i in issues if i["state"] == query.get("state", "open")
                  and (not query.get("labels") or query["labels"] in i["labels"])]
+        # GitHub lists pull requests here too, each with a pull_request key.
+        found += [dict(p, pull_request={"merged_at": p.get("merged_at")}) for p in pulls
+                  if p["state"] == query.get("state", "open") and query.get("labels") and query["labels"] in p["labels"]]
         return paged(state, url, query, [dict(i, labels=[{"name": n} for n in i["labels"]]) for i in found])
     if len(rest) == 3 and rest[0] == "commits" and rest[2] == "check-runs":
         runs = state.setdefault("checks", {}).get(rest[1], [])

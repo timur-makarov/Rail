@@ -120,12 +120,34 @@ class Facts:
             self.pr = self.forge.merged_from(t.id)
         self.labels = self.forge.labels(self.pr) if self.pr else set()
         self.stopped = self._stop()
+        self.revert = self._revert(project)
         self._needs_review = None
         self.state = self._state()
 
+    def _revert(self, project):
+        """For a revert ticket with a worktree, what its brief says: the reverted ticket and its squash commit, whether
+        the worktree holds exactly the reverse of that change, whether the reverse still applies to the base, and
+        whether verify has failed on it."""
+        from . import revert
+        found = revert.target(project, self.ticket, project.tickets()) if self.ticket else None
+        if not found:
+            return None
+        nn, sha = found
+        tree = self.t.worktree if self.t.worktree and os.path.isdir(self.t.worktree) else None
+        if not sha or not tree:
+            return {"ticket": nn, "sha": sha, "exact": False, "applies": False, "failed": False}
+        base = gitx.git(["merge-base", project.base_ref, "HEAD"], tree, check=False).stdout.strip()
+        wanted = revert.exact(project, sha)
+        return {"ticket": nn, "sha": sha, "exact": revert.in_worktree(project, tree) == wanted,
+                "applies": bool(base) and revert.applies(project, sha, base), "base": base,
+                "failed": revert.failed_verify(self.t.events, wanted)}
+
     def _stop(self):
         """The rail:stop issue that stops this ticket, or None: one with no paths stops every ticket, one with paths
-        those whose scope can name a path the issue names."""
+        those whose scope can name a path the issue names. A revert ticket is never stopped: a brake can't block its
+        own way out."""
+        if self.ticket and self.ticket.get("kind") == "revert":
+            return None
         scope = self.ticket.scope if self.ticket else []
         for stop in (self.forge.stops() if self.forge else []):
             if not stop["paths"] or any(globs_overlap(a, b) for a in scope for b in stop["paths"]):

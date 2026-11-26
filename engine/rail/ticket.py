@@ -17,7 +17,9 @@ KINDS = ("data-loss", "data-shape", "data-exposure", "external-effect", "access"
 FIELDS = {
     "id": str, "title": str, "tier": str, "scope_paths": list, "after": list,
     "caused_by": str, "external_id": str, "reversibility": str, "rollback": str, "person_reason": str,
+    "kind": str, "reverts": str,
 }
+TICKET_KINDS = ("revert",)  # `kind`: a ticket whose contract is built in. A revert takes ticket `reverts` out again
 # The `## Grilling` record a bot or a session writes when it questioned the person who asked for the ticket.
 TOPICS = ("scope", "done", "behaviour", "tier", "out-of-scope", "other")
 TAKEN = ("accepted", "edited", "rejected", "answered")  # answered: there was no recommendation to take
@@ -230,9 +232,18 @@ def lint(ticket, expect_id=None):
         errors.append("a ticket can't come after itself")
     if not ticket.sections.get("Why"):
         errors.append("'## Why' is missing or empty")
+    kind = ticket.get("kind")
+    if kind is not None and kind not in TICKET_KINDS:
+        errors.append(f"kind must be one of {', '.join(TICKET_KINDS)}, or left out")
+    reverts = ticket.get("reverts")
+    if kind == "revert" and not (isinstance(reverts, str) and reverts.strip().isdigit()):
+        errors.append('a revert ticket needs reverts = "NN", the id of the merged ticket it takes out')
+    elif kind != "revert" and reverts is not None:
+        errors.append("'reverts' belongs to a ticket with kind = \"revert\"")
     if "Done Contract" not in ticket.sections:
         errors.append("'## Done Contract' is missing")
-    elif not ticket.check_lines():
+    elif not ticket.check_lines() and kind != "revert":
+        # A revert's check is built in: ship compares the change with the reverse of the reverted ticket's.
         errors.append("the Done Contract needs at least one '- Check: `command`' line")
     if any(_DECIDED_BARE.match(line) for line in ticket.sections.get("Assumptions", "").splitlines()):
         errors.append("a 'VERIFIED: decided, not checked:' row needs, after the colon, what you decided, your reason and"
