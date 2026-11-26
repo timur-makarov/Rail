@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv venv *)",
+      "Bash(uv pip install *)",
+      "Bash(uv tool install *)",
+      "Bash(uv sync *)",
+      "Bash(pip install *)",
+      "Bash(pip3 install *)",
+      "Bash(python3 -m pip install *)",
+      "Bash(npm install *)",
+      "Bash(npm ci *)",
+      "Bash(pnpm install *)",
+      "Bash(pnpm add *)",
+      "Bash(corepack enable *)",
+      "Bash(go install *)",
+      "Bash(go mod download *)",
+      "Bash(cargo install *)",
+      "Bash(cargo fetch *)",
+      "Bash(apt-get update *)",
+      "Bash(apt-get install *)",
+      "Bash(python3 tests/run.py *)",
+      "Bash(./install *)",
+      "Bash(bin/rail *)"
+    ]
+  }
+}

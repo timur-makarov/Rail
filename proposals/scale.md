@@ -9,6 +9,10 @@ doctor` on what a ticket branch can reach, doctor's tool lines and the candidate
 tools`, `rail docs retries`); and the kinds of wait, `approval`, `grant` and `hold` (`rail docs retries`). Nothing
 below is implemented, and nothing below was run.
 
+**Set aside by the owner on 2026-11-26.** Nothing on this page is built until the owner takes it up again.
+Other pages that wait for a part of it (the machine identity, read-only tools for the engine's agents, sources
+with a schedule) wait with it.
+
 Marks: **confirmed** means read in Rail's code or on the primary source while writing this; **reported**
 means a research agent read the primary source and it was not read again; **inferred** means it follows from
 those, with the reason given.
