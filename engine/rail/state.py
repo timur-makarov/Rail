@@ -139,18 +139,24 @@ class Facts:
 
         accepted_at = amended_at = shipped_at = continued_at = -1
         self.amend_reason = ""
+        spent = {}  # what the ticket's runs reported they cost since a person last acted, by what ran
         for i, e in enumerate(events):
             kind = e.get("event")
+            if e.get("cost_usd") and kind in ("worked", "step"):
+                what = (f"worker {e.get('model') or '(model not reported)'}" if kind == "worked"
+                        else e.get("step") or "?")
+                spent[what] = spent.get(what, 0.0) + e["cost_usd"]
             if passed is not None and not (kind == "step" and e.get("step") == passed):
                 settle()
                 passed = None
             if kind == "continued" or (kind == "accepted" and e.get("by") == "person"):
                 # A person's act gives a fresh budget and a fresh cap, whether it continues a wait or approves.
                 attempts, same, seen, consulted, since = {}, {}, {}, {}, i
-                if kind == "continued":
-                    continued_at = i
-                else:
+                spent = {}
+                if kind == "accepted":
                     accepted_at = i
+                elif e.get("wait") != "BUDGET":  # going on past the budget is no approval of the merge
+                    continued_at = i
             elif kind == "step" and e.get("status") in ("ran", "could_not_run"):
                 step = e.get("step")
                 if e.get("result") == "pass":
@@ -200,6 +206,10 @@ class Facts:
         runs = [e for e in events[since:] if e.get("event") == "step" and e.get("step") in ("review", "security", "refuter")]
         # Two review runs in a row with no verdict, timed out or with invalid output: neither counts against the author.
         self.stuck_review = len(runs) >= 2 and all(e.get("counted") is False for e in runs[-2:])
+        self.spent_by = {what: round(usd, 4) for what, usd in spent.items()}
+        self.spent = round(sum(spent.values()), 4)
+        limit = project.config["worker"]["ticket_usd"]
+        self.over_budget = bool(limit) and self.spent > limit
         self.amend_pending = amended_at > accepted_at
         self.merge_approved = continued_at > shipped_at >= 0
         # A person's note from `accept` goes into the agent's briefs until the next ship.

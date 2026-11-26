@@ -60,6 +60,10 @@ contract = "claude-opus-5-5:high"         # writing a ticket's contract (TICKET_
 command = '''claude -p --output-format stream-json --verbose ${RAIL_MODEL:+--model "$RAIL_MODEL"} ${RAIL_EFFORT:+--effort "$RAIL_EFFORT"} --permission-mode auto --permission-prompts none --max-turns 300 --max-budget-usd 15 --autocompact 400000 ${RAIL_SESSION:+--resume "$RAIL_SESSION"}'''
 timeout_minutes = 90                      # reader: work; one worker run, wall clock. Keep it under the Bash tool's
                                           # BASH_MAX_TIMEOUT_MS in .claude/settings.json
+ticket_usd = 40                           # reader: next; dollars the runs of one ticket (worker and review) may report
+                                          # since a person last acted before it waits for a person. 0: off
+daily_usd = 0                             # reader: next, work; dollars the runs of every ticket may report in 24 hours
+                                          # before next rests and work starts no worker. 0: off
 
 [sweep]
 after = 20                                # reader: next; changes merged with no review since the last sweep:

@@ -399,3 +399,125 @@ class AfterDropped(RailTest):
         after = p.rail("advance", "2")
         self.assertEqual(after["state"], "dropped")
         self.assertEqual(p.rail("next")["reason"]["code"], "NO_WORK")
+
+
+def budget(**caps):
+    return WORK + "".join(f"{key} = {value}\n" for key, value in caps.items())
+
+
+BROKEN = {"write": {"src/calc.py": "def add(a, b):\n    return a * b\n"}, "result": {"total_cost_usd": 1.5}}
+
+
+class Budget(RailTest):
+    def test_a_ticket_over_ticket_usd_waits_for_a_person_and_accept_starts_the_count_again(self):
+        p = self.fixture(config=budget(ticket_usd=1))
+        p.add(ticket())
+        p.rail("next")
+        p.queue_work(BROKEN)
+        self.assertEqual(p.rail("work", "1")["reason"]["code"], "WORKED")
+        waiting = p.rail("next", "--ticket", "1", expect=None)
+        self.assertEqual((waiting["owner"], waiting["reason"]["code"], waiting["action"]["kind"]),
+                         ("human", "BUDGET", "human_wait"))
+        self.assertIn("Ticket 1 has spent $1.50 since a person last acted, over [worker] ticket_usd ($1): worker"
+                      " claude-sonnet-5-5 $1.50.", waiting["action"]["brief"])
+        self.assertEqual(p.rail("work", "1", expect=None)["reason"]["code"], "BUDGET")  # and no worker starts
+        self.assertEqual(len(p.work_log()), 1)
+        p.rail("accept", "1")
+        continued = events(p, name="continued")
+        self.assertEqual([(e["via"], e["wait"]) for e in continued], [("accept", "BUDGET")])
+        self.assertEqual(p.rail("next")["reason"]["code"], "IMPLEMENT")  # the count starts again
+
+    def test_a_ticket_with_no_contract_yet_stops_too(self):
+        p = self.fixture(config=budget(ticket_usd=1))
+        request = os.path.join(self.tmp, "request.md")
+        with open(request, "w") as f:
+            f.write("add(2, 3) gives -1.\n")
+        p.rail("intake", "--external-id", "PROJ-7", "--title", "Fix add", "--brief", request)
+        self.assertEqual(p.rail("next")["reason"]["code"], "TICKET_LINT")
+        p.queue_work({"result": {"total_cost_usd": 1.5}})  # it spent the money and wrote no contract
+        p.rail("work", "1")
+        waiting = p.rail("next", "--ticket", "1", expect=None)
+        self.assertEqual((waiting["state"], waiting["reason"]["code"]), ("new", "BUDGET"))
+        p.rail("accept", "1")
+        after = p.rail("next", "--ticket", "1")
+        self.assertEqual((after["state"], after["reason"]["code"]), ("new", "TICKET_LINT"))  # it approved no contract
+
+    def test_going_on_past_the_budget_is_no_approval_of_the_merge(self):
+        p = self.fixture(config=budget(ticket_usd=0.015))
+        p.add(ticket(tier="PERSON"))
+        p.rail("accept", "1")
+        p.rail("next")
+        p.fix_calc("1")
+        p.queue_reviews({"summary": "Clean.", "findings": []}, {"summary": "Clean.", "findings": []})
+        stopped = p.rail("advance", "1", expect=None)  # the review and the security seat: $0.02
+        self.assertEqual(stopped["reason"]["code"], "BUDGET")
+        self.assertIn("review $0.01, security $0.01", stopped["action"]["brief"])
+        self.assertEqual(p.rail("accept", "1", expect=None)["reason"]["code"], "MERGE_BY_PERSON")
+        p.rail("accept", "1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
+
+    def test_rail_go_continues_a_budget_wait(self):
+        a, b, github = self.github_pair(config=budget(ticket_usd=1))
+        a.add(ticket())
+        a.rail("next")
+        a.queue_work(BROKEN)
+        a.rail("work", "1")
+        self.assertEqual(a.rail("next", "--ticket", "1", expect=None)["reason"]["code"], "BUDGET")
+        self.assertIn("rail:needs-you", github.pr(1)["labels"])
+        github.label(1, "rail:go")
+        self.assertEqual(a.rail("next")["reason"]["code"], "IMPLEMENT")
+        self.assertEqual([(e["via"], e["wait"]) for e in events(a, name="continued")], [("label", "BUDGET")])
+
+    def test_over_daily_usd_next_rests_and_work_refuses_until_the_runs_are_a_day_old(self):
+        p = self.fixture(config=budget(daily_usd=1))
+        p.add(ticket())
+        p.rail("next")
+        p.queue_work(BROKEN, BROKEN)
+        p.rail("work", "1")
+        rest = p.rail("next")
+        self.assertEqual((rest["owner"], rest["reason"]["code"], rest["action"]["kind"], rest["spent_usd"]),
+                         ("none", "BUDGET_DAY", "rest", 1.5))
+        self.assertIn("The runs of the last 24 hours reported $1.50, over [worker] daily_usd ($1). No ticket changed.",
+                      rest["action"]["brief"])
+        self.assertTrue(86000 < rest["wait_secs"] <= 86401)
+        self.assertEqual(p.rail("next", "--ticket", "1")["reason"]["code"], "BUDGET_DAY")
+        self.assertEqual(p.rail("work", "1")["reason"]["code"], "BUDGET_DAY")
+        self.assertEqual(len(p.work_log()), 1)
+        self.assertEqual(p.rail("status")["tickets"][0]["state"], "implementing")
+
+    def test_a_dropped_tickets_cost_stays_in_its_drop_mark_and_in_the_days_sum(self):
+        from test_stuck import mark
+        a, b, github = self.github_pair(config=budget(daily_usd=1))
+        a.add(ticket())
+        a.rail("next")
+        a.queue_work(BROKEN)
+        a.rail("work", "1")
+        a.rail("drop", "1", "--reason", "not needed")
+        note = mark(a)["dropped"]
+        self.assertEqual((note["by"], note["cost_usd"]), ("agent", 1.5))
+        b.rail("status")  # a clone that never had the ticket's branch: the mark is all it has
+        self.assertEqual(b.rail("next")["reason"]["code"], "BUDGET_DAY")
+
+
+class WorkerStats(RailTest):
+    def test_stats_count_worker_runs_by_rung_and_how_they_ended(self):
+        p = self.fixture(config=WORK)
+        p.add(ticket())
+        p.rail("next")
+        p.queue_work({"write": {"src/calc.py": "def add(a, b):\n    return a * b\n"},
+                      "result": {"subtype": "error_max_turns", "is_error": True, "total_cost_usd": 0.5}},
+                     {"write": {"src/calc.py": FIXED}, "result": {"total_cost_usd": 0.25}})
+        p.rail("work", "1", expect=None)
+        p.rail("advance", "1", expect=3)
+        p.rail("work", "1", expect=None)
+        p.queue_reviews({"summary": "Clean.", "findings": []})
+        p.rail("advance", "1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
+        answer = p.rail("stats")
+        runs = answer["stats"]["worker"]["runs"]  # the failed ship moved the second run one rung up
+        self.assertEqual({rung: (w["runs"], w["cost_usd"], w["turns"], w["budget"], w["timeout"]) for rung, w in runs.items()},
+                         {"claude-sonnet-5-5:medium": (1, 0.5, 1, 0, 0), "claude-sonnet-5-5:high": (1, 0.25, 0, 0, 0)})
+        auto = answer["stats"]["outcomes"]["tiers"]["AUTO"]
+        self.assertEqual((auto["worker_usd"], auto["review_usd"], auto["cost_per_ticket"]), (0.75, 0.01, 0.76))
+        self.assertIn("WORKER", answer["text"])
+        self.assertRegex(answer["text"], r"claude-sonnet-5-5:medium +1 +\$0\.50 +0m +1 +0 +0 +0 +0\n")

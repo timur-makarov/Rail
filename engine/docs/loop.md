@@ -30,8 +30,10 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   `DROP_PENDING`, `CI_WAIT`, `GITHUB_LIMIT` (GitHub's rate limit is used up: sleep as the script says, or come
   back at the time the brief names), `NO_WORK`. A person's turn is `APPROVE_CONTRACT`, `APPROVE_AMEND`,
   `MERGE_BY_PERSON`, and on a PERSON ticket `RETRY_CAP` (the retry budget or the cap), `FINDING_UPHELD` and
-  `AFTER_DROPPED`; `STUCK_REVIEW`, `HOLD` or `MERGE_FAILED`. Act on `owner` and `action`; the code is for
-  logs and for telling two briefs apart.
+  `AFTER_DROPPED`; `STUCK_REVIEW`, `HOLD` or `MERGE_FAILED`; and `BUDGET` (the ticket's runs cost more than
+  `[worker] ticket_usd` since a person last acted). `BUDGET_DAY` is a rest that lifts by itself: the runs of the
+  last 24 hours cost more than `[worker] daily_usd` (`rail docs retries`). Act on `owner` and `action`; the
+  code is for logs and for telling two briefs apart.
 - `guide` names the page `[guides]` gives for the brief's situation, such as the start of a ticket or a
   failure that repeats; the brief then ends with that page's text, or the sections the key names (`rail docs
   guides`). It is a hint, and part of the brief, so a subagent that gets the brief word for word gets the
@@ -118,8 +120,8 @@ lost.
 brief `next` would give for the ticket, and runs only when that is a ticket's work: `TICKET_LINT`,
 `VERIFY_ASSUMPTIONS`, `IMPLEMENT`, `STEP_FAILED`, `RED_CHECK`, `ANSWER_FINDINGS`, `CONFLICT`, `REBASING`,
 `SPLIT`, a sweep's `SWEEP_TICKETS` (`rail docs sweep`), or `AFTER_DROPPED` on an AUTO ticket. For any other
-answer, such as `SETUP_FAILED`, it runs nothing and returns that answer, and so it does when `[worker] command`
-is empty.
+answer, such as `SETUP_FAILED` or a `BUDGET` wait, it runs nothing and returns that answer, and so it does when
+`[worker] command` is empty. Over `[worker] daily_usd` it starts no worker and answers `BUDGET_DAY`.
 
 It runs `[worker] command` in the answer's `cwd` (the ticket's worktree, or the project's root for a
 contract), with the brief on stdin and one line added: reply in one line, and don't run `rail advance`. The

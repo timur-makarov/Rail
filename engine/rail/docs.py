@@ -74,6 +74,11 @@ READERS = {
     "worker.timeout_minutes": "work: one worker run's wall clock, after which the engine ends it and records"
                               " timeout. Keep it under the Bash tool's BASH_MAX_TIMEOUT_MS; rail doctor says when it"
                               " isn't",
+    "worker.ticket_usd": "next and every command that answers for a ticket: when the cost its worker and review runs"
+                         " reported since a person last acted passes this many dollars, the ticket waits for a person"
+                         " (BUDGET). 0 switches it off (rail docs retries)",
+    "worker.daily_usd": "next and work: while the cost every ticket's runs reported in the last 24 hours passes this"
+                        " many dollars, next rests and work starts no worker (BUDGET_DAY). 0 switches it off",
     "sweep.after": "next: changes merged with no review (tickets inside review.skip_paths, and commits with no"
                    " ticket) since the last sweep before one is offered",
     "sweep.every": "next: tickets merged since the last sweep, reviewed or not, before one is offered; it then"

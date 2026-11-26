@@ -200,7 +200,8 @@ ended (`rail docs stats`).
 - **A dropped ticket's journal** goes with its branch. Its ID, the title it was added with and the drop
   itself stay in the counter branch, so a dropped ticket stays dropped when its branch is deleted. The drop's
   mark is a `rail drop NN` commit whose message keeps the `requested` event with one more key, `dropped`: `by`,
-  `reason`, and from the engine `step` and `signature`. The mark is written before the worktree and branches
+  `reason`, `at`, `cost_usd` (what the ticket's worker and review runs reported, when they reported any), and
+  from the engine `step` and `signature`. The mark is written before the worktree and branches
   are removed and before the pull request is closed. When it can't be (offline, or a push refused other than by
   another clone's push), nothing is removed and the ticket rests as `DROP_PENDING` until a later `rail next`
   writes it and finishes the drop.

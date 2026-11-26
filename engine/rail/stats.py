@@ -176,7 +176,7 @@ def drops(tickets, start):
     """The dropped tickets requested on or after `start`: who dropped them, and for the engine's drops at the retry
     cap the step each stopped at. Read from the drop marks, which outlive the tickets' branches, and from the
     journal of a drop whose mark isn't written yet."""
-    by, steps_ = Counter(), Counter()
+    by, steps_, cost = Counter(), Counter(), 0.0
     for t in tickets.values():
         record = t.dropped_record or (t.last("dropped") if not t.merged else None)
         if not record:
@@ -187,7 +187,10 @@ def drops(tickets, start):
         by[record.get("by") or "?"] += 1
         if record.get("by") == "engine":
             steps_[record.get("step") or "?"] += 1
-    return {"total": sum(by.values()), "by": dict(sorted(by.items())), "stuck_steps": dict(sorted(steps_.items()))}
+        # The mark keeps what the ticket's runs reported; a drop whose mark isn't written yet still has its journal.
+        cost += record.get("cost_usd") or sum(_cost(t))
+    return {"total": sum(by.values()), "by": dict(sorted(by.items())), "stuck_steps": dict(sorted(steps_.items())),
+            "cost_usd": round(cost, 4)}
 
 
 def _held_a_kind(tickets):
@@ -315,6 +318,7 @@ def collect(project, tickets, since=None, states=None, now=None):
     outcomes = {tier: _outcome_row() for tier in TIERS}
     by_worker, by_profile, names_cause, counted = {}, {}, 0, []
     fixed_by_person, under = _held_a_kind(tickets), {"tickets": 0, "kinds": Counter()}
+    workers, acted = {}, {"tickets": 0, "cost_usd": 0.0}  # worker runs by model and effort; tickets a person acted on
     for nn, t in tickets.items():
         ships = [e for e in t.events if e.get("event") == "shipped"]
         tier = (ships[-1] if ships else t.last("accepted") or {}).get("tier")
@@ -349,6 +353,21 @@ def collect(project, tickets, since=None, states=None, now=None):
             side["reverted_or_fixed"] += nn in reverted or nn in caused
         counted.append(nn)
         review_usd, worker_usd = _cost(t)
+        if _acts(t):
+            acted["tickets"] += 1
+            acted["cost_usd"] += review_usd + worker_usd
+        for e in t.events:
+            if e.get("event") == "worked":
+                rung = ":".join(part for part in (e.get("model"), e.get("effort")) if part) or NO_MODEL
+                w = workers.setdefault(rung, {"runs": 0, "cost_usd": 0.0, "minutes": 0.0, "turns": 0, "budget": 0,
+                                              "timeout": 0, "error": 0, "resumed": 0, "resume_failed": 0})
+                w["runs"] += 1
+                w["cost_usd"] += e.get("cost_usd") or 0
+                w["minutes"] += e.get("minutes") or 0
+                if e.get("end") in ("turns", "budget", "timeout", "error"):
+                    w[e["end"]] += 1
+                w["resumed"] += bool(e.get("resumed"))
+                w["resume_failed"] += bool(e.get("resume_failed"))
         names_cause += bool(t.ticket and t.ticket.get("caused_by"))
         for out in (outcomes[tier], by_worker.setdefault(_worker_of(t), _outcome_row()),
                     *[by_profile.setdefault(name, _outcome_row()) for name in _profiles_of(project, t)]):
@@ -431,6 +450,10 @@ def collect(project, tickets, since=None, states=None, now=None):
         "outcomes": {"held_days": held_days, "tiers": {tier: _outcome_done(row) for tier, row in outcomes.items()},
                      "names_cause": names_cause, "by_worker": _split(by_worker), "by_profile": _split(by_profile)},
         "time": timing.collect(tickets, merged_at, counted),
+        # What rail work's runs on the merged tickets reported, by model and effort, and what the tickets a person
+        # acted on cost. A session a person drives records no cost.
+        "worker": {"runs": {name: _rounded(workers[name]) for name in sorted(workers)},
+                   "person_acted": {"tickets": acted["tickets"], "cost_usd": round(acted["cost_usd"], 4)}},
         "tiers": tiers, "raised": dict(raised), "drops": drops(tickets, start),
         # AUTO tickets a later PERSON ticket names as its cause, by that ticket's kinds: nobody was asked.
         "auto_held_a_kind": {"tickets": under["tickets"], "kinds": dict(sorted(under["kinds"].items()))},
@@ -539,10 +562,31 @@ def render_drops(data):
     if not found["total"]:
         return []
     line = f"Dropped: {found['total']}. " + _listed(found["by"], DROPPED_BY)
+    if found["cost_usd"]:
+        line += f" Their runs reported ${found['cost_usd']:.2f}."
     if found["stuck_steps"]:
         line += " The engine's drops, by the step that kept failing: " + ", ".join(
             f"{step} {n}" for step, n in found["stuck_steps"].items()) + "."
     return [line]
+
+
+def render_worker(data):
+    """What the worker runs of the merged tickets cost and how they ended, once rail work ran one."""
+    runs = data["worker"]["runs"]
+    if not runs:
+        return []
+    ends = ["turns", "budget", "timeout", "error"]
+    lines = ["", *_table(["WORKER", "runs", "cost", "time", "hit turns", "hit budget", "timed out", "errors", "resumed"], [
+        [name, w["runs"], f"${w['cost_usd']:.2f}", _span(w["minutes"]), *[w[end] for end in ends], w["resumed"]]
+        for name, w in runs.items()])]
+    failed = sum(w["resume_failed"] for w in runs.values())
+    if failed:
+        lines.append(f"Runs that could not resume their session and started fresh: {failed}.")
+    acted = data["worker"]["person_acted"]
+    if acted["tickets"]:
+        lines.append(f"Merged tickets a person acted on: {acted['tickets']}, whose runs reported"
+                     f" ${acted['cost_usd']:.2f}.")
+    return lines
 
 
 def render_sources(data):
@@ -643,6 +687,7 @@ def render(data):
         lines.append(f"Consult ran {data['consults']} times.")
     lines += render_guides(data)
     lines += timing.render(data["time"], _table)
+    lines += render_worker(data)
     if not review["roles"]:
         return "\n".join(lines + ["", "No review ran.", *render_sources(data), *render_grilling(data)])
     roles = review["roles"]

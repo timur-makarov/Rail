@@ -108,7 +108,8 @@ class DropPending(RailTest):
         back()
         a.rail("next")
         self.assertFalse(os.path.exists(a.worktree("1")))
-        self.assertEqual(mark(a)["dropped"], {"by": "agent", "reason": "not needed"})
+        self.assertEqual({k: mark(a)["dropped"].get(k) for k in ("by", "reason", "cost_usd")},
+                         {"by": "agent", "reason": "not needed", "cost_usd": None})  # no run reported a cost
 
 
 class AfterDropped(RailTest):
@@ -140,4 +141,5 @@ class AfterDropped(RailTest):
         dropped = self.p.rail("drop", "2", "--reason", "it only made sense with the status code")
         self.assertEqual(dropped["state"], "dropped")
         note = open(self.p.path(".git", "rail", "ids", "2.dropped")).read()
-        self.assertEqual(json.loads(note)["dropped"], {"by": "agent", "reason": "it only made sense with the status code"})
+        dropped = json.loads(note)["dropped"]
+        self.assertEqual((dropped["by"], dropped["reason"]), ("agent", "it only made sense with the status code"))

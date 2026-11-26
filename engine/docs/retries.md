@@ -25,6 +25,22 @@ tried and why it stopped; and removes the worktree and branches. The closed pull
 GitHub. To try again, label the issue `rail` again. A PERSON ticket that is stuck waits for a person
 (`RETRY_CAP`): a person is there anyway.
 
+**Spending has two caps of its own.** They are sums of what the runs reported (`cost_usd` on the `worked`
+events of `rail work` and on the review, security, refuter and sweep steps): the CLI's own estimate, not the
+bill. Consult records no cost, and neither does a session a person drives.
+
+- `[worker] ticket_usd` (40 by default; 0 switches it off) bounds one ticket. When its runs since a person
+  last acted cost more, the ticket waits for a person (`BUDGET`) in whatever state it is, a ticket with no
+  contract yet included, and the brief gives the sum by what ran. This holds on AUTO too: money spent is not
+  undone by a revert. `rail accept NN` or `rail:go` lets it go on and starts the count again, as either gives
+  a fresh retry cap; that answer approves nothing else, so a contract or a merge that waits still waits.
+  `rail drop NN --by person` ends it. A rebase that is open in the worktree is finished first.
+- `[worker] daily_usd` (0 by default: off) bounds every ticket together. While the runs of the last 24 hours
+  cost more, `rail next` rests (`BUDGET_DAY`) and `rail work` starts no worker. No ticket changes state, and
+  the rest lifts by itself as the runs get older: the answer's `wait_secs` and its brief say when. A dropped
+  ticket's journal goes with its branch, so its drop mark keeps its cost, and the day's sum counts all of it
+  when the drop was in the last 24 hours.
+
 **The mark comes first.** When the counter branch can't be pushed (offline, or a push refused other than by
 another clone's push), nothing is removed or closed: the ticket rests as `DROP_PENDING` until a later
 `rail next` writes the mark and finishes the drop. `rail drop` works the same way.

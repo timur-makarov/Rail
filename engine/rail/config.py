@@ -38,7 +38,8 @@ DEFAULTS = {
     "claim": {"stale_minutes": 30, "save_minutes": 10},
     "worker": {"ladder": ["claude-sonnet-5-5:medium", "claude-sonnet-5-5:high", "claude-opus-5-5:medium"],
                "person_ladder": ["claude-opus-5-5:medium", "claude-opus-5-5:high"],
-               "contract": "claude-opus-5-5:high", "command": WORKER_COMMAND, "timeout_minutes": 90},
+               "contract": "claude-opus-5-5:high", "command": WORKER_COMMAND, "timeout_minutes": 90,
+               "ticket_usd": 40.0, "daily_usd": 0.0},
     "sweep": {"after": 20, "every": 20},
     "stats": {"held_days": 14},
     "map": {"depth": 1, "ignore": []},
@@ -73,8 +74,10 @@ def _check(value, default, where):
                 raise RailError(f"config: unknown key '{where}.{key}'{_suggest(key, default)}")
             merged[key] = _check(item, default[key], f"{where}.{key}")
         return merged
+    if isinstance(default, float) and isinstance(value, int) and not isinstance(value, bool):
+        return float(value)  # an amount of money: 40 is as good as 40.0
     if isinstance(value, bool) != isinstance(default, bool) or not isinstance(value, type(default)):
-        raise RailError(f"config: {where} must be {type(default).__name__}")
+        raise RailError(f"config: {where} must be {'a number' if isinstance(default, float) else type(default).__name__}")
     if isinstance(default, list) and not all(isinstance(v, str) for v in value):
         raise RailError(f"config: {where} must be a list of strings")
     return value

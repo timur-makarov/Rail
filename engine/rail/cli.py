@@ -17,7 +17,7 @@ from .table import TRANSITIONS, first_match
 from .ticket import TIERS, Ticket, branch_name, highest, lint, rank, with_field, with_id, with_tier
 from .forge import ENGINE_MARK, TRUSTED, ForgeError, RateLimited
 from .hidden import strip_hidden
-from .util import RailError, age, cloud, could_not_run, disposable, match_any, session_url, shell
+from .util import RailError, age, cloud, could_not_run, disposable, match_any, parse_iso, session_url, shell
 
 VERBS = ("init", "add", "adopt", "accept", "amend", "answer", "next", "advance", "status", "context", "drop", "doctor", "ci",
          "consult", "docs", "intake", "sweep", "source", "provision", "save", "stats", "work")
@@ -52,6 +52,38 @@ def github_limit(e):
     result["reason"]["message"] = str(e)
     result["wait_secs"] = wait
     return result
+
+
+def day_budget(project, tickets):
+    """The BUDGET_DAY rest when the runs of the last 24 hours reported more than [worker] daily_usd, else None. The
+    sum is over every ticket's worker and review runs, and over a dropped ticket's whole cost when it was dropped in
+    that time (its journal went with its branch; the drop mark keeps the sum). It lifts by itself as runs get older."""
+    import time
+
+    limit = project.config["worker"]["daily_usd"]
+    if not limit:
+        return None
+    now, costs = time.time(), []
+    for t in tickets.values():
+        found = [e for e in t.events if e.get("event") in ("worked", "step")] or [t.dropped_record or {}]
+        for e in found:
+            if e.get("cost_usd") and e.get("at"):
+                costs.append((parse_iso(e["at"]).timestamp(), e["cost_usd"]))
+    recent = sorted(c for c in costs if c[0] > now - 86400)
+    total = left = sum(usd for _, usd in recent)
+    if total <= limit:
+        return None
+    lifts = now
+    for at, usd in recent:
+        left -= usd
+        if left <= limit:
+            lifts = at + 86400
+            break
+    back = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(lifts))
+    return answer(code="BUDGET_DAY", wait_secs=max(1, int(lifts - now) + 1), spent_usd=round(total, 2), action={
+        "kind": "rest", "brief": f"The runs of the last 24 hours reported ${total:.2f}, over [worker] daily_usd"
+                                 f" (${limit:g}). No ticket changed. It lifts by itself at about {back}: run rail next"
+                                 " after that."})
 
 
 def worker(f, action, code=None):
@@ -361,7 +393,7 @@ def transition(project, f, code):
         note = person_comments(project, f) or None
         ensure_local(project, t)
         waited = wait_code(f)
-        if f.state == "new" or f.amend_pending:
+        if waited != "BUDGET" and (f.state == "new" or f.amend_pending):
             record = accepted_event(project, t.id, f.ticket, f.tier, "person", "label", note, wait=waited)
         else:
             record = event(t.id, "continued", via="label", **({"wait": waited} if waited else {}),
@@ -744,7 +776,10 @@ def cmd_accept(project, args):
     f = facts[nn]
     note = args.note or None
     waited = wait_code(f)  # with a rail:go already on the pull request the table reads that label first: left out here
-    if f.state == "new":
+    if waited == "BUDGET":
+        # Going on past the budget approves nothing else: a contract or an amend that waits still waits.
+        events = [event(nn, "continued", via="accept", wait=waited, **({"note": note} if note else {}))]
+    elif f.state == "new":
         if f.lint_errors:
             raise RailError(f"ticket {nn} fails ticket lint: {'; '.join(f.lint_errors)}", code="TICKET_LINT")
         events = [accepted_event(project, nn, f.ticket, f.tier, "person", "accept", note, wait=waited)]
@@ -1031,6 +1066,9 @@ def cmd_next(project, args):
     if took_in or red_base_ticket(project, facts):
         tickets, facts = load(project)
     leftovers = cleanup(project, tickets, facts)
+    rest = day_budget(project, tickets)
+    if rest:
+        return dict(rest, steps=took_in, leftovers=leftovers)
     explicit = requested(project, args)
     if explicit:
         nn = project.find(explicit, tickets).id
@@ -1486,7 +1524,10 @@ def finish_drop(project, f, receipts):
     refused other than by a race): the ticket then keeps everything and rests as DROP_PENDING."""
     kept = next((e for e in f.t.events if e.get("event") == "requested"), None)
     last = f.t.last("dropped") or {}
-    dropped = {k: last[k] for k in ("by", "reason", "step", "signature") if last.get(k)}
+    dropped = {k: last[k] for k in ("by", "reason", "step", "signature", "at") if last.get(k)}
+    cost = round(sum(e.get("cost_usd") or 0 for e in f.t.events if e.get("event") in ("worked", "step")), 4)
+    if cost:
+        dropped["cost_usd"] = cost  # the journal goes with the branch: this is all that is left of what it cost
     note = dict(kept or {}, dropped=dropped) if kept or dropped else None
     if not project.mark_dropped(f.id, json.dumps(note, separators=(",", ":")) if note else ""):
         receipts.append({"step": "drop-mark", "status": "unavailable",
@@ -1576,6 +1617,9 @@ def cmd_work(project, args):
         raise RailError("which ticket? Run rail work NN")
     nn = project.find(key, project.tickets()).id
     work.flush(project, nn)
+    rest = day_budget(project, project.tickets())
+    if rest:
+        return rest  # no worker starts while the day's spend is over its cap
     f, receipts = settle(project, nn, explicit=False)
     if f is None:
         return answer(nn, None, "none", {"kind": "rest", "brief": f"Another session claimed ticket {nn} first."},

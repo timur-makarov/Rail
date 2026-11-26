@@ -15,6 +15,10 @@ MERGE_PATIENCE = 600  # seconds a requested merge may take before a person looks
 OPEN = ("implementing", "reviewing", "in-ci", "merge-ready")
 
 
+def _spent(f):
+    return ", ".join(f"{what} ${usd:.2f}" for what, usd in sorted(f.spent_by.items(), key=lambda x: -x[1]))
+
+
 def _join(items):
     return ", ".join(items)
 
@@ -303,6 +307,16 @@ ROWS = [
      lambda f: f"A rebase is under way in {f.cwd} (ticket {f.id}, branch {f.t.branch}). Finish it there: resolve each"
                f" conflicted file, git add it, then git rebase --continue. To give the rebase up: git rebase --abort."
                f" Then run: rail advance {f.id}\nRail writes nothing to the ticket until the rebase has ended."),
+    # A ticket whose runs cost more than [worker] ticket_usd since a person last acted stops in every state, before
+    # any row that sends an agent to it. A person's answer comes first, so it can go on.
+    ("GO",                 "agent", "script",      lambda f: f.over_budget and "rail:go" in f.labels
+                                                   and f.state not in ("merged", "dropped"),
+     lambda f: f"rail next --ticket {f.id}"),
+    ("BUDGET",             "human", "human_wait",  lambda f: f.over_budget and f.state not in ("merged", "dropped"),
+     lambda f: f"Ticket {f.id} has spent ${f.spent:.2f} since a person last acted, over [worker] ticket_usd"
+               f" (${f.project.config['worker']['ticket_usd']:g}): {_spent(f)}. These are the costs the runs reported,"
+               f" not the bill. To let it go on, with the count starting again: rail accept {f.id}, or the rail:go label"
+               f" on its pull request. To end it: rail drop {f.id} --by person"),
     # One session writes a contract: four that start at once would each send a worker to write the same one.
     ("CONTRACT_ELSEWHERE", "none",  "rest",        lambda f: f.state == "new" and f.lint_errors and f.drafted_elsewhere
                                                    and not f.explicit,

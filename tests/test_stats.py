@@ -424,6 +424,6 @@ class Responsibility(RailTest):
         b.rail("status")  # another clone, which never had the branches
         answer = b.rail("stats")
         self.assertEqual(answer["stats"]["drops"], {"total": 3, "by": {"agent": 1, "engine": 1, "person": 1},
-                                                    "stuck_steps": {"checks": 1}})
+                                                    "stuck_steps": {"checks": 1}, "cost_usd": 0.0})
         self.assertIn("Dropped: 3. By the engine at the retry cap 1, by an agent 1, by a person 1. The engine's drops,"
                       " by the step that kept failing: checks 1.", answer["text"])
