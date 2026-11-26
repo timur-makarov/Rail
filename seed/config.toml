@@ -91,7 +91,7 @@ save_minutes = 10                         # reader: advance, rail save and rail 
                                           # .claude/settings.json; keep the two the same
 
 [consult]                                 # reader: the consult pack; read-only, with the brief on stdin
-command = "claude -p --safe-mode --effort high --tools Read,Grep,Glob"
+command = "claude -p --safe-mode --effort high --autocompact 400000 --tools Read,Grep,Glob"
 model = "claude-fable-5-2"                # the model consult runs on; empty is the CLI's default. The effort is
                                           # --effort in the command
                                           # point it at another vendor's CLI when you have one; claude is labelled same-model
