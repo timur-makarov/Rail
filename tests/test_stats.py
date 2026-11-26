@@ -1,5 +1,6 @@
 """rail stats: what the journals of merged tickets say about the work and about the reviewer."""
 
+import json
 import os
 import sys
 from types import SimpleNamespace
@@ -301,3 +302,80 @@ class Outcomes(RailTest):
         self.assertEqual((split["big"]["reverted"], split["big"]["cost_per_ticket"]), (1, 0.2))
         self.assertEqual((split["other"]["merged"], split["other"]["caused_fix"], split["other"]["acts"]["total"]), (3, 1, 3))
         self.assertEqual(stats._split({"small": dict(stats._outcome_row(), merged=4, acts=[0] * 4)}), {})
+
+
+def at(minute):
+    return f"2026-03-01T{10 + minute // 60:02d}:{minute % 60:02d}:00Z"
+
+
+def timed(*events):
+    """A journal whose events are (minute, kind, fields)."""
+    return SimpleNamespace(ticket=None, events=[{"event": kind, "at": at(minute), **fields} for minute, kind, fields in events])
+
+
+class WhereTheTimeGoes(RailTest):
+    def test_the_lines_come_from_the_journals_with_their_medians_and_shares(self):
+        engine()
+        from rail import timing
+        from rail.util import parse_iso
+
+        def merged(minute):
+            return parse_iso(at(minute)).timestamp()
+
+        tickets = {
+            # 1: accepted at once, claimed at 2, shipped at 20, merged at 30. Its rebase after the ship took 30s.
+            "1": timed((0, "requested", {}), (0, "accepted", {"by": "engine", "scope_paths": ["src/**"]}),
+                       (2, "claimed", {}), (10, "step", {"step": "checks", "duration_ms": 60000}),
+                       (20, "shipped", {}), (25, "step", {"step": "rebase", "duration_ms": 30000})),
+            # 2: the same scope, accepted at 5 while 1 was claimed, so it rested until 1 merged: claimed at 32.
+            "2": timed((5, "requested", {}), (5, "accepted", {"by": "engine", "scope_paths": ["src/calc.py"]}),
+                       (32, "claimed", {}), (40, "step", {"step": "checks", "duration_ms": 180000}),
+                       (45, "shipped", {}), (95, "continued", {"wait": "MERGE_BY_PERSON"})),
+            # 3: another scope, a PERSON ticket whose contract waited 20 minutes for its approval.
+            "3": timed((10, "requested", {}), (30, "accepted", {"by": "person", "scope_paths": ["api/**"]}),
+                       (31, "claimed", {}), (50, "worked", {"minutes": 12.0}), (50, "shipped", {})),
+            # 4: not merged, and claimed after the others: it held nothing back.
+            "4": timed((0, "requested", {}), (0, "accepted", {"by": "engine", "scope_paths": ["src/**"]}),
+                       (200, "claimed", {})),
+        }
+        merged_at = {"1": merged(30), "2": merged(100), "3": merged(60)}
+        found = timing.collect(tickets, merged_at, ["1", "2", "3"])
+        rows = {row["key"]: row for row in found["lines"]}
+        # Request to merge: 30, 95 and 50 minutes, 175 in all.
+        self.assertEqual((found["tickets"], found["request_to_merge_secs"]), (3, 3000.0))
+        self.assertEqual((rows["claim_behind_overlap"]["count"], rows["claim_behind_overlap"]["median_secs"],
+                          rows["claim_behind_overlap"]["share"]), (1, 1620.0, round(27 / 175, 3)))
+        self.assertEqual((rows["claim"]["count"], rows["claim"]["median_secs"]), (2, 90.0))  # 2 minutes and 1
+        self.assertEqual((rows["step:checks"]["count"], rows["step:checks"]["median_secs"],
+                          rows["step:checks"]["per_ticket_secs"]), (2, 120.0, 80.0))
+        self.assertEqual((rows["shipped_to_merged"]["median_secs"], rows["shipped_to_merged"]["share"]),
+                         (600.0, round(75 / 175, 3)))  # 10, 55 and 10 minutes
+        self.assertEqual((rows["person:MERGE_BY_PERSON"]["median_secs"], rows["person:MERGE_BY_PERSON"]["share"]),
+                         (3000.0, round(50 / 175, 3)))
+        self.assertEqual(rows["person:APPROVE_CONTRACT"]["median_secs"], 1200.0)  # an older journal names no wait
+        self.assertEqual(rows["worker"]["median_secs"], 720.0)
+        self.assertEqual(found["rebases_after_ship"], 0.33)
+        self.assertEqual(found["lines"][0]["key"], "shipped_to_merged")  # the slowest line first
+        shares = [row["share"] for row in found["lines"]]
+        self.assertEqual(shares, sorted(shares, reverse=True))
+
+    def test_a_persons_act_records_the_wait_it_answered_and_stats_print_the_lines(self):
+        p = self.fixture()
+        p.add(ticket(title="Add a status code", tier="PERSON", scope=("api/**",), check="grep -q 201 api/handlers.py"))
+        p.rail("accept", "1")
+        p.rail("next")
+        p.write("api/handlers.py", "def handle():\n    return 201\n", base=p.worktree("1"))
+        p.queue_reviews(clean(), clean())
+        self.assertEqual(p.rail("advance", "1")["reason"]["code"], "MERGE_BY_PERSON")
+        p.rail("accept", "1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
+        events = [json.loads(line) for line in p.git("show", "main:.rail/journal/1-events.jsonl").splitlines()]
+        self.assertEqual([e["wait"] for e in events if e["event"] in ("accepted", "continued")],
+                         ["APPROVE_CONTRACT", "MERGE_BY_PERSON"])
+        answer = p.rail("stats")
+        keys = [row["key"] for row in answer["stats"]["time"]["lines"]]
+        for key in ("claim", "shipped_to_merged", "step:checks", "step:review", "person:APPROVE_CONTRACT",
+                    "person:MERGE_BY_PERSON"):
+            self.assertIn(key, keys)
+        self.assertIn("WHERE THE TIME GOES", answer["text"])
+        self.assertIn("waiting for a person, MERGE_BY_PERSON", answer["text"])

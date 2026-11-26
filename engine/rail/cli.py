@@ -304,15 +304,20 @@ def person_comments(project, f):
     return "\n".join(s for s in said if s)  # what GitHub hides in a comment, its reader didn't write for the agent
 
 
-def answers_wait(f):
-    """Whether a rail:go on the ticket answers a wait for a person: what the table says with the label left out."""
-    if "rail:go" not in f.labels:
-        return False
+def wait_code(f):
+    """The code of the wait for a person the ticket is at, or "": what the table says with a rail:go left out. A
+    person's act records it, so rail stats can say which waits take the time."""
     labels, f.labels = f.labels, f.labels - {"rail:go"}
     try:
-        return first_match(f)[1] == "human"
+        code, owner, _ = first_match(f)
+        return code if owner == "human" else ""
     finally:
         f.labels = labels
+
+
+def answers_wait(f):
+    """Whether a rail:go on the ticket answers a wait for a person."""
+    return "rail:go" in f.labels and bool(wait_code(f))
 
 
 def transition(project, f, code):
@@ -346,7 +351,7 @@ def transition(project, f, code):
             t.branch, t.ref = name, f"refs/heads/{name}"
         ensure_local(project, t)
         restart_on_base(project, f, run)
-        run.events.append(accepted_event(project, t.id, f.ticket, f.tier, "person", "merge"))
+        run.events.append(accepted_event(project, t.id, f.ticket, f.tier, "person", "merge", wait="APPROVE_CONTRACT"))
         project.append_events(t, run.events, "accept: the contract was merged")
         run.events = []
         run.steps.append({"step": "contract", "status": "ran", "result": "pass",
@@ -355,11 +360,12 @@ def transition(project, f, code):
         # A person's rail:go: it approves a contract or an amend, or continues any other wait.
         note = person_comments(project, f) or None
         ensure_local(project, t)
-        waited = answers_wait(f)
+        waited = wait_code(f)
         if f.state == "new" or f.amend_pending:
-            record = accepted_event(project, t.id, f.ticket, f.tier, "person", "label", note)
+            record = accepted_event(project, t.id, f.ticket, f.tier, "person", "label", note, wait=waited)
         else:
-            record = event(t.id, "continued", via="label", **({"note": note} if note else {}))
+            record = event(t.id, "continued", via="label", **({"wait": waited} if waited else {}),
+                           **({"note": note} if note else {}))
         project.append_events(t, [record], "continue")
         for label in ("rail:go", "rail:needs-you", "rail:hold"):
             project.forge.remove_label(f.pr["number"], label)
@@ -718,11 +724,13 @@ def cmd_intake(project, args):
                           **({"command": "rail next"} if created else {})}, created=created, skipped=skipped)
 
 
-def accepted_event(project, nn, ticket, tier, by, via, note=None):
+def accepted_event(project, nn, ticket, tier, by, via, note=None, wait=""):
     """An accepted event. It also keeps the scope and the Done Contract's own hash, so amend can say what changed,
-    and the kinds the ticket holds (rail docs kinds)."""
+    and the kinds the ticket holds (rail docs kinds). `wait` is the code of the wait a person's approval answered."""
     fields = {"by": by, "via": via, "tier": tier, "contract": ticket.contract_hash(), "done": ticket.done_hash(),
               "scope_paths": sorted(ticket.scope), "kinds": ticket_kinds(project, ticket)}
+    if wait:
+        fields["wait"] = wait
     if note:
         fields["note"] = note
     return event(nn, "accepted", **fields)
@@ -735,15 +743,15 @@ def cmd_accept(project, args):
     nn = project.find(args.ticket or requested(project, args), tickets).id
     f = facts[nn]
     note = args.note or None
+    waited = wait_code(f)  # with a rail:go already on the pull request the table reads that label first: left out here
     if f.state == "new":
         if f.lint_errors:
             raise RailError(f"ticket {nn} fails ticket lint: {'; '.join(f.lint_errors)}", code="TICKET_LINT")
-        events = [accepted_event(project, nn, f.ticket, f.tier, "person", "accept", note)]
+        events = [accepted_event(project, nn, f.ticket, f.tier, "person", "accept", note, wait=waited)]
     elif f.amend_pending:
-        events = [accepted_event(project, nn, f.ticket, f.tier, "person", "accept", note)]
-    elif f.state in OPEN and (first_match(f)[1] == "human" or answers_wait(f)):
-        # With a rail:go already on the pull request the table reads that label first: it is the same answer.
-        events = [event(nn, "continued", via="accept", **({"note": note} if note else {}))]
+        events = [accepted_event(project, nn, f.ticket, f.tier, "person", "accept", note, wait=waited)]
+    elif f.state in OPEN and waited:
+        events = [event(nn, "continued", via="accept", wait=waited, **({"note": note} if note else {}))]
     else:
         raise RailError(f"ticket {nn} is {f.state}, and nothing waits for a person", code="NOTHING_TO_ACCEPT")
     ensure_local(project, f.t)

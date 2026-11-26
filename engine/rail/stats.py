@@ -10,7 +10,7 @@ import statistics
 import time
 from collections import Counter
 
-from . import gitx
+from . import gitx, timing
 from .project import events_path, parse_events, review_path
 from .review import Ledger, load_doc
 from .state import SHIP_STEPS
@@ -280,7 +280,7 @@ def collect(project, tickets, since=None, states=None, now=None):
     held_days = project.config["stats"]["held_days"]
     old = (now if now is not None else time.time()) - held_days * 86400
     outcomes = {tier: _outcome_row() for tier in TIERS}
-    by_worker, by_profile, names_cause = {}, {}, 0
+    by_worker, by_profile, names_cause, counted = {}, {}, 0, []
     for nn, t in tickets.items():
         ships = [e for e in t.events if e.get("event") == "shipped"]
         tier = (ships[-1] if ships else t.last("accepted") or {}).get("tier")
@@ -310,6 +310,7 @@ def collect(project, tickets, since=None, states=None, now=None):
             side = sizes["over" if ships[-1]["size"] > cap else "under"]
             side["merged"] += 1
             side["reverted_or_fixed"] += nn in reverted or nn in caused
+        counted.append(nn)
         review_usd, worker_usd = _cost(t)
         names_cause += bool(t.ticket and t.ticket.get("caused_by"))
         for out in (outcomes[tier], by_worker.setdefault(_worker_of(t), _outcome_row()),
@@ -392,6 +393,7 @@ def collect(project, tickets, since=None, states=None, now=None):
         "since": since, "merged": merged, "left_out": len(tickets) - merged,
         "outcomes": {"held_days": held_days, "tiers": {tier: _outcome_done(row) for tier, row in outcomes.items()},
                      "names_cause": names_cause, "by_worker": _split(by_worker), "by_profile": _split(by_profile)},
+        "time": timing.collect(tickets, merged_at, counted),
         "tiers": tiers, "raised": dict(raised),
         "base_checks": base, "adopted": adopted, "split": split, "size": {"cap": cap, **sizes},
         "guides": {"situations": dict(sorted(situations.items()))},
@@ -581,6 +583,7 @@ def render(data):
     if data["consults"]:
         lines.append(f"Consult ran {data['consults']} times.")
     lines += render_guides(data)
+    lines += timing.render(data["time"], _table)
     if not review["roles"]:
         return "\n".join(lines + ["", "No review ran.", *render_sources(data), *render_grilling(data)])
     roles = review["roles"]

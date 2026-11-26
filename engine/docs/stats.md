@@ -41,6 +41,16 @@ STEPS THAT FAILED  runs  failed  could not run
 checks                5       1              0
 review                3       1              0
 
+WHERE THE TIME GOES                                   times  median  for each ticket  share
+first ship to merge                                       3     12m              31m    45%
+waiting for a person, MERGE_BY_PERSON                     1   1h02m              21m    30%
+worker run (rail work), each run                          4     14m              19m    27%
+waiting for a person, APPROVE_CONTRACT                    1     25m               8m    12%
+step review, each run                                     3      3m               3m     4%
+step checks, each run                                     5     40s               1m     2%
+accepted to claimed, with no overlapping ticket open      3      1m               1m     1%
+Share: of the time from request to merge, median 58m over 3 tickets. The lines overlap, so the shares don't add up to 100%.
+
 REVIEW    runs   cost  time
 review       3  $1.23    9m
 security     1  $0.38    3m
@@ -86,6 +96,12 @@ PERSON tickets where the person changed nothing, by why they were PERSON: at add
 | `Became PERSON at ship or review` | `tier_raised` events, by reason: `kinds`, `person_paths`, `migration_paths`, `reviewer` (`size` from an older engine). Such a ticket counts under PERSON |
 | `STEPS THAT FAILED` | For each step that failed at least once: its runs, the failed ones, and the ones the shell couldn't start |
 | `Consult ran` | `consulted` events |
+| `WHERE THE TIME GOES` | What the merged tickets' time went on, the largest share first. Every line is read from events that already exist, so nothing is timed for it. `times` is how often it happened, `median` its median length, `for each ticket` its total divided by the merged tickets, and `share` its total divided by the tickets' time from request to merge. In JSON, `time`: `tickets`, `request_to_merge_secs` (the median), `rebases_after_ship`, and `lines`, each with `key`, `label`, `count`, `median_secs`, `per_ticket_secs` and `share` |
+| `accepted to claimed` | From a ticket's first `accepted` event to its first claim. `behind a ticket with an overlapping scope` when another ticket whose scope overlaps was claimed before this one and had neither merged nor been dropped when this one was accepted (the `SCOPE_OVERLAP` rest); `with no overlapping ticket open` otherwise: that time is the wait for a free session. Keys `claim_behind_overlap` and `claim` |
+| `step NAME, each run` | `duration_ms` of each step event with that name. Key `step:NAME` |
+| `worker run (rail work), each run` | `minutes` of each `worked` event. Key `worker` |
+| `first ship to merge` | From the first `shipped` event to the squash commit: review, CI, rebases behind other merges and a person's merge. Key `shipped_to_merged`. `Rebases after the first ship` counts the `rebase` steps in that time, for each merged ticket |
+| `waiting for a person, CODE` | From the event before a person's act to the act (`accepted` by a person, `continued`), by the code of the wait the act answered, which the act records in `wait`. A step the engine ran in the middle of the wait, such as a rebase, starts the count again, so read it as a lower bound. For an act an older engine wrote with no `wait`: `APPROVE_CONTRACT` for a ticket's first approval, `APPROVE_AMEND` for a later one, `(not recorded)` for a continue. Key `person:CODE` |
 | `REVIEW` | Runs, cost and time by role. Cost is what the review command reported; a command that reports none counts as $0 |
 | `BY MODEL` | Runs and cost by the model that answered, the blocking findings its review and security runs first reported, and how many of those were fixed |
 | `Blocking findings` | How each ended: fixed, dismissed by the refuter, declined by a person, parked, or still open |
