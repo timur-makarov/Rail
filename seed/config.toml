@@ -49,8 +49,9 @@ cap = 5                                   # reader: next and advance; failures a
                                           # one rung per failed attempt at the current step. Empty: none is named
 ladder = ["claude-sonnet-5-5:medium", "claude-sonnet-5-5:high", "claude-opus-5-5:medium"]
 person_ladder = ["claude-opus-5-5:medium", "claude-opus-5-5:high"]   # a PERSON ticket starts higher
-contract = "claude-opus-5-5:high"         # writing a ticket's contract (TICKET_LINT) and filing a sweep's tickets
-                                          # (SWEEP_TICKETS); empty: the ladder's rung
+contract = "claude-opus-5-5:high"         # writing a ticket's contract (TICKET_LINT), filing a sweep's tickets
+                                          # (SWEEP_TICKETS) and deciding on a dropped after (AFTER_DROPPED); empty:
+                                          # the ladder's rung
 # reader: work; the worker rail work starts in the answer's cwd, with the brief on stdin and RAIL_MODEL, RAIL_EFFORT and
 # RAIL_SESSION (a session to resume, or empty) set. Every flag lives here: --max-turns and --max-budget-usd end one run
 # where the CLI honours them (not every version honours --max-turns); timeout_minutes is the bound every run has

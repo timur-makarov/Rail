@@ -19,6 +19,7 @@ import random
 
 from . import arms as armsmod
 from . import runs, sealed, sets
+from .driver import role_of
 
 RATES = ("solved_alone", "solved_at_stop")
 
@@ -181,7 +182,7 @@ def cost(results):
     roles = {}
     for r in results:
         for w in r.get("worked", []):
-            role = "contract" if w.get("code") == "TICKET_LINT" else "worker"
+            role = w.get("role") or role_of(w.get("code"))  # a result written before the driver recorded the role
             d = roles.setdefault(role, {"cost_usd": 0.0, "turns": 0, "minutes": 0.0})
             d["cost_usd"] += w.get("cost_usd") or w.get("total_cost_usd") or 0
             d["turns"] += w.get("turns") or w.get("num_turns") or 0

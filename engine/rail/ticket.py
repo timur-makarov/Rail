@@ -9,6 +9,9 @@ import tomllib
 # AUTO: the engine accepts the contract and merges. PERSON: a person approves the contract and merges.
 TIERS = ("AUTO", "PERSON")
 # What a revert doesn't undo (rail docs kinds). A ticket is PERSON when its change does something of one of these kinds.
+# engine/reviewer.md names all but public-release, on purpose: a release that can't be pulled back takes effect only
+# at release (docs/kinds.md), so it is a person's question there, not one a reviewer answers from a ticket's diff. The
+# review schema's enum holds all of them: review.py checks an id against this one tuple, and naming it isn't wrong.
 KINDS = ("data-loss", "data-shape", "data-exposure", "external-effect", "access", "runs-with-secrets", "controls",
          "infrastructure", "money", "licence", "public-release")
 FIELDS = {

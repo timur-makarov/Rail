@@ -52,8 +52,9 @@ ticket that improves how the project is verified; the engine gives each in the b
 | `rail-slice` | The work is more than one ticket | Several tickets with their order |
 
 A seed skill can carry a docs page instead of naming it: a line `<!-- include engine/docs/grill.md -->` in
-the seed is replaced by that page's text (or its `#Heading` sections) when `rail init` installs the skill.
-`rail-grill` carries `grill.md` this way.
+the seed is replaced by that page's text when `rail init` installs the skill. To take only some sections, put
+each heading after a `#`, as it stands, spaces and all, such as
+`<!-- include engine/docs/guides.md#Writing or changing a guide -->`. `rail-grill` carries `grill.md` this way.
 
 ## Writing or changing a guide
 

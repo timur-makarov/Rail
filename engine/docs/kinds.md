@@ -30,7 +30,8 @@ tier (`rail docs loop`).
 - **Paths.** `[kinds]` in `.rail/config.toml` maps kind ids to globs. `person_paths` means `controls` and
   `migration_paths` means `data-loss`, so a config with only those two works as before. A ticket whose
   `scope_paths` reach one is PERSON at `rail add` and at `rail amend`: the engine raises the tier in the ticket
-  and writes `person_reason = "<kind>: <path>"` when the ticket has none. A changed file on one raises the tier at
+  and, when the ticket has no `person_reason`, writes one naming every kind reached, each with the first path that
+  reaches it: `person_reason = "<kind>: <path>; <kind>: <path>"`. A changed file on one raises the tier at
   ship, with a `tier_raised` event naming the `kind`. `rail init` asks for the paths of each kind in the project.
 
   ```toml
