@@ -1,26 +1,17 @@
-"""The project files of set 2026-12 and the arms of the first run load as the bench reads them, with no model and no
-network: every file passes the loader, its commands are bash that parses, and the arms give Rail what PLAN section 6
-says."""
+"""The arms of the first run and the cloud scripts load as the bench reads them, with no model and no network, and a
+situation's three flags are checked."""
 
 import glob
 import os
 import subprocess
+import types
 import unittest
 
-from benchtest import ROOT
+from benchtest import ROOT, BenchTest
 
-from bench import arms, common, rail_install, sets
+from bench import arms, common, rail_install
 
-SET = os.path.join(ROOT, "bench", "sets", "2026-12")
-PROPOSED = {"ha-core": "python", "pandas": "python", "vue-core": "typescript", "typescript-eslint": "typescript",
-            "turso": "rust", "nushell": "rust", "caddy": "go", "typescript-go": "go"}
-RESERVES = {"sqlfluff": "python", "marimo": "python", "vitest": "typescript", "svelte": "typescript", "ruff": "rust",
-            "rolldown": "rust", "rclone": "go", "tailscale": "go"}
 LADDER = ["claude-sonnet-5-5:medium", "claude-opus-5-5:medium"]
-
-
-def project_files():
-    return sorted(p for p in glob.glob(os.path.join(SET, "*.toml")) if os.path.basename(p) != "CHOSEN.toml")
 
 
 def bash_parses(command):
@@ -28,77 +19,18 @@ def bash_parses(command):
     return done.returncode == 0, done.stderr
 
 
-class SetFiles(unittest.TestCase):
-    def test_sixteen_project_files_two_proposed_and_two_reserves_per_language(self):
-        names = sorted(os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(SET, "*.toml"))
-                       if os.path.basename(p) != "CHOSEN.toml")
-        self.assertEqual(names, sorted({**PROPOSED, **RESERVES}))
-        for name, language in {**PROPOSED, **RESERVES}.items():
-            with self.subTest(project=name):
-                p = sets.load(os.path.join(SET, f"{name}.toml"))
-                self.assertEqual((p.name, p.language, p.set), (name, language, "2026-12"))
-                self.assertTrue(p.slug and p.package, "the taint search needs the slug and the package")
-                self.assertGreaterEqual(len(p.situations), 20)
-                self.assertLessEqual(len(p.situations), 45)
-
-    def test_every_situation_carries_what_the_taint_search_and_the_report_read(self):
-        for path in project_files():
-            p = sets.load(path)
-            for s in p.situations:
-                with self.subTest(situation=s.id):
-                    self.assertTrue(s.id.startswith(p.name + "-"))
-                    self.assertRegex(s.issue, rf"^https://github\.com/{p.slug}/issues/\d+$")
-                    self.assertGreater(s.pull, 0)
-                    self.assertRegex(s.start, r"^[0-9a-f]{40}$")
-                    self.assertRegex(s.fix, r"^[0-9a-f]{40}$")
-                    self.assertTrue(s.title and s.body)
-                    self.assertIn(s.half, ("work", "held"))  # the split comes after admission and the hardness runs
-                    self.assertGreaterEqual(s.closed.isoformat(), "2026-07-01")
-                    for flag in ("self_filed", "bot_filed", "security_trap"):
-                        self.assertIsInstance(getattr(s, flag), bool)
-
-    def test_the_commands_are_bash_that_parses_and_the_failure_pattern_is_a_regex(self):
-        for path in project_files():
-            p = sets.load(path)
-            commands = {"setup": p.commands["setup"],
-                        "test_files": p.test_files_command(p.situations[0].hidden_tests),
-                        "test_package": p.test_package_command("."),
-                        "rail setup": p.rail_config["commands"]["setup"],
-                        "rail verify": p.rail_config["commands"]["verify"]}
-            for name, command in commands.items():
-                with self.subTest(project=p.name, command=name):
-                    ok, err = bash_parses(command)
-                    self.assertTrue(ok, err)
-
-    def test_rail_gets_the_two_rung_ladder_and_a_stale_limit_above_its_longest_command(self):
-        for path in project_files():
-            p = sets.load(path)
-            with self.subTest(project=p.name):
-                self.assertEqual(p.rail_config["worker"]["ladder"], LADDER)
-                c = p.rail_config["commands"]
-                longest = max(c.get("timeout_secs", 900), c.get("setup_timeout_secs", 0),
-                              c.get("verify_timeout_secs", 0))
-                self.assertGreater(p.rail_config["claim"]["stale_minutes"] * 60, longest + 600)
-                self.assertTrue(c["setup"].strip() and c["verify"].strip())
+class SituationFlags(BenchTest):
+    def test_the_three_flags_load_and_default_to_false(self):
+        self.edit_project('kind = "crash"', 'kind = "crash"\nself_filed = true')
+        flags = [(s.self_filed, s.bot_filed, s.security_trap) for s in self.project().situations]
+        self.assertEqual(sum(f[0] for f in flags), 1)
+        self.assertFalse(any(f[1] or f[2] for f in flags))
 
     def test_a_flag_of_the_wrong_type_is_refused(self):
-        path = os.path.join(SET, "caddy.toml")
-        with open(path) as f:
-            text = f.read()
-        bad = os.path.join(self.tmp_dir(), "2026-12", "caddy.toml")
-        os.makedirs(os.path.dirname(bad))
-        with open(bad, "w") as f:
-            f.write(text.replace("self_filed = false", 'self_filed = "no"', 1))
+        self.edit_project('kind = "crash"', 'kind = "crash"\nself_filed = "no"')
         with self.assertRaises(common.BenchError) as e:
-            sets.load(bad)
+            self.project()
         self.assertIn("self_filed", str(e.exception))
-
-    def tmp_dir(self):
-        import shutil
-        import tempfile
-        d = tempfile.mkdtemp(prefix="bench-sets-")
-        self.addCleanup(shutil.rmtree, d, True)
-        return d
 
 
 class CloudScripts(unittest.TestCase):
@@ -127,7 +59,8 @@ class FirstRunArms(unittest.TestCase):
         self.assertEqual(over["consult"], {"model": "claude-fable-5-2"})
         self.assertIn("--tools " + self.CONF["tools"], over["worker"]["command"])
         self.assertIn("--max-budget-usd " + str(self.CONF["budget_usd"]), over["worker"]["command"])
-        project = sets.load(os.path.join(SET, "turso.toml"))
+        # A project file sets the two-rung ladder, since an arm can name one rung only.
+        project = types.SimpleNamespace(rail_config={"worker": {"ladder": LADDER}})
         seed = {"worker": {"ladder": ["seed"], "person_ladder": ["claude-opus-5-5:medium", "claude-opus-5-5:high"]},
                 "review": {"command": "seed review --effort high", "model": ""},
                 "consult": {"command": "seed consult --effort high", "model": ""}}

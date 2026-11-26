@@ -3,7 +3,7 @@
 A cloud session's machine pauses a few minutes after the session's turn ends and kills every process; files stay
 (fulltest `CLOUD-CHECK-RESULT.md`). These scripts let a session run long work in the background, wait on it with
 foreground calls, start it again after a pause, and keep the results. They use the bench's own code and change none
-of it. The store is `/srv/rail-bench` (`BENCH_STORE`): the Rust project files of set 2026-12 name paths under it.
+of it. The store is `/srv/rail-bench` (`BENCH_STORE`): a project file's `[commands] env` values are taken literally, so paths in them name it.
 
 | Script | What it does |
 |---|---|
@@ -23,4 +23,4 @@ of it. The store is `/srv/rail-bench` (`BENCH_STORE`): the Rust project files of
 | `prune_runs.py` | Delete the working copy and temp folder of every graded run (the bench keeps them; a Rust copy is gigabytes), and old scratch. |
 | `keep.py` | Copy results into a clone of the results repository, in pieces under 90 MB, commit and push; `--no-stages` leaves out runs' saved stages. |
 
-The prompts that drive them are kept outside this repository, in the fulltest folder's `cloud/`.
+The prompts that drive them are not kept in this repository.
