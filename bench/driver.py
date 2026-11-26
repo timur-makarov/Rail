@@ -32,6 +32,8 @@ from .common import BENCH, BenchError, Clock, git, kill, now_iso, run, write
 
 WORK_CODES = ("TICKET_LINT", "VERIFY_ASSUMPTIONS", "IMPLEMENT", "STEP_FAILED", "RED_CHECK", "ANSWER_FINDINGS", "CONFLICT",
               "REBASING", "SPLIT", "SWEEP_TICKETS")  # engine/rail/work.py CODES: the briefs rail work runs
+# engine/rail/cli.py worker(): the briefs that run on [worker] contract's model, so on the arm's contract role
+CONTRACT_CODES = ("TICKET_LINT", "SWEEP_TICKETS")
 PERSON_WAITS = ("APPROVE_CONTRACT", "APPROVE_AMEND", "MERGE_BY_PERSON")
 REVIEW_STEPS = ("review", "security", "refuter")
 AGAIN = re.compile(r"rate[ _-]?limit|overloaded|\b429\b|\b529\b|usage limit", re.I)
@@ -121,6 +123,11 @@ def again_reason(path):
                 if SIGN_IN.search(text):
                     return f"sign-in failed ({SIGN_IN.search(text).group(0)})"
     return None
+
+
+def role_of(code):
+    """The arm's role a rail work run takes, by its brief's code: its env, its cost proxy and the report's role."""
+    return "contract" if code in CONTRACT_CODES else "worker"
 
 
 def says_done(exit_code, result):
@@ -234,7 +241,7 @@ class RailDriver:
         self.r.save_stage(name, dict(self.state), self.ctx.project.build_dirs, self.ctx.conf["piece_mb"])
 
     def work(self, nn, code):
-        role = "contract" if code == "TICKET_LINT" else "worker"
+        role = role_of(code)
         self.state["runs"] += 1
         stream = self.r.stream(self.state["runs"], role)
         extra = {"BENCH_STREAM": stream, "BENCH_ROLE": role}
@@ -244,8 +251,9 @@ class RailDriver:
         if (answer.get("reason") or {}).get("code") != "WORKED":
             raise Ended((answer.get("reason") or {}).get("code") or "WORK_ERROR")
         worked = answer.get("worked") or {}
-        self.state["worked"].append({k: worked.get(k) for k in ("code", "model", "effort", "end", "cost_usd", "turns",
-                                                                "minutes") if worked.get(k) is not None})
+        self.state["worked"].append(dict({k: worked.get(k) for k in ("code", "model", "effort", "end", "cost_usd",
+                                                                     "turns", "minutes") if worked.get(k) is not None},
+                                         role=role))
         if worked.get("end") == "error":
             why = again_reason(stream)
             if why:
