@@ -91,12 +91,13 @@ Finally run `rail doctor`. It prints the lines for the cloud environment's setup
 environment tool, so the person approves them once and every later session starts ready."""
 
 
-INCLUDE = re.compile(r"^<!-- include (\S+) -->$", re.M)
+INCLUDE = re.compile(r"^<!-- include (.+?) -->$", re.M)
 
 
 def include(text):
     """A seed file's `<!-- include PAGE[#Heading...] -->` lines, replaced by that text of the framework's page: a
-    skill carries what it would otherwise tell the agent to go and read."""
+    skill carries what it would otherwise tell the agent to go and read. A heading is written as it stands, spaces
+    and all."""
     from .docs import read_part
 
     def page(m):
