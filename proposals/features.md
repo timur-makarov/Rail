@@ -38,6 +38,14 @@ as a credential by the secret scan. These came out of the same run and are left.
 
 **How.**
 
+- **The Python sample project fails its own type check.** Seen on 2026-11-26, as soon as basedpyright was on
+  the machine: `test_languages.Projects.test_python` fails, in the plain run as well as with `--languages`.
+  The profile's `types` part, `uv run basedpyright`, reports four errors in `tests/projects/python`: `dict`
+  with no type arguments, twice, and `pytest` not resolved from the two test files. Until then the part was
+  reported as "not run", so nobody had seen it. To settle while fixing: whether the sample project is at fault
+  (its annotations, and a type checker that is not told where the project's environment is), or the profile's
+  default is too strict for a project that has no settings for the type checker. This comes first, because
+  the suite is red on any machine that has the tool.
 - **pip for a pip project.** `rail init` wrote the uv commands into a project that tracks
   `requirements-dev.txt` and no lockfile. A profile takes the manager whose lockfile is tracked, and with none
   the first one, which is uv; pip's lockfile is `requirements.txt` and no other name. The change: with no
@@ -56,7 +64,8 @@ as a credential by the secret scan. These came out of the same run and are left.
   init`, `rail doctor` and the sweep read it, since a language added after init is named. The line in
   `engine/rail/docs.py` says so.
 
-**Kept when.** Gate cases, no model: a fixture with `requirements-dev.txt` and no lockfile gets the pip
+**Kept when.** The language tests pass on a machine that has every tool (`python3 tests/run.py --languages`
+prints no "not run" line for Python). Gate cases, no model: a fixture with `requirements-dev.txt` and no lockfile gets the pip
 commands; one with `uv.lock` beside it keeps uv; a ticket that adds `.gitleaksignore` is PERSON; a review run
 that holds only `needs_person` raises nothing and adds no "Read these" row.
 
