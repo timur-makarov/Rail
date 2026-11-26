@@ -8,15 +8,15 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from . import config as configmod, doclint, flakes, gitx, rules
+from . import config as configmod, doclint, flakes, gitx, rules, tools
 from .project import event, events_path, ticket_path
 from .state import raised_tier
 from .util import cloud
 from .ticket import Ticket, lint, rank
-from .util import MISSING_HELP, could_not_run, match_any, minutes_since, run_shell, tail, tried_help
+from .util import MISSING_HELP, NOT_COUNTED, could_not_run, match_any, minutes_since, run_shell, tail, tried_help
 
 # A step's status: it ran and passed or failed, or the shell could not start its command (could_not_run, a failure
-# that checked nothing). Both are attempts, and both count toward the step's retry budget.
+# that checked nothing). A ship step that could not run counts as no attempt: twice in a row it waits for a person.
 TRIED = ("ran", "could_not_run")
 REVIEW_STEPS = ("review", "security", "refuter")  # every failed run at one of these is the same failure: plain count
 
@@ -344,7 +344,19 @@ def ship(project, f, run):
     text = gitx.read_blobs([f"{ref}:{ticket_path(t.id)}"], project.root)[f"{ref}:{ticket_path(t.id)}"]
     tier = check(project, t.id, Ticket(text or ""), ref, wt, f.tier, run, patch_id, accepted=f.accepted,
                  offer=not t.last("split_offered"), again=True)
-    if tier is None and run.failure and run.failure[0] == "verify" and run.events[-1].get("status") != "could_not_run":
+    last = run.events[-1] if run.events and run.events[-1].get("event") == "step" else {}
+    if tier is None and run.failure and last.get("result") == "fail":
+        # A failure that may be the machine's costs no attempt; the second in a row waits for a person (TOOL_DOWN).
+        if last.get("status") == "could_not_run":
+            last["counted"] = False  # the shell could not start the command: nothing was checked
+        elif run.failure[0] in ("verify", "checks", "sensors"):
+            down = tools.down(project)
+            if down:  # a declared tool is out of reach: the check may have failed for that alone
+                last["counted"], last["tools_down"] = False, down
+                run.failure = (run.failure[0], f"{run.failure[1]}\n\nA tool the project declares is out of reach"
+                                               f" ({tools.down_said(down)}). {tools.DOWN_HELP}")
+    if (tier is None and run.failure and run.failure[0] == "verify" and last.get("status") != "could_not_run"
+            and not last.get("tools_down")):
         # A red base spends no budget: two tickets that each pass can break main together. A verify that could
         # not start is the machine's lack, not the base's: it is never taken for a red base.
         red = base_fails_verify(project)
@@ -376,7 +388,10 @@ def ship_failed_brief(t, run):
     if any(s.get("status") == "could_not_run" for s in run.steps):
         from . import sensors
         told = "" if sensors.HELP in output else f"\n\n{MISSING_HELP}"  # a sensor that crashed says so itself
-        return f"Ship of ticket {t.id} could not run '{step}'.\n{output}{told} Then run: rail advance {t.id}"
+        return (f"Ship of ticket {t.id} could not run '{step}'.\n{output}{told} Then run: rail advance {t.id}\n"
+                f"{NOT_COUNTED}")
+    if any(e.get("tools_down") for e in run.events):
+        return f"Ship of ticket {t.id} failed at '{step}'.\n{output}\n\nThen run: rail advance {t.id}"
     tried = tried_help(step, ticket_path(t.id))
     return (f"Ship of ticket {t.id} failed at '{step}'.\n{output}\n\nFix it in the worktree, then run: rail advance {t.id}"
             + (f"\n{tried}" if tried else ""))

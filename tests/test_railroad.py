@@ -286,8 +286,7 @@ class Commands(RailTest):
 
     def test_a_verify_that_cannot_start_could_not_run_and_is_never_taken_for_a_red_base(self):
         p = self.fixture(config=CONFIG.replace("python3 -m py_compile src/calc.py", "no-such-test-runner --all"))
-        p.add(ticket(tier="PERSON"))
-        p.rail("accept", "1")  # PERSON: at the retry budget or cap it waits for a person
+        p.add(ticket())
         p.rail("next")
         p.fix_calc("1")
         first = p.rail("advance", "1", expect=3)
@@ -303,15 +302,29 @@ class Commands(RailTest):
         self.assertIn("no-such-test-runner: command not found\n\nNothing was checked", again)
         recorded = [e for e in journal(p) if e["event"] == "step" and e["step"] == "verify"][-1]
         self.assertEqual((recorded["status"], recorded["result"]), ("could_not_run", "fail"))
-        self.assertNotIn("counted", recorded)  # an attempt like any other: the budget bounds it
+        self.assertIs(recorded["counted"], False)  # the machine's lack is no attempt at the work
+        self.assertIn("Nothing was checked, so no attempt was counted. The same thing a second time in a row waits for"
+                      " a person.", first["action"]["brief"])
+        self.assertIn("no attempt was counted", again)
         self.assertEqual(p.rail("next", "--ticket", "1")["reason"]["code"], "STEP_FAILED")  # not RED_BASE
         self.assertEqual(len(p.rail("status")["tickets"]), 1)  # and no fix ticket for the base
-        second = p.rail("advance", "1", expect=3)  # the budget: consult advises, one more attempt
-        self.assertIn("consult says", second["action"]["brief"])
-        capped = p.rail("advance", "1", expect=3)
-        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("person", "RETRY_CAP"))
-        self.assertIn("Its last attempt at 'verify' (could not run (exit 127: command not found)) could not run",
-                      capped["action"]["brief"])
+        # A second time in a row: more attempts would not mend the machine, so a person is asked, on AUTO too. The
+        # ticket is not dropped as stuck, and consult is not asked about a program that isn't there.
+        second = p.rail("advance", "1", expect=3)
+        self.assertEqual((second["owner"], second["reason"]["code"]), ("person", "TOOL_DOWN"))
+        self.assertEqual(second["action"]["brief"],
+                         "Ticket 1 can't get past 'verify' on this machine: its command could not run 2 times in a row"
+                         " (could not run (exit 127: command not found)), so nothing was checked and no attempt was"
+                         " counted. A person installs what it needs on this machine, and adds it to [commands] provision"
+                         " so that every cloud machine and CI runner gets it, then continues the ticket: rail accept 1.")
+        waits = p.rail("next")["waits"]
+        self.assertEqual([(w["ticket"], w["needs"], w["kind"]) for w in waits], [("1", "TOOL_DOWN", "grant")])
+        self.assertEqual([e["event"] for e in journal(p) if e["event"] in ("consulted", "dropped")], [])
+        # The person's answer starts the count again: one more could-not-run is the first in a row.
+        p.rail("accept", "1")
+        self.assertEqual(p.rail("next", "--ticket", "1")["reason"]["code"], "STEP_FAILED")
+        self.assertEqual(p.rail("advance", "1", expect=3)["reason"]["code"], "STEP_FAILED")
+        self.assertEqual(p.rail("advance", "1", expect=3)["reason"]["code"], "TOOL_DOWN")
 
     def test_a_check_that_cannot_start_says_so_and_a_failing_one_does_not(self):
         p = self.fixture()

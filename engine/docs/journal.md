@@ -81,6 +81,7 @@ reason. Ticket lint refuses a `VERIFIED: decided, not checked:` row with nothing
 | `size` | Ship, CI | Never. On an AUTO ticket, a count over `[size] cap` writes `split_offered` at the first ship that meets it and stops there; after that the ship goes on. Size raises no tier |
 | `doc-lint` | Ship, CI | `ARCHITECTURE.md` no longer matches the tree |
 | `verify` | Ship, CI | The command fails. When it fails on the base branch too, the event has `counted: false` |
+| any ship step | Ship | A command that couldn't run has `counted: false`. A failed `verify`, `checks` or `sensors` with a declared tool out of reach has `counted: false` and `tools_down` (each tool and what its probe said): `rail docs retries` |
 | `checks` | Ship, CI | A `Check:` line fails; `detail` names it |
 | `sensors` | Ship, CI, last, when the change touches a sensor's `paths` | A sensor reports a violation on a line the change adds; `detail` counts them and names the sensors. `could_not_run` when a sensor ends with an exit it doesn't declare (`rail docs sensors`) |
 | `review`, `security` | `advance` | The run leaves a blocking finding open. A run past `timeout_secs` fails with `detail: "timeout"`, and a run whose output is invalid with `detail: "invalid output: ..."`, both with `counted: false`. No run and no step when the change needs no review |
@@ -90,7 +91,7 @@ reason. Ticket lint refuses a `VERIFIED: decided, not checked:` row with nothing
 | `merge` | `advance`, with no remote | The base branch moved during the merge |
 
 **The retry budget.** A step's attempts are its `step` events with `result: "fail"` and `counted` not false
-(a command that couldn't run is an attempt too),
+(a ship step that couldn't run, or that failed with a declared tool out of reach, is none),
 since that step last passed or since a person's `continued` or approval, whichever is later. Two attempts in a
 row are the same failure when their `signature`s are equal, or when either has none (an older engine wrote
 it). At `[retry] budget` same failures in a row consult runs once for that step and the agent gets one more

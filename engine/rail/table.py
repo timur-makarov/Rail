@@ -10,7 +10,7 @@ import os
 from . import flakes, gitx, history, tools
 from .project import advice_path, ticket_path
 from .ticket import Ticket
-from .util import MISSING_HELP, tried_help
+from .util import MISSING_HELP, NOT_COUNTED, tried_help
 
 TRANSITIONS = {"ACCEPT_AUTO", "CLAIM", "RESUME", "CONSULT", "GO", "REBASE_BEHIND", "CONTRACT_MERGED", "STUCK"}
 MERGE_PATIENCE = 600  # seconds a requested merge may take before a person looks
@@ -234,7 +234,13 @@ def _step_failed(f):
         told = MISSING_HELP if not crashed else "" if sensors.HELP in output else sensors.HELP
         return (f"The last ship of ticket {f.id} could not run '{e.get('step')}': {e.get('detail', '')}{end}"
                 f"{told} Then run: rail advance {f.id}".replace("\n\n Then", "\n\nThen")
+                + (f"\n{NOT_COUNTED}" if e.get("counted") is False else "")
                 ) + _findings(f, "Open review findings:") + _note(f)
+    if e.get("tools_down"):
+        from . import tools
+        return (f"The last ship of ticket {f.id} failed at '{e.get('step')}': {e.get('detail', '')}{end}A tool the"
+                f" project declares was out of reach ({tools.down_said(e['tools_down'])}). {tools.DOWN_HELP} Then run:"
+                f" rail advance {f.id}") + _findings(f, "Open review findings:") + _note(f)
     tried = "".join(f"\n{line}" for line in _tried(f))
     return (f"The last ship of ticket {f.id} failed at '{e.get('step')}': {e.get('detail', '')}{end}Nothing has changed"
             f" since. Fix the cause in {f.cwd}, then run: rail advance {f.id}\n"
@@ -288,6 +294,23 @@ def _capped(f):
     return (f"Ticket {f.id} is stuck: {'; '.join(_stuck(f, s) for s in f.capped)}.{_could_not_run(f, f.capped)} A person"
             f" looks at the journal and the branch {f.t.name}, then continues it: rail accept {f.id} \"what to do"
             f" differently\". That gives a fresh budget and a fresh cap." + _go(f))
+
+
+def _tool_down(f):
+    """A step failed for the machine's own reason more than once in a row: more attempts would not mend it."""
+    e, times = f.machine_stuck
+    step = e.get("step")
+    if e.get("tools_down"):
+        from . import tools
+        said = (f"it failed {times} times in a row while a tool the project declares was out of reach"
+                f" ({tools.down_said(e['tools_down'])}). No failure of these counted as an attempt, since it may not be"
+                f" the change's. A person checks that the tool answers and that its credential is valid on this machine")
+    else:
+        said = (f"its command could not run {times} times in a row ({e.get('detail', '')}), so nothing was checked and"
+                f" no attempt was counted. A person installs what it needs on this machine, and adds it to [commands]"
+                f" provision so that every cloud machine and CI runner gets it")
+    return (f"Ticket {f.id} can't get past '{step}' on this machine: {said}, then continues the ticket:"
+            f" rail accept {f.id}." + _go(f))
 
 
 def stuck_reason(f):
@@ -439,6 +462,8 @@ ROWS = [
                f" then approve it: rail accept {f.id}." + _go(f)),
     ("RETRY_CAP",          "person", "person_wait",  lambda f: f.state in OPEN and f.capped and not f.auto,
      _capped),
+    ("TOOL_DOWN",          "person", "person_wait",  lambda f: f.state in OPEN and f.machine_stuck,
+     lambda f: _tool_down(f)),
     ("STUCK_REVIEW",       "person", "person_wait",  lambda f: f.state == "reviewing" and f.stuck_review,
      lambda f: f"The review of ticket {f.id} failed twice in a row with no verdict: it timed out (timeout_secs) or its"
                f" output was invalid. A person looks at why, for example a command that waits for input or a reviewer"
@@ -527,6 +552,16 @@ ROWS = [
     ("MERGE_BY_PERSON",    "person", "person_wait",  lambda f: f.state == "merge-ready",
      _merge_by_person),
 ]
+
+
+# What a person's wait asks of them: an approval of something a revert doesn't undo (money included), a grant (the
+# machine lacks something a person gives once: a tool, a key, a setting to repair), or a hold (the person's own brake).
+WAIT_KINDS = {
+    "APPROVE_CONTRACT": "approval", "APPROVE_AMEND": "approval", "MERGE_BY_PERSON": "approval", "RETRY_CAP": "approval",
+    "FINDING_UPHELD": "approval", "AFTER_DROPPED": "approval", "BUDGET": "approval",
+    "TOOL_MISSING": "grant", "TOOL_DOWN": "grant", "STUCK_REVIEW": "grant", "MERGE_FAILED": "grant",
+    "HOLD": "hold", "STOPPED": "hold",
+}
 
 
 def first_match(f):

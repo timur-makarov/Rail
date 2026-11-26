@@ -43,6 +43,12 @@ In a cloud session nobody reads the answer, so the engine opens one issue per to
 A key that a cloud environment's network proxy adds to requests never shows up as a variable. A tool reached
 that way declares no `env` and relies on its probe.
 
+**A probe runs after a failure.** When `verify`, a `Check:` line or a sensor fails at ship, the engine runs
+the probe of each tool whose names are set. A failing probe means the step may have failed for the tool's
+sake: no attempt is counted, the brief says which tool and to run the ship once more, and a second such
+failure in a row waits for a person as `TOOL_DOWN` (`rail docs retries`). So a probe has to be fast and change
+nothing: it has 60 seconds.
+
 **`rail doctor` shows each tool:** its names, set or not, where to set a missing one, and the result of its
 probe. A probe is not run while a name is missing.
 

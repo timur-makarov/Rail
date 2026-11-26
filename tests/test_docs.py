@@ -164,6 +164,16 @@ class Terms(RailTest):
             node.value.replace("\n", " ") for node in ast.walk(tree)
             if isinstance(node, ast.Constant) and isinstance(node.value, str))
 
+    def test_every_wait_for_a_person_says_what_it_asks(self):
+        engine()
+        from rail import table
+        codes = {row[0] for row in table.ROWS if row[1] == "person"}
+        self.assertEqual(codes, set(table.WAIT_KINDS))
+        self.assertEqual(set(table.WAIT_KINDS.values()), {"approval", "grant", "hold"})
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "engine", "docs", "retries.md")) as f:
+            page = f.read()
+        self.assertEqual([code for code in sorted(codes) if f"`{code}`" not in page], [])
+
     def test_rails_own_text_uses_no_word_the_terms_rule_out(self):
         engine()
         from rail import docs

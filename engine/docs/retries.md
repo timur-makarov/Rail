@@ -64,12 +64,29 @@ two such runs in a row wait for a person. A command that
 times out at ship, such as `verify` or a check, counts like any other failure. A failed step event with no
 `signature`, written by an older engine, counts as the same failure as its neighbour.
 
-A command the shell couldn't start (exit 127: not found; 126: found but not executable) is recorded as
-`could_not_run`, not as a failure of the change: nothing was checked. It still counts as an attempt, so a
-missing tool can't loop for ever, and a verify that couldn't run is never taken for a red base. Install the
-tool to go on, and open a ticket so that `[commands] provision` (or `setup`) installs it on every machine.
-A sensor that ends with an exit code it doesn't declare is `could_not_run` too, with a brief of its own: the
-tool crashed or is set up wrongly, and nothing needs installing (`rail docs sensors`).
+## The machine's failures
+
+Some failures are the machine's and not the change's, and more attempts would not mend them. They spend no
+attempt, the worker ladder doesn't move, and consult is not asked:
+
+- **A command the shell couldn't start** (exit 127: not found; 126: found but not executable) is recorded as
+  `could_not_run`: nothing was checked. A verify that couldn't run is never taken for a red base. The brief
+  says to put the program back if the change removed it, or to install it and open a ticket so that
+  `[commands] provision` (or `setup`) installs it on every machine.
+  A sensor that ends with an exit code it doesn't declare is `could_not_run` too, with a brief of its own: the
+  tool crashed or is set up wrongly, and nothing needs installing (`rail docs sensors`).
+- **A declared tool out of reach.** After a failed `verify`, `Check:` line or sensor, the engine runs the
+  probe of each declared tool whose names are set (`rail docs tools`). When one fails, the step's failure may
+  be the tool's alone: the event keeps `tools_down`, and the brief says to run the ship once more. The
+  base branch is not tried either, since it would fail the same way. A probe runs only then, so a tool that
+  is up costs nothing.
+
+The same such failure at one step twice in a row waits for a person (`TOOL_DOWN`), on an AUTO ticket too: the
+brief names the program or the tool, and `rail accept NN` or `rail:go` continues the ticket and starts the
+count again. "The same" is the same output for a command that couldn't start and the same tools for a probe;
+`[retry] cap` such failures in a row at one step wait too, whatever they were. A failure that counts, or a
+pass of the step, ends the row. The reviewer's command that can't start is the reviewer's fault and follows
+the review rules above.
 
 ## Consult
 
@@ -83,7 +100,7 @@ it. The advice given at the budget is in the answer of
 ## Waits
 
 A ticket waits for a person (`owner: person`) for an approval, a person's merge, a review that timed out or gave
-invalid output twice in a row, or an amended Done Contract; and a PERSON ticket also for the retry budget or cap,
+invalid output twice in a row, a failure of the machine's twice in a row, or an amended Done Contract; and a PERSON ticket also for the retry budget or cap,
 a finding the refuter upheld, and a ticket it comes after that was dropped. On an AUTO ticket those three are no
 wait: at the cap the ticket is dropped (above); a finding the refuter upheld stands, and disputing it again comes
 back as a failed review that counts toward the cap; and when a ticket it comes after was dropped, the agent
@@ -97,3 +114,11 @@ rail accept NN "what to do differently"
 
 The note goes into your next brief, with a fresh retry budget and a fresh cap. If it holds beyond this ticket, open a
 ticket that writes it into the project's part of `AGENTS.md`, or into a rule.
+
+Each entry of `rail next`'s `waits` list has `kind`, what the wait asks of the person:
+
+- `approval`: something a revert doesn't undo, money included (`APPROVE_CONTRACT`, `APPROVE_AMEND`,
+  `MERGE_BY_PERSON`, `BUDGET`, and on a PERSON ticket `RETRY_CAP`, `FINDING_UPHELD` and `AFTER_DROPPED`).
+- `grant`: the machine lacks something a person gives once, or a setting needs repair (`TOOL_MISSING`,
+  `TOOL_DOWN`, `STUCK_REVIEW`, `MERGE_FAILED`).
+- `hold`: the person's own brake (`HOLD`, `STOPPED`).

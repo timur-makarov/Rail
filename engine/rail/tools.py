@@ -120,6 +120,26 @@ def probe(project, name):
     return False, f"its probe failed ({said})" + (f": {last}" if last else "")
 
 
+def down(project):
+    """{tool: what its probe said} for each declared tool whose names are set here and whose probe fails now."""
+    gone, found = missing(project), {}
+    for name in project.config["tools"]:
+        if name not in gone:
+            passed, detail = probe(project, name)
+            if passed is False:
+                found[name] = detail
+    return found
+
+
+def down_said(down):
+    return "; ".join(f"{name}: {detail}" for name, detail in down.items())
+
+
+DOWN_HELP = ("So the failure may be the machine's and not the change's: no attempt was counted. Run it once more. If"
+             " the failure is the change's own, fix that first. A second failure in a row with the tool still out of"
+             " reach waits for a person.")
+
+
 def doctor(project):
     """One line per tool for rail doctor: each name present or missing, where to set it, and the probe's result."""
     found, gone = [], missing(project)

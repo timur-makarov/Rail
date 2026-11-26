@@ -33,7 +33,8 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   `MERGE_BY_PERSON`, and on a PERSON ticket `RETRY_CAP` (the retry budget or the cap), `FINDING_UPHELD` and
   `AFTER_DROPPED`; `STUCK_REVIEW`, `HOLD` or `MERGE_FAILED`; and `BUDGET` (the ticket's runs cost more than
   `[worker] ticket_usd` since a person last acted); and `TOOL_MISSING` (a declared tool's credential isn't set on
-  this machine, so no ticket is claimed there: `rail docs tools`). `STOPPED` is a person's brake: an issue labelled `rail:stop`
+  this machine, so no ticket is claimed there: `rail docs tools`) and `TOOL_DOWN` (a step failed twice in a row for
+  the machine's own reason, a program that can't start or a declared tool out of reach: `rail docs retries`). `STOPPED` is a person's brake: an issue labelled `rail:stop`
   is open, and nothing is done on the ticket, or on any ticket, until it is closed (`rail docs cloud`); it comes
   before every other answer for a ticket that isn't merged or dropped. `BUDGET_DAY` is a rest that lifts by itself: the runs of the
   last 24 hours cost more than `[worker] daily_usd` (`rail docs retries`). Act on `owner` and `action`; the

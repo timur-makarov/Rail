@@ -80,6 +80,7 @@ class Facts:
         self.dirty = []
         self.shipped = None
         self.last_fail = None
+        self.machine_stuck = None
         self.split = None
         self.setup_failed = None
         self.after_open = []
@@ -160,6 +161,7 @@ class Facts:
         retry.budget times in a row; whatever the failures, retry.cap of them since it last passed wait for a person."""
         budget, cap = project.config["retry"]["budget"], project.config["retry"]["cap"]
         attempts, same, seen, consulted, since, failing = {}, {}, {}, {}, 0, None
+        faults = {}      # step: [what failed, times in a row the same way, times in a row] for the machine's failures
         passed = None    # a step whose last event passed: its counts reset once the run leaves that step
 
         def settle():
@@ -169,6 +171,7 @@ class Facts:
                 attempts[passed] = same[passed] = 0
                 seen.pop(passed, None)
                 consulted.pop(passed, None)
+                faults.pop(passed, None)
 
         accepted_at = amended_at = shipped_at = continued_at = -1
         self.amend_reason = ""
@@ -186,6 +189,7 @@ class Facts:
                 # A person's act gives a fresh budget and a fresh cap, whether it continues a wait or approves.
                 attempts, same, seen, consulted, since = {}, {}, {}, {}, i
                 spent = {}
+                faults.clear()
                 if kind == "accepted":
                     accepted_at = i
                 elif e.get("wait") != "BUDGET":  # going on past the budget is no approval of the merge
@@ -196,7 +200,15 @@ class Facts:
                     passed = step
                 else:
                     passed = None
-                if e.get("result") != "pass" and e.get("counted", True):
+                if (e.get("result") != "pass" and e.get("counted") is False and step in SHIP_STEPS
+                        and (e.get("status") == "could_not_run" or e.get("tools_down"))):
+                    # The machine's failure, not the change's: a program the shell could not start, or a declared
+                    # tool out of reach. It spends no attempt; the same one twice in a row waits for a person.
+                    what = sorted(e["tools_down"]) if e.get("tools_down") else e.get("signature") or e.get("detail")
+                    was = faults.get(step) or [None, 0, 0]
+                    faults[step] = [what, was[1] + 1 if was[0] == what else 1, was[2] + 1, e]
+                elif e.get("result") != "pass" and e.get("counted", True):
+                    faults.pop(step, None)
                     # The same failure as the last one at this step, or a new one, which is progress. An event with
                     # no signature, from an older engine, is the same failure as its neighbour.
                     sig, last = e.get("signature"), seen.get(step)
@@ -221,6 +233,8 @@ class Facts:
         pack = os.path.join(project.root, ".rail", "packs", "consult", "bin", "consult")
         can_consult = os.path.exists(pack) and self.consults < 3
         self.attempts, self.same = attempts, same
+        # (the failed step's event, times in a row), or None. The cap bounds failures that each look new.
+        self.machine_stuck = next(((x[3], x[2]) for x in faults.values() if x[1] >= 2 or x[2] >= cap), None)
         self.failing = failing if attempts.get(failing) else None  # the step the ticket is failing now, if any
         # Why each step waits for a person: the cap, the attempt after consult, or the budget with
         # no consult to ask.

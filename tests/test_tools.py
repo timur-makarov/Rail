@@ -1,5 +1,6 @@
 """Tools: what the work reaches outside the repository is declared, listed in the briefs, and checked before a claim."""
 
+import json
 import os
 import subprocess
 import sys
@@ -20,6 +21,10 @@ review = true
 '''
 SET = {"RAIL_TEST_PAY_KEY": "sk_test_1", "RAIL_TEST_ERRORS_TOKEN": "t"}
 CLEAN = {"summary": "Clean.", "findings": []}
+
+
+def journal(p, nn="1", branch="1-fix-add"):
+    return [json.loads(row) for row in p.git("show", f"{branch}:.rail/journal/{nn}-events.jsonl").splitlines()]
 
 
 class Briefs(RailTest):
@@ -227,6 +232,63 @@ class Secrets(RailTest):
                       failed["action"]["brief"])
         passed = p.rail("ci", cwd=ci, env_extra=dict(SET, RAIL_BRANCH="1-fix-add"))
         self.assertEqual(passed["action"]["brief"], "Every check passed.")
+
+
+class Down(RailTest):
+    """A check that fails while a declared tool is out of reach may have failed for that alone."""
+    PROBED = ("""
+[tools.payments]
+use = "The payment service in test mode"
+env = ["RAIL_TEST_PAY_KEY"]
+probe = 'test "$RAIL_TEST_PAY_KEY" = sk_test_1'
+""")
+
+    def test_a_failure_with_a_tool_out_of_reach_counts_no_attempt_and_twice_in_a_row_waits_for_a_person(self):
+        from railtest import CHECK_ADD
+        up, down = {"RAIL_TEST_PAY_KEY": "sk_test_1"}, {"RAIL_TEST_PAY_KEY": "revoked"}
+        p = self.fixture(config=CONFIG + self.PROBED)
+        p.add(ticket(check=f'test "$RAIL_TEST_PAY_KEY" = sk_test_1 && {CHECK_ADD}'))  # a check that uses the tool
+        p.rail("next", env_extra=up)
+        p.fix_calc("1")
+        first = p.rail("advance", "1", expect=3, env_extra=down)
+        self.assertEqual(first["reason"]["code"], "STEP_FAILED")
+        self.assertIn("A tool the project declares is out of reach (payments: its probe failed (exit 1)). So the failure"
+                      " may be the machine's and not the change's: no attempt was counted. Run it once more.",
+                      first["action"]["brief"])
+        recorded = [e for e in journal(p) if e["event"] == "step" and e["result"] == "fail"][-1]
+        self.assertEqual((recorded["step"], recorded["counted"], recorded["tools_down"]),
+                         ("checks", False, {"payments": "its probe failed (exit 1)"}))
+        later = p.rail("next", "--ticket", "1", env_extra=down)["action"]["brief"]  # a fresh worker is told the same
+        self.assertIn("A tool the project declares was out of reach (payments: its probe failed (exit 1)).", later)
+        self.assertNotIn("## Tried", later)  # nothing was tried at the work
+        second = p.rail("advance", "1", expect=3, env_extra=down)
+        self.assertEqual((second["owner"], second["reason"]["code"]), ("person", "TOOL_DOWN"))
+        self.assertEqual(second["action"]["brief"],
+                         "Ticket 1 can't get past 'checks' on this machine: it failed 2 times in a row while a tool the"
+                         " project declares was out of reach (payments: its probe failed (exit 1)). No failure of these"
+                         " counted as an attempt, since it may not be the change's. A person checks that the tool answers"
+                         " and that its credential is valid on this machine, then continues the ticket: rail accept 1.")
+        self.assertEqual([e["event"] for e in journal(p) if e["event"] in ("consulted", "dropped")], [])
+        p.rail("accept", "1")
+        p.queue_reviews(CLEAN)
+        self.assertEqual(p.rail("advance", "1", env_extra=up)["state"], "merge-ready")
+
+    def test_a_failure_with_every_tool_in_reach_is_the_changes_own(self):
+        up = {"RAIL_TEST_PAY_KEY": "sk_test_1"}
+        p = self.fixture(config=CONFIG + self.PROBED)
+        p.add(ticket())
+        p.rail("next", env_extra=up)
+        p.write("src/calc.py", "def add(a, b):\n    return a * b\n", base=p.worktree("1"))  # still wrong
+        failed = p.rail("advance", "1", expect=3, env_extra=up)
+        self.assertNotIn("out of reach", failed["action"]["brief"])
+        recorded = [e for e in journal(p) if e["event"] == "step" and e["result"] == "fail"][-1]
+        self.assertNotIn("counted", recorded)
+        # A failure that counts between two that don't: they are not in a row.
+        p.rail("advance", "1", expect=3, env_extra={"RAIL_TEST_PAY_KEY": "revoked"})
+        p.write("src/calc.py", "def add(a, b):\n    return a - b - 0\n", base=p.worktree("1"))
+        p.rail("advance", "1", expect=3, env_extra=up)
+        again = p.rail("advance", "1", expect=3, env_extra={"RAIL_TEST_PAY_KEY": "revoked"})
+        self.assertNotEqual(again["reason"]["code"], "TOOL_DOWN")
 
 
 class Config(RailTest):

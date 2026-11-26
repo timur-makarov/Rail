@@ -139,6 +139,11 @@ MISSING_HELP = ("Nothing was checked: the shell couldn't start the command or a 
                 " every machine.")
 
 
+# After a ship step that could not run: the machine's lack is no attempt at the work.
+NOT_COUNTED = ("Nothing was checked, so no attempt was counted. The same thing a second time in a row waits for a"
+               " person.")
+
+
 def could_not_run(code):
     """The words for a command the shell could not start, or None when it ran (or timed out)."""
     return f"could not run (exit {code}: {COULD_NOT_RUN[code]})" if code in COULD_NOT_RUN else None

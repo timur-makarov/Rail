@@ -13,7 +13,7 @@ import sys
 from . import areas, gitx, guard, hooks, history, rules, steps, tools
 from .project import Project, event, events_path, ticket_path
 from .state import OPEN, derive, floor, ticket_kinds
-from .table import TRANSITIONS, first_match
+from .table import TRANSITIONS, WAIT_KINDS, first_match
 from .ticket import TIERS, Ticket, branch_name, highest, lint, rank, with_field, with_id, with_tier
 from .forge import ENGINE_MARK, TRUSTED, ForgeError, RateLimited
 from .hidden import strip_hidden
@@ -1215,7 +1215,7 @@ def cmd_next(project, args):
         if owner == "none" and f.state in ("new", "accepted") + OPEN and code != "CLAIMED_ELSEWHERE":
             resting.append(f"- {f.id}: {action['brief']}")  # so a runner offered none of them knows why
         if owner == "person":
-            waits.append({"ticket": f.id, "needs": code, "brief": action["brief"],
+            waits.append({"ticket": f.id, "needs": code, "kind": WAIT_KINDS[code], "brief": action["brief"],
                           **({"pr": f.pr["html_url"]} if f.pr else {})})
         elif f.held:  # also with a rail:go on it that answers no wait: the session at work reads it
             held.append({"ticket": f.id, "quiet_minutes": f.quiet_minutes,
