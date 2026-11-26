@@ -1,6 +1,7 @@
 """Structure rules on added lines and files and the size count."""
 
 import os
+import re
 
 from . import gitx
 from .project import PRODUCT_SPEC
@@ -11,6 +12,41 @@ LOCKFILES = {
     "poetry.lock", "uv.lock", "Pipfile.lock", "pdm.lock", "Cargo.lock", "go.sum", "Gemfile.lock",
     "composer.lock", "mix.lock", "pubspec.lock", "Package.resolved", "flake.lock",
 }
+
+
+GO_GENERATED = re.compile(r"^// Code generated .* DO NOT EDIT\.$")
+
+
+def _go_generated(text):
+    """Whether a Go file says it is generated: the comment Go's own tools read, on a line of its own before the
+    `package` line."""
+    for line in (text or "").splitlines():
+        if GO_GENERATED.match(line):
+            return True
+        if line.startswith("package "):
+            return False
+    return False
+
+
+def _go_texts(project, paths, ref, cwd):
+    """{path: text} of the changed Go files: as the ref or the worktree has them, and a deleted one as the base does."""
+    if not paths:
+        return {}
+    texts = {}
+    if ref:
+        blobs = gitx.read_blobs([f"{ref}:{p}" for p in paths], cwd)
+        texts = {p: blobs.get(f"{ref}:{p}") for p in paths}
+    else:
+        for p in paths:
+            try:
+                with open(os.path.join(cwd, p), encoding="utf-8", errors="replace") as f:
+                    texts[p] = f.read()
+            except OSError:
+                texts[p] = None
+    gone = [p for p in paths if texts[p] is None]
+    base = gitx.read_blobs([f"{project.base_ref}:{p}" for p in gone], cwd)
+    texts.update({p: base.get(f"{project.base_ref}:{p}") for p in gone})
+    return texts
 
 
 def _diff_range(project, ref, cwd):
@@ -60,7 +96,8 @@ def violations(project, ref, cwd=None):
 
 def size(project, ref=None, cwd=None):
     """Changed lines, added plus deleted. Renames count only their edits and binary files count
-    zero; files marked linguist-generated or -diff, lockfiles and [size] exclude are left out.
+    zero; files marked linguist-generated or -diff, lockfiles, [size] exclude and Go files that carry the
+    generated-code comment before their `package` line are left out.
 
     With no ref, it counts the worktree in `cwd` against the merge base, uncommitted changes included.
     Returns (count, excluded paths).
@@ -89,10 +126,16 @@ def size(project, ref=None, cwd=None):
         path, attr, value = attrs[j], attrs[j + 1], attrs[j + 2]
         if (attr == "linguist-generated" and value in ("set", "true")) or (attr == "diff" and value == "unset"):
             generated.add(path)
-    total, excluded = 0, []
+    total, excluded, kept = 0, [], []
     for path, added_n, deleted_n in entries:
         if path in generated or os.path.basename(path) in LOCKFILES or match_any(project.config["size"]["exclude"], path):
             excluded.append(path)
-            continue
-        total += added_n + deleted_n
+        else:
+            kept.append((path, added_n + deleted_n))
+    go = _go_texts(project, [path for path, _ in kept if path.endswith(".go")], ref, cwd)
+    for path, lines in kept:
+        if _go_generated(go.get(path)):
+            excluded.append(path)
+        else:
+            total += lines
     return total, excluded

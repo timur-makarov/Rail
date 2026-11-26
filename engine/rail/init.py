@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shlex
 import shutil
 import stat
 import tomllib
@@ -33,7 +34,7 @@ sys.exit(main())
 '''
 
 INIT_TASK = """Rail is installed, and this project isn't set up for it yet: .rail/config.toml isn't on {base}.
-Read the repository to learn its stack, then propose each of these to the person and make the changes they confirm:
+{profiles}Read the repository to learn its stack, then propose each of these to the person and make the changes they confirm:
 1. [commands] in .rail/config.toml: `setup`, which runs in each new ticket worktree (install dependencies), and `verify`,
    the whole project's checks: tests, lint, a secret scan over the branch's commits ($RAIL_BASE..HEAD; RAIL_BASE is
    set for every command) and, when a lockfile changes, a dependency scan for this stack. When no scanner is
@@ -65,7 +66,7 @@ Finally run `rail doctor` and make the one-time settings it lists."""
 # the person confirms it once, by merging the pull request.
 INIT_TASK_CLOUD = """Rail is installed, and this project isn't set up for it yet: .rail/config.toml isn't on {base}.
 This is a cloud session: the machine is yours to change. Set the project up yourself; the person confirms it all at
-once by reading and merging one pull request. Read the repository to learn its stack, then:
+once by reading and merging one pull request. {profiles}Read the repository to learn its stack, then:
 1. [commands] in .rail/config.toml:
    - `verify`: the whole project's checks: tests, lint, a secret scan over the branch's commits ($RAIL_BASE..HEAD;
      RAIL_BASE is set for every command) and, when a lockfile changes, a dependency scan for this stack. A monorepo
@@ -142,9 +143,11 @@ def _load_profile(name):
 
 
 def detect(root):
-    """The language profiles the tracked manifests mark: [{name, paths, profile, type_check}]. A manifest at the root
-    gives paths "**"; manifests only below it give the top-most folders that hold one, as "web/**" or "{a,b}/**".
-    type_check is None for a profile with no type_check_file, else whether one is tracked under its paths."""
+    """The language profiles the tracked manifests mark: [{name, paths, dirs, manager, profile, type_check}]. A
+    manifest at the root gives paths "**"; manifests only below it give the top-most folders that hold one, as
+    "web/**" or "{a,b}/**". `dirs` are those folders ("" for the root), and `manager` is the profile's package
+    manager whose lockfile is tracked in one of them, else its first one. type_check is None for a profile with no
+    type_check_file, else whether one is tracked under its paths."""
     if not os.path.isdir(PROFILES):
         return []
     skip = set(_load_profile("common")["ignore"])
@@ -164,8 +167,69 @@ def detect(root):
         if profile.get("type_check_file"):
             type_check = any(os.path.basename(path) == profile["type_check_file"] and globmatch(paths, path)
                              for path in tracked)
-        found.append({"name": name, "paths": paths, "profile": profile, "type_check": type_check})
+        dirs = [""] if "" in folders else top
+        managers = profile.get("managers") or []
+        locked = [m for m in managers if any(os.path.join(d, m["lockfile"]).lstrip("/") in tracked for d in dirs)]
+        found.append({"name": name, "paths": paths, "dirs": dirs, "profile": profile, "type_check": type_check,
+                      "manager": (locked or managers[:1] or [None])[0]})
     return found
+
+
+def default_parts(found, available=None):
+    """(setup commands, verify parts, left out) for the profiles found. Each profile's setup and the parts of its
+    verify run in each of its folders, then one secret scan over the branch's commits; a part named `types` is left
+    out where type checking is off, and an `audit` runs only when the change touches the lockfile. A part is
+    {profile, part, tool, run}. `available(tool)` says whether a part's tool may be used: parts it refuses are left
+    out and named, which is how Rail's own tests run on a machine that lacks a scanner. With none, every part is
+    kept."""
+    def inside(folder, command):
+        return f"(cd {shlex.quote(folder)} && {command})" if folder else command
+
+    setup, parts, left = [], [], []
+    for f in found:
+        manager = f["manager"]
+        if not manager:
+            continue
+        for folder in f["dirs"]:
+            setup.append(inside(folder, manager["setup"]))
+            for part in manager["verify"]:
+                if part["part"] == "types" and f["type_check"] is False:
+                    continue
+                if available and not available(part["tool"]):
+                    left.append(f"{f['name']} {part['part']} ({part['tool']})")
+                    continue
+                run = inside(folder, part["run"])
+                if part["part"] == "audit":
+                    lock = os.path.join(folder, manager["lockfile"])
+                    run = f'{{ git diff --quiet "$RAIL_BASE"...HEAD -- {shlex.quote(lock)} || {run}; }}'
+                parts.append({"profile": f["name"], "part": part["part"], "tool": part["tool"], "run": run})
+    secrets = _load_profile("common").get("secrets")
+    if found and secrets:
+        if available and not available(secrets["tool"]):
+            left.append(f"{secrets['part']} ({secrets['tool']})")
+        else:
+            parts.append({"profile": "common", "part": secrets["part"], "tool": secrets["tool"], "run": secrets["run"]})
+    return setup, parts, left
+
+
+def default_commands(found, available=None):
+    """(setup, verify, left out): the commands a new config starts with, the parts joined with &&."""
+    setup, parts, left = default_parts(found, available)
+    return " && ".join(setup), " && ".join(part["run"] for part in parts), left
+
+
+def toml_string(value):
+    """A command as a TOML string: literal where it can be, so the command reads as it runs."""
+    return f"'{value}'" if "'" not in value and "\n" not in value else json.dumps(value)
+
+
+def _set_string(text, table, key, value):
+    """The seed config's text with an empty string's value filled in, the line's comment kept."""
+    start = text.index(f"\n[{table}]")
+    found = re.compile(rf'^{key} = ""', re.M).search(text, start)
+    if not found:
+        raise RailError(f"the seed config has no empty {key} to fill in under [{table}]")
+    return text[:found.start()] + f"{key} = {toml_string(value)}" + text[found.end():]
 
 
 def _union(*lists):
@@ -193,7 +257,8 @@ def _toml_table(header, item, comment):
 
 def with_profiles(text, found):
     """The seed config's text with what the profiles found add: migration paths, generated files left out of the
-    size count, [tests] paths, a [[profiles]] entry each and their suppression-marker rules."""
+    size count, [tests] paths, each language's default setup and verify, a [[profiles]] entry each and their
+    suppression-marker rules."""
     if not found:
         return text
     seed = tomllib.loads(text)
@@ -202,11 +267,30 @@ def with_profiles(text, found):
                      _union(seed["migration_paths"], *(p["migration_paths"] for p in profiles)))
     text = _set_list(text, "size", "exclude", _union(seed["size"]["exclude"], *(p["generated"] for p in profiles)))
     text = _set_list(text, "tests", "paths", _union(seed["tests"]["paths"], *(p["tests"] for p in profiles)))
+    setup, verify, _ = default_commands(found)
+    for key, command in (("setup", setup), ("verify", verify)):
+        if command and not seed["commands"][key]:
+            text = _set_string(text, "commands", key, command)
     tables = [_toml_table("profiles", {"name": f["name"], "paths": f["paths"]},
                           "written by rail init from the manifests it found (rail docs languages)") for f in found]
     tables += [_toml_table("rules", rule, f"from the {f['name']} profile")
                for f in found for rule in f["profile"]["rules"]]
     return text.rstrip("\n") + "\n\n" + "\n".join(tables)
+
+
+FOUND = ("rail init found {found} and wrote each language's default `setup` and `verify` into [commands]. The"
+         " repository's own commands win over a default: where a Makefile target, a package.json script or a CI step"
+         " already runs a part (tests, lint, types, format), put that in the default's place, because it holds what the"
+         " project knows. Where the repository has none, keep the default and say so in the pull request. Every tool"
+         " verify names has to be on the machine that runs it.\n")
+
+
+def found_line(config):
+    """The init task's sentence on the language profiles the config names; "" when it names none."""
+    profiles = config.get("profiles") or []
+    if not profiles:
+        return ""
+    return FOUND.format(found=", ".join(f"{p['name']} ({p.get('paths') or '**'})" for p in profiles))
 
 
 def _describe(found):
@@ -279,7 +363,8 @@ def init(cwd):
         step("profiles", False, "no tracked Python, TypeScript, Rust or Go manifest: nothing language-specific written")
     else:
         step("profiles", True, f"found {_describe(found)}; " + (
-            "wrote each to .rail/config.toml with its rules, migration paths, generated files and [tests] paths"
+            "wrote each to .rail/config.toml with its default setup and verify, rules, migration paths, generated"
+            " files and [tests] paths"
             if config_new else ".rail/config.toml was there already, so nothing was written to it"))
 
     copies = {

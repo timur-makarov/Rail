@@ -9,6 +9,54 @@ migration_paths = ["**/drizzle/**"]                        # Drizzle Kit's migra
 tests = ["**/*.test.*", "**/*.spec.*", "**/__tests__/**", "**/e2e/**", "**/vitest.config.*",
          "**/playwright.config.*"]
 
+# The commands rail init writes into [commands] when the project's config is new: `setup`, and the parts of
+# `verify`. The manager is the first whose lockfile is tracked beside the manifest; with none, the first one. Each
+# part names the tool it needs on the machine. `types` runs only where a tsconfig.json is tracked; `audit` only on
+# a change that touches the lockfile. Installs run no dependency's lifecycle scripts. The project's own formatter
+# check and scripts win over these (rail docs languages).
+[[managers]]
+name = "pnpm"
+lockfile = "pnpm-lock.yaml"
+setup = "pnpm install --frozen-lockfile --ignore-scripts"
+verify = [
+  { part = "lint", tool = "oxlint", run = "pnpm exec oxlint" },
+  { part = "types", tool = "tsc", run = "pnpm exec tsc --noEmit" },
+  { part = "tests", tool = "pnpm", run = "pnpm test" },
+  { part = "audit", tool = "pnpm", run = "pnpm audit" },
+]
+
+[[managers]]
+name = "npm"
+lockfile = "package-lock.json"
+setup = "npm ci --ignore-scripts"
+verify = [
+  { part = "lint", tool = "oxlint", run = "npx --no-install oxlint" },
+  { part = "types", tool = "tsc", run = "npx --no-install tsc --noEmit" },
+  { part = "tests", tool = "npm", run = "npm test" },
+  { part = "audit", tool = "npm", run = "npm audit" },
+]
+
+[[managers]]
+name = "yarn"
+lockfile = "yarn.lock"
+setup = "yarn install --immutable"
+verify = [
+  { part = "lint", tool = "oxlint", run = "yarn oxlint" },
+  { part = "types", tool = "tsc", run = "yarn tsc --noEmit" },
+  { part = "tests", tool = "yarn", run = "yarn test" },
+  { part = "audit", tool = "yarn", run = "yarn npm audit" },
+]
+
+[[managers]]
+name = "bun"
+lockfile = "bun.lock"
+setup = "bun install --frozen-lockfile --ignore-scripts"
+verify = [
+  { part = "lint", tool = "oxlint", run = "bunx oxlint" },
+  { part = "types", tool = "tsc", run = "bunx tsc --noEmit" },
+  { part = "tests", tool = "bun", run = "bun run test" },
+]
+
 [[rules]]
 id = "no-new-typescript-suppressions"
 files = "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"

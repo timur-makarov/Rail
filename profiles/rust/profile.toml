@@ -7,6 +7,21 @@ generated = []                                             # build output is in 
 migration_paths = []
 tests = ["**/tests/**", "**/benches/**"]                   # unit tests inside src/ files can't be told by path
 
+# The commands rail init writes into [commands] when the project's config is new: `setup`, and the parts of
+# `verify`. Each part names the tool it needs on the machine; `audit` runs only on a change that touches the
+# lockfile. A build always runs the dependencies' build scripts and procedural macros: cargo has no switch for
+# it. The repository's own commands win over these (rail docs languages).
+[[managers]]
+name = "cargo"
+lockfile = "Cargo.lock"
+setup = "cargo fetch --locked"
+verify = [
+  { part = "format", tool = "rustfmt", run = "cargo fmt --check" },
+  { part = "lint", tool = "cargo-clippy", run = "cargo clippy --all-targets --locked -- -D warnings" },
+  { part = "tests", tool = "cargo", run = "cargo test --locked" },
+  { part = "audit", tool = "cargo-deny", run = "cargo deny check advisories" },
+]
+
 [[rules]]
 id = "no-new-rust-suppressions"
 files = "**/*.rs"

@@ -1595,8 +1595,9 @@ def init_task(project):
     """The first `rail next` returns the init task until the project's config is on the base branch."""
     if gitx.read_blobs([f"{project.base_ref}:.rail/config.toml"], project.root).get(f"{project.base_ref}:.rail/config.toml"):
         return None
-    from .init import INIT_TASK, INIT_TASK_CLOUD
-    brief = (INIT_TASK_CLOUD if cloud() else INIT_TASK).format(base=project.base, depth=project.config["map"]["depth"])
+    from .init import INIT_TASK, INIT_TASK_CLOUD, found_line
+    brief = (INIT_TASK_CLOUD if cloud() else INIT_TASK).format(base=project.base, depth=project.config["map"]["depth"],
+                                                               profiles=found_line(project.config))
     action = {"kind": "agent_task", "brief": brief}
     named = guide(project, "INIT_TASK", action)  # no ticket, so no event
     return answer(owner="agent", code="INIT_TASK", action=action, cwd=".", **({"guide": named} if named else {}))

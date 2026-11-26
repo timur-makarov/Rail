@@ -18,8 +18,10 @@ this is where a project gains or loses the most.
 ## 1. Ask the repository, not the person
 
 Read the manifests, the CI workflows, the Makefile or task runner and the README. Use the commands the
-project already declares for tests, lint, types, a secret scan and a dependency scan. Don't invent a command
-the project doesn't have: say it is missing, and propose a ticket for it.
+project already declares for tests, lint, types, a secret scan and a dependency scan. Where `rail init`
+wrote a default into `[commands]` for a part the project has no command for, keep the default and say so in
+the pull request. Beyond that, don't invent a command the project doesn't have: say it is missing, and
+propose a ticket for it.
 
 ## 2. Show that each part bites
 

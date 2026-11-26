@@ -66,17 +66,21 @@ def ticket(title="Fix add", tier="AUTO", scope=("src/**",), check=CHECK_ADD, fro
 class Fixture:
     """A git project set up with `rail init`, with a test config and a tiny calculator.
 
-    With `remote`, it is a clone of that bare repository instead.
+    With `remote`, it is a clone of that bare repository instead. With `tree`, the project is a copy of that folder
+    and nothing else, not the calculator.
     """
 
-    def __init__(self, root, config=CONFIG, files=None, remote=None, init=True):
+    def __init__(self, root, config=CONFIG, files=None, remote=None, init=True, tree=None):
         self.root = root
         if remote:
             self.git("clone", "--quiet", remote, root, cwd=os.path.dirname(root))
             return
-        os.makedirs(root)
+        if tree:
+            shutil.copytree(tree, root)
+        else:
+            os.makedirs(root)
         self.git("init", "--quiet", "-b", "main")
-        defaults = {
+        defaults = {} if tree else {
             ".gitignore": ".claude/worktrees/\n__pycache__/\n",
             "ARCHITECTURE.md": ARCHITECTURE,
             "src/calc.py": "def add(a, b):\n    return a - b\n",

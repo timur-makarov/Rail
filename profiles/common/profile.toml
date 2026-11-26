@@ -3,3 +3,6 @@
 # Folders whose manifests mark no language of the project's own: vendored, installed or built code. A manifest
 # with one of these anywhere in its path is skipped.
 ignore = ["node_modules", "vendor", "target", ".venv", "dist"]
+
+# The secret scan every profile's verify ends with: the branch's own commits, never the whole history.
+secrets = { part = "secrets", tool = "gitleaks", run = 'gitleaks git --no-banner --log-opts="$RAIL_BASE..HEAD"' }

@@ -7,6 +7,47 @@ generated = ["**/*_pb2.py", "**/*_pb2_grpc.py"]            # protobuf and gRPC o
 migration_paths = ["**/alembic/versions/**"]               # Alembic's migrations
 tests = ["**/tests/**", "**/test_*.py", "**/*_test.py", "**/conftest.py", "**/pytest.ini"]
 
+# The commands rail init writes into [commands] when the project's config is new: `setup`, and the parts of
+# `verify`. The manager is the first whose lockfile is tracked beside the manifest; with none, the first one. Each
+# part names the tool it needs on the machine. `types` runs only where type checking is on; `audit` only on a
+# change that touches the lockfile. ruff leaves out .rail and .claude: Rail's engine and the agent's files are
+# tracked in the project and are not its code. The repository's own commands win over these (rail docs languages).
+[[managers]]
+name = "uv"
+lockfile = "uv.lock"
+setup = "uv sync --locked"
+verify = [
+  { part = "format", tool = "ruff", run = "uv run ruff format --check --extend-exclude .rail --extend-exclude .claude ." },
+  { part = "lint", tool = "ruff", run = "uv run ruff check --extend-exclude .rail --extend-exclude .claude ." },
+  { part = "types", tool = "basedpyright", run = "uv run basedpyright" },
+  { part = "tests", tool = "pytest", run = "uv run pytest -q" },
+  { part = "audit", tool = "pip-audit", run = "uv export --locked --no-emit-project --format requirements-txt | pip-audit --disable-pip -r /dev/stdin" },
+]
+
+[[managers]]
+name = "poetry"
+lockfile = "poetry.lock"
+setup = "poetry install"
+verify = [
+  { part = "format", tool = "ruff", run = "poetry run ruff format --check --extend-exclude .rail --extend-exclude .claude ." },
+  { part = "lint", tool = "ruff", run = "poetry run ruff check --extend-exclude .rail --extend-exclude .claude ." },
+  { part = "types", tool = "basedpyright", run = "poetry run basedpyright" },
+  { part = "tests", tool = "pytest", run = "poetry run pytest -q" },
+  { part = "audit", tool = "pip-audit", run = "poetry export --format requirements.txt | pip-audit --disable-pip -r /dev/stdin" },
+]
+
+[[managers]]
+name = "pip"
+lockfile = "requirements.txt"
+setup = "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+verify = [
+  { part = "format", tool = "ruff", run = "ruff format --check --extend-exclude .rail --extend-exclude .claude ." },
+  { part = "lint", tool = "ruff", run = "ruff check --extend-exclude .rail --extend-exclude .claude ." },
+  { part = "types", tool = "basedpyright", run = "basedpyright" },
+  { part = "tests", tool = "pytest", run = ".venv/bin/python -m pytest -q" },
+  { part = "audit", tool = "pip-audit", run = "pip-audit -r requirements.txt" },
+]
+
 [[rules]]
 id = "no-new-python-suppressions"
 files = "**/*.py"
