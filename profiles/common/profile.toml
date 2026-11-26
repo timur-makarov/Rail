@@ -5,4 +5,4 @@
 ignore = ["node_modules", "vendor", "target", ".venv", "dist"]
 
 # The secret scan every profile's verify ends with: the branch's own commits, never the whole history.
-secrets = { part = "secrets", tool = "gitleaks", run = 'gitleaks git --no-banner --log-opts="$RAIL_BASE..HEAD"' }
+secrets = { part = "secrets", tool = "gitleaks", run = 'gitleaks git --no-banner --redact -v --log-opts="$RAIL_BASE..HEAD"' }

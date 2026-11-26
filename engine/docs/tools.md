@@ -8,7 +8,7 @@ missing credential stops a ticket before any work is wasted on it.
 [tools.payments]
 use = "The payment service in test mode: create customers and charges in checks"   # what the agents read
 env = ["PAY_TEST_KEY"]             # names only, never values; the same name on every machine
-probe = 'curl -sf -u "$PAY_TEST_KEY:" https://api.example.com/v1/balance >/dev/null'   # fast, changes nothing
+probe = 'curl -sf --oauth2-bearer "$PAY_TEST_KEY" https://api.example.com/v1/balance >/dev/null'   # fast, changes nothing
 review = false                     # true: the reviewer, the refuter and consult are told of it too
 ci = true                          # a test or dev key: a pull request's run may be given it
 ```

@@ -182,6 +182,25 @@ class Terms(RailTest):
                for path, text in self.texts() for n, word, term in misused(terms, text)]
         self.assertEqual(bad, [])
 
+    def test_no_file_init_copies_holds_an_example_a_secret_scan_fails(self):
+        # rail init commits engine/ and seed/ into the project, and the profiles' verify ends with a secret scan over
+        # the branch's commits. gitleaks' curl-auth-user rule fails `curl -u "$KEY:"`, variable or not, so such an
+        # example made every project's setup pull request fail its own check.
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        bad = []
+        for top in ("engine", "seed"):
+            for folder, _, names in os.walk(os.path.join(root, top)):
+                for name in names:
+                    path = os.path.join(folder, name)
+                    try:
+                        with open(path) as f:
+                            lines = f.read().splitlines()
+                    except UnicodeDecodeError:
+                        continue
+                    bad += [f"{os.path.relpath(path, root)}:{n}" for n, line in enumerate(lines, 1)
+                            if re.search(r"curl\b[^|;&]*\s(-u|--user)\s", line)]
+        self.assertEqual(bad, [])
+
     def test_the_check_finds_a_planted_word_and_leaves_a_code_span_alone(self):
         engine()
         from rail import docs

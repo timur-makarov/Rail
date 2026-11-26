@@ -315,7 +315,7 @@ class Defaults(RailTest):
         self.assertIn('{ git diff --quiet "$RAIL_BASE"...HEAD -- tools/gen/go.sum || (cd tools/gen && govulncheck ./...); }',
                       verify)
         # One secret scan over the branch's commits, after every language.
-        self.assertTrue(verify.endswith(' && gitleaks git --no-banner --log-opts="$RAIL_BASE..HEAD"'), verify)
+        self.assertTrue(verify.endswith(' && gitleaks git --no-banner --redact -v --log-opts="$RAIL_BASE..HEAD"'), verify)
 
     def test_types_are_left_out_where_type_checking_is_off_and_a_missing_tool_is_named(self):
         found = tree(os.path.join(self.tmp, "js"), "package.json", "pnpm-lock.yaml", "Cargo.toml", "Cargo.lock")

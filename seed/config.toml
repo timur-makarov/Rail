@@ -128,7 +128,7 @@ setup = ".claude/skills/rail-verify/SKILL.md"
 # [tools.payments]                        # reader: next, review and doctor; one table for each thing the work
 # use = "The payment service in test mode: create customers and charges in checks"   # reaches outside the
 # env = ["PAY_TEST_KEY"]                  # repository (rail docs tools). Names only, never values: a ticket is
-# probe = 'curl -sf -u "$PAY_TEST_KEY:" https://api.example.com/v1/balance >/dev/null'   # not claimed while one
+# probe = 'curl -sf --oauth2-bearer "$PAY_TEST_KEY" https://api.example.com/v1/balance >/dev/null'   # not claimed while one
 # review = false                          # is not set. true: the reviewer, the refuter and consult are told too
 # ci = false                              # true: a test or dev key that a pull request's run may be given
 
