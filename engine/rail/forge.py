@@ -15,7 +15,11 @@ LABELS = {
     "rail:go": ("1d76db", "Rail: a person approves or continues this ticket"),
     "rail:needs-you": ("d93f0b", "Rail: this ticket waits for a person"),  # the engine sets it and never reads it
     "rail:hold": ("b60205", "Rail: a person stopped this ticket; rail:go continues it"),  # only a person sets it
+    # only a person sets it, on an issue: the brake for the whole repository, or for the paths its body names
+    "rail:stop": ("b60205", "Rail: while an issue with this label is open, Rail does nothing here"),
 }
+
+STOP_PATHS = re.compile(r"(?im)^[ \t]*paths:[ \t]*(\S.*)$")
 
 # Whose comments speak for the repository: those of people who can push to it. GitHub gives every comment an
 # author_association; a stranger's is NONE, CONTRIBUTOR or FIRST_TIME_CONTRIBUTOR, and so is most bots'.
@@ -218,7 +222,7 @@ def doctor_checks(project, repo):
 
 
 def create_labels(repo):
-    """Create the three labels that are missing. Returns the names created."""
+    """Create the labels that are missing. Returns the names created."""
     names = {label["name"] for label in api("GET", f"repos/{repo}/labels?per_page=100") or []}
     created = []
     for name, (color, description) in LABELS.items():
@@ -246,6 +250,7 @@ class Forge:
         self._full = {}
         self._checks = {}
         self._required = earlier._required if earlier else None  # the base branch's rules don't change mid-command
+        self._stops = earlier._stops if earlier else None        # a person's brake is read once per command
 
     @property
     def stale(self):
@@ -407,3 +412,23 @@ class Forge:
         """Every open issue with the label, however many pages they fill."""
         found = pages(f"repos/{self.repo}/issues?labels={label}&state=open&per_page={PAGE}")
         return [i for i in found if "pull_request" not in i]
+
+    def stops(self):
+        """A person's brake: the open issues labelled rail:stop, as [{number, title, url, paths}], oldest first.
+        `paths` holds the globs of a `paths:` line in the issue's body, and is empty when the issue stops the whole
+        repository. Only someone who may triage the repository can set a label, so the label is a person's word.
+        Read once per command; with GitHub out of reach there is nothing to read, and nothing is stopped."""
+        if self._stops is None:
+            if not self.ok:
+                return []
+            try:
+                found = self.issues("rail:stop")
+            except ForgeError:
+                return []
+            self._stops = []
+            for issue in sorted(found, key=lambda i: i["number"]):
+                line = STOP_PATHS.search(issue.get("body") or "")
+                paths = [p.strip("`") for p in re.split(r"[,\s]+", line.group(1).strip())] if line else []
+                self._stops.append({"number": issue["number"], "title": issue.get("title") or "",
+                                    "url": issue.get("html_url") or "", "paths": [p for p in paths if p]})
+        return self._stops

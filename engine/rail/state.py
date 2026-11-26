@@ -119,8 +119,18 @@ class Facts:
             # branch by its own pull request, and not inside another ticket's merge.
             self.pr = self.forge.merged_from(t.id)
         self.labels = self.forge.labels(self.pr) if self.pr else set()
+        self.stopped = self._stop()
         self._needs_review = None
         self.state = self._state()
+
+    def _stop(self):
+        """The rail:stop issue that stops this ticket, or None: one with no paths stops every ticket, one with paths
+        those whose scope can name a path the issue names."""
+        scope = self.ticket.scope if self.ticket else []
+        for stop in (self.forge.stops() if self.forge else []):
+            if not stop["paths"] or any(globs_overlap(a, b) for a in scope for b in stop["paths"]):
+                return stop
+        return None
 
     def _budgets(self, project, events):
         """Retry budgets and the waits derived from the journal. A step is stuck when it fails the same way

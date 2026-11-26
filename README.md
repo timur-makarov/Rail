@@ -169,7 +169,8 @@ says which tickets wait for a person and what each one needs.
 ```
 
 Don't add "edited" or "synchronized" triggers: the engine edits its own pull requests, and each edit would
-start a run. To stop a ticket, add the label `rail:hold` to its pull request. `rail docs cloud` has the rest.
+start a run. To stop a ticket, add the label `rail:hold` to its pull request. To stop everything, open an issue
+with the label `rail:stop`: nothing moves until you close it. `rail docs cloud` has the rest.
 
 ## Start on your own machine
 

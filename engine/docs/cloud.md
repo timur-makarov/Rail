@@ -146,6 +146,16 @@ The source only files tickets. The runner above picks them up on its own schedul
 - **Change a contract:** comment on its pull request. **Reject it:** close the pull request.
 - **Stop a ticket:** add the label `rail:hold` to its pull request. Nothing moves it until you add `rail:go`.
   `rail:needs-you` is the engine's own label: adding or removing it by hand changes nothing.
+- **Stop everything:** open an issue and give it the label `rail:stop`. While it is open, `rail next`,
+  `rail advance` and `rail work` answer `STOPPED` and do nothing, in every session, at their next call: no
+  ticket is claimed, shipped, reviewed or merged, and no worker starts. A run already going ends its command
+  first, and a merge GitHub had already accepted may still land. To stop only part of the repository, put a
+  line `paths: src/billing/**, db/**` in the issue's body: then only the tickets whose `scope_paths` reach
+  those paths stop. Close the issue, or take the label off, and the next run goes on; closing starts no run
+  by itself, so the schedule or your next message does. Issues still come in as tickets under a brake, since
+  taking one in changes no code, and what a worker already changed stays saved in its worktree. Only someone
+  who may triage the repository can set a label, so a stranger's issue stops nothing. With no remote there
+  is no brake.
 - **Merge a PERSON ticket:** the merge button.
 - Each pull request ends with `Claude-Session:` and a link to the session that worked the ticket.
 

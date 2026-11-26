@@ -31,7 +31,9 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   back at the time the brief names), `NO_WORK`. A person's turn is `APPROVE_CONTRACT`, `APPROVE_AMEND`,
   `MERGE_BY_PERSON`, and on a PERSON ticket `RETRY_CAP` (the retry budget or the cap), `FINDING_UPHELD` and
   `AFTER_DROPPED`; `STUCK_REVIEW`, `HOLD` or `MERGE_FAILED`; and `BUDGET` (the ticket's runs cost more than
-  `[worker] ticket_usd` since a person last acted). `BUDGET_DAY` is a rest that lifts by itself: the runs of the
+  `[worker] ticket_usd` since a person last acted). `STOPPED` is a person's brake: an issue labelled `rail:stop`
+  is open, and nothing is done on the ticket, or on any ticket, until it is closed (`rail docs cloud`); it comes
+  before every other answer for a ticket that isn't merged or dropped. `BUDGET_DAY` is a rest that lifts by itself: the runs of the
   last 24 hours cost more than `[worker] daily_usd` (`rail docs retries`). Act on `owner` and `action`; the
   code is for logs and for telling two briefs apart.
 - `guide` names the page `[guides]` gives for the brief's situation, such as the start of a ticket or a

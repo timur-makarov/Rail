@@ -293,6 +293,14 @@ def _merge_by_person(f):
             f" rail accept {f.id}. The engine then merges it." + asked)
 
 
+def stop_brief(stop, what):
+    """What a brake's wait says, about one ticket or about the repository."""
+    where = f" for the paths {', '.join(stop['paths'])}" if stop["paths"] else ""
+    return (f"A person stopped Rail{where}: issue #{stop['number']} ({stop['title']}) is open with the label rail:stop."
+            f" Nothing is done on {what} until that issue is closed or loses the label; a run that then starts goes on"
+            f" by itself. Do no work on it meanwhile. {stop['url']}").rstrip()
+
+
 ROWS = [
     # (code,               owner,   kind,          when,                                         brief)
     ("MERGED",             "none",  "rest",        lambda f: f.state == "merged",
@@ -304,6 +312,9 @@ ROWS = [
                f" writes the mark and finishes the drop."),
     ("DROPPED",            "none",  "rest",        lambda f: f.state == "dropped",
      lambda f: f"Ticket {f.id} was dropped."),
+    # A person's brake, an open issue labelled rail:stop, comes before every row that sends anyone to the ticket.
+    ("STOPPED",            "human", "human_wait",  lambda f: f.stopped and f.state not in ("merged", "dropped"),
+     lambda f: stop_brief(f.stopped, f"ticket {f.id}")),
     # A rebase stopped in the ticket's worktree. Until it ends the engine writes nothing to the ticket: git moves
     # the branch when the rebase finishes. Another session's fresh work is still left alone (CLAIMED_ELSEWHERE).
     ("REBASING",           "agent", "agent_task",  lambda f: f.rebasing and f.state in OPEN and not (f.held and not f.explicit),

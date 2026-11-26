@@ -132,7 +132,7 @@ def guide(project, code, action, f=None):
 def from_facts(f, steps_=None, code=None, **extra):
     row_code, owner, action = first_match(f)
     worker(f, action, row_code)
-    if owner == "human" or person_next(f):
+    if row_code != "STOPPED" and (owner == "human" or person_next(f)):
         label_wait(f.project, f, row_code)  # the person's inbox is this label, whichever command met the wait
     named = guide(f.project, row_code, action, f)
     if named:
@@ -457,6 +457,8 @@ def settle(project, nn, explicit):
         f = facts[nn]
         f.explicit = explicit
         code, owner, action = first_match(f)
+        if code == "STOPPED":
+            return f, receipts  # a person's brake: nothing is claimed, moved or repaired
         if code == "SETUP_FAILED" and explicit and not reran_setup:
             # `next --ticket NN` runs a failed setup again, once (the SETUP_FAILED brief says so).
             run = steps.Run(project, f.t)
@@ -1066,10 +1068,16 @@ def cmd_next(project, args):
     if took_in or red_base_ticket(project, facts):
         tickets, facts = load(project)
     leftovers = cleanup(project, tickets, facts)
+    explicit = requested(project, args)
+    stop = next((s for s in project.forge.stops() if not s["paths"]), None)
+    if stop and not explicit:
+        # The whole repository is stopped: no ticket is looked at. With --ticket NN the ticket's own row says so.
+        from .table import stop_brief
+        return answer(owner="human", code="STOPPED", steps=took_in, leftovers=leftovers,
+                      action={"kind": "human_wait", "brief": stop_brief(stop, "any ticket")})
     rest = day_budget(project, tickets)
     if rest:
         return dict(rest, steps=took_in, leftovers=leftovers)
-    explicit = requested(project, args)
     if explicit:
         nn = project.find(explicit, tickets).id
         f, receipts = settle(project, nn, explicit=True)
@@ -1094,6 +1102,8 @@ def cmd_next(project, args):
         # A ship whose pull request GitHub didn't let it write (a rate limit, an outage) left the old title and
         # description there, and a person's merge squashes with what the pull request says.
         update_pr(project, f, took_in)
+        if code == "STOPPED":
+            continue  # the person set the brake and knows: it is no wait in their inbox
         if owner == "human" or person_next(f):
             label_wait(project, f, code)
         elif owner == "agent" and f.pr_open and "rail:needs-you" in f.labels:
@@ -1347,8 +1357,9 @@ def cmd_advance(project, args):
         f = facts[nn]
         f.explicit = True
         code, owner, _ = first_match(f)
-        if code == "REBASING":
-            return from_facts(f, receipts)  # nothing to ship while the rebase is open: the brief says how to end it
+        if code in ("REBASING", "STOPPED"):
+            # Nothing to ship while the rebase is open (the brief says how to end it), or while a person's brake is on.
+            return from_facts(f, receipts)
         mine = bool(f.worktree) and not f.claimed_elsewhere
         run = steps.Run(project, f.t)
         if f.state == "implementing" and mine and owner == "agent":
@@ -1461,7 +1472,8 @@ def cmd_status(project, args):
                 leftovers.append({"kind": "remote branch", "ref": t.remote_branch, "reason": f"ticket {nn} {f.state}"})
     for branch in project.orphans:
         leftovers.append({"kind": "branch", "ref": branch, "reason": "no ticket; left for you"})
-    return answer(code="STATUS", tickets=rows, leftovers=leftovers)
+    return answer(code="STATUS", tickets=rows, leftovers=leftovers,
+                  **({"stops": project.forge.stops()} if project.forge.stops() else {}))
 
 
 def cmd_stats(project, args):
@@ -2021,7 +2033,9 @@ def render(result):
     if "text" in result:
         return result["text"].rstrip("\n")
     if "tickets" in result:
-        lines = [f"{'TICKET':<7} {'STATE':<13} {'OWNER':<6} {'TIER':<7} {'LAST':<5} NOTE"]
+        lines = [f"STOPPED by issue #{s['number']} ({s['title']})" + (f": {', '.join(s['paths'])}" if s["paths"] else "")
+                 for s in result.get("stops", [])]
+        lines += [f"{'TICKET':<7} {'STATE':<13} {'OWNER':<6} {'TIER':<7} {'LAST':<5} NOTE"]
         for r in result["tickets"]:
             lines.append(f"{r['ticket']:<7} {r['state']:<13} {r['owner']:<6} {r['tier']:<7} {r['last_event']:<5} {r['note']}")
         for i, l in enumerate(result.get("leftovers", [])):
