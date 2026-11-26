@@ -23,7 +23,8 @@ A sweep is itself an AUTO ticket that changes only its journal summary. It chang
 needs no review and merges on its own. Its squash commit carries a `Sweep:` trailer, which marks where the
 next sweep starts. The first sweep starts where Rail was set up.
 
-- **Free part:** doc-lint on the base branch, and each structure rule counted over the whole tree.
+- **Free part:** doc-lint on the base branch, each structure rule counted over the whole tree, and the
+  manifests no `[[profiles]]` entry covers (`rail docs languages`, "A language added later").
 - **Review part:** only when something merged with no review. One pass of the reviewer over those changes,
   looking for duplication across tickets, logic in the wrong area, weak checks, security and stale docs. It
   also reads the parked and open advisory findings and the proposed checks. With nothing unreviewed there is no model run: the
@@ -47,7 +48,7 @@ next sweep starts. The first sweep starts where Rail was set up.
   drives Rail with `rail next`, `rail work` and `rail advance` goes through a sweep with no step of its own.
 
 When the sweep finds nothing (no unreviewed change, no parked or open advisory finding, no proposed check, no
-pattern, no flaky check, and doc-lint is clean), the agent gets no task: `rail next` answers `SWEEP_EMPTY` with `rail advance NN`, and the sweep's
+pattern, no flaky check, no language without a profile, and doc-lint is clean), the agent gets no task: `rail next` answers `SWEEP_EMPTY` with `rail advance NN`, and the sweep's
 ticket merges, which moves the marker.
 
 A sweep never blocks a merge. To turn other signals into tickets, such as failed CI runs or an error

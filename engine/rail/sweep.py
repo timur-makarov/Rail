@@ -82,10 +82,15 @@ def ticket_text(start, unreviewed, merged):
 
 
 def free_part(project):
-    """What needs no model: doc-lint on base, and each structure rule counted over the whole tree."""
+    """What needs no model: doc-lint on base, each structure rule counted over the whole tree, and the manifests on
+    base that no [[profiles]] entry covers (rail docs languages), as one sentence in a list."""
+    from . import init
+
     problems = doclint.lint(project, project.base_ref)
     files = [f for f in gitx.git(["ls-tree", "-r", "-z", "--name-only", project.base_ref], project.root)
              .stdout.split("\0") if f]
+    bare = init.unprofiled(files, project.config)
+    languages = [init.uncovered(bare)] if bare else []
     counts = {}
     for rule in project.config["rules"]:
         hits = 0
@@ -96,7 +101,7 @@ def free_part(project):
                 if any(word in line for word in rule.get("forbid", [])):
                     hits += 1
         counts[rule["id"]] = hits
-    return problems, counts
+    return problems, counts, languages
 
 
 def history(project, merged):
@@ -188,13 +193,14 @@ def brief(project, commits, parked, checks):
     return "\n".join(parts) + "\n"
 
 
-def summary(nn, start, commits, merged, problems, counts, entry, parked, checks, recurring=(), flaked=()):
+def summary(nn, start, commits, merged, problems, counts, entry, parked, checks, recurring=(), flaked=(), languages=()):
     review = (entry["summary"] if entry else "(the review run failed)") if commits else \
         "(no review run: nothing merged without a review)"
     lines = [f"# Sweep {nn}", "", f"Since {start[:12]}: {len(merged)} tickets merged; {len(commits)} commits merged"
                                   " without a review.", "",
              "## Free part", *([f"- doc-lint: {p}" for p in problems] or ["- doc-lint: clean"]),
-             *[f"- rule {rid}: {n} lines in the tree" for rid, n in counts.items()], "",
+             *[f"- rule {rid}: {n} lines in the tree" for rid, n in counts.items()],
+             *[f"- languages: {line}" for line in languages], "",
              "## Review", review, ""]
     for f in (entry or {}).get("findings", []):
         where = f"{f['file']}:{f['line']}" if f.get("line") else f["file"]
@@ -218,16 +224,17 @@ def run(project, f, receipt):
     from . import review
 
     start, commits, merged = since_last(project)
-    problems, counts = free_part(project)
+    problems, counts, languages = free_part(project)
     parked, checks = history(project, merged)
     recurring, flaked = patterns(project, merged), flaky(project, merged)
     entry = None
     if commits:
         entry = review.run(project, f, "sweep", receipt, prompt=brief(project, commits, parked, checks))
     else:
-        receipt.record("harvest", True, f.patch_id, NOTHING if not (problems or parked or checks or recurring or flaked)
+        receipt.record("harvest", True, f.patch_id, NOTHING if not (problems or languages or parked or checks or recurring or flaked)
                        else f"no review run: {len(parked)} parked findings, {len(checks)} proposed checks,"
-                            f" {len(recurring)} patterns in the worker runs, {len(flaked)} flaky checks")
+                            f" {len(recurring)} patterns in the worker runs, {len(flaked)} flaky checks"
+                            + (", a language with no profile" if languages else ""))
     receipt.files[f".rail/journal/{f.id}-summary.md"] = summary(f.id, start, commits, merged, problems, counts, entry,
-                                                               parked, checks, recurring, flaked)
+                                                               parked, checks, recurring, flaked, languages)
     return entry

@@ -32,8 +32,8 @@ What init writes today stops at the project's files. Four things the four langua
   and the seed's skills name no property, fuzz or driving-check tool per language.
 - **A monorepo gets one command per folder and nothing more.** Workspace layouts and an affected-aware
   `verify` are only a sentence in the init task.
-- **A language added after init is not picked up.** An existing `.rail/config.toml` is never touched, so a Go
-  service added next year gets no profile.
+- **A language added after init is named, and nothing is written for it.** `rail doctor`, the sweep and a
+  second `rail init` say what the config lacks; a person or a ticket still has to put it there (Part 3).
 
 **Why these four.** The research behind this page found TypeScript first among GitHub contributors and among
 new repositories with an agent signal, Python first in usage surveys and for work done with AI tools, Rust
@@ -97,18 +97,13 @@ measure first; if Rust `setup` and `verify` dominate, the Rust profile adds a co
 
 ## Part 3: a language added after init
 
-`rail init` writes profiles only into a config it creates. Run again on a repository that has one, it lists
-what it found ("`.rail/config.toml` was there already, so nothing was written to it") and merges the registry
-domains into `.claude/settings.json`. It prints no entry, command or rule to paste, and `rail doctor` doesn't
-compare the tracked manifests with the `[[profiles]]` entries. A Go service added later gets no suppression
-rule, no `[size] exclude`, no migration path, no `[tests] paths` and no `setup` or `verify` lines, unless the
-person writes them from `rail docs languages`.
+Built: `rail doctor` fails its `languages` line on a tracked manifest that no `[[profiles]]` entry covers, the
+sweep's free part names it, and a second `rail init` prints the entry, rules, paths and commands the config
+lacks and writes nothing to it (`rail docs languages`, "A language added later"). Two things are left:
 
-The proposal (not in the page this one was cut from; it follows from the rule that an existing config is never
-touched): `rail doctor` names a tracked manifest whose language has no `[[profiles]]` entry, and prints the
-entries, rules and commands init would write for it, for a person to paste into the config or into a ticket
-(`.rail/config.toml` is a person's path, so the change is a person's to approve). The init task's text for a
-re-run says the same. The existing config stays untouched (Decision 3).
+- whether a sweep agent files a ticket from the free part's line: not tried with a model;
+- whether `rail init` should write the missing entries into an existing config instead of printing them
+  (Decision 3).
 
 ## Part 4: mutation commands
 
@@ -177,9 +172,9 @@ per-language tables.
 
 - `profiles/{python,typescript,rust,go}/profile.toml`: the provision lines and pins; each language's `mutation`
   wrapper beside them.
-- `engine/rail/init.py`: `provision` and `mutation` written into a new config; the Python `--no-build`; the
-  re-run text. `engine/rail/config.py`: the `[commands] mutation` key.
-- `engine/rail/doctor.py`: the per-profile lines, and the manifest with no profile.
+- `engine/rail/init.py`: `provision` and `mutation` written into a new config; the Python `--no-build`.
+  `engine/rail/config.py`: the `[commands] mutation` key.
+- `engine/rail/doctor.py`: the per-profile lines.
 - `engine/docs/languages.md` and `engine/docs/stats.md`: the same changes.
 - `seed/skills/rail-verify/SKILL.md`: the per-language driving-check tools of Part 5.
 - `tests/projects/LANG/` and `tests/test_languages.py`: the cases below.
@@ -191,13 +186,11 @@ per-language tables.
    - init writes a `provision` into a new config for each profile found, and none into an existing one;
    - `rail doctor` reports a missing toolchain, tool and pin, and the registry domains missing from the
      sandbox list;
-   - `rail doctor` names a tracked `go.mod` in a repository whose config has no `go` profile, prints the
-     entries, rules and commands init would write, and changes no file;
    - a tree with a `pnpm-workspace.yaml` gets the filtered `verify`, and a tree with `go.work` or a uv
      workspace gets the workspace commands.
    Kept when every case behaves as written.
-2. **The re-run text, no model.** The init task on a repository whose config exists names the profiles missing
-   from it. Kept when the brief holds them for each fixture.
+2. **The sweep's line, with a model.** A sweep on a fixture whose base holds a manifest with no profile, four
+   runs: kept when the agent files a ticket for it in at least 3 of 4. This uses a model, so it waits.
 3. **Each fixture end to end, no model, four toolchains.** Run, in a cloud session with all four toolchains,
    what the fixtures don't run yet: `provision` installs what the profile names; the audits (pip-audit, pnpm
    audit, cargo-deny, govulncheck), the secret scan (gitleaks), basedpyright and oxlint each fail on a planted
@@ -243,7 +236,7 @@ One pull request each, with docs and `CHANGELOG.md`.
 1. `provision` and the pins in each profile, and `rail doctor`'s per-profile lines (test 1).
 2. Run what the fixtures don't yet (test 3), in a cloud session with all four toolchains; fix or drop the
    lines whose planted mistake doesn't fail.
-3. A language added after init: doctor's manifest-with-no-profile line and the re-run text (tests 1 and 2).
+3. A language added after init: the sweep's line with a model (test 2), and Decision 3.
 4. Workspaces and the affected-aware `verify` for pnpm (test 1); the rest of Part 2 only if the time per step
    shows the need.
 5. The mutation wrappers (test 4), after `proposals/checks.md` Part 6 builds `[commands] mutation`.
@@ -263,9 +256,9 @@ it; a step that needs model runs builds its deterministic part first and marks i
 1. Rust builds across worktrees: measure first, then sccache if needed (proposed); or sccache from the start.
 2. Language-specific review lines in the reviewer's brief: none at first; a repeated finding in one language
    becomes a sensor or a rule, not a review line (proposed).
-3. A language added after init: `rail doctor` names it and prints what init would write, and nothing is
-   written to the config (proposed); or `rail init` appends the missing profile's entries to an existing
-   config, which breaks the rule that init never touches a project's own file.
+3. A language added after init: `rail init` prints what the config lacks and writes nothing (built, and
+   proposed to stay); or it appends the missing profile's entries to an existing config, which breaks the rule
+   that init never touches a project's own file.
 4. Package managers other than uv and pnpm: their commands stay, with no fixture (proposed, as built); or
    fixtures for each; or uv and pnpm only, the rest unsupported.
 

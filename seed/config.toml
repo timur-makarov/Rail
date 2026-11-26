@@ -110,6 +110,8 @@ model = "claude-fable-5-2"                # the model consult runs on; empty is 
 skill_dirs = [".claude/skills"]           # reader: init; the folders the skills are written to. An agent other than
                                           # Claude Code reads SKILL.md files from its own folder: add it here and
                                           # run rail init again. The skill pages in [guides] name the first
+other_manifests = []                      # reader: init, doctor and the sweep; globs of tracked manifests that mark no
+                                          # code of the project's own, such as a package.json kept for a formatter
 
 [guides]                                  # reader: next and advance; a page whose text the brief carries when its
                                           # situation applies, the whole page or each #Heading section named. A

@@ -285,6 +285,19 @@ class Sweep(RailTest):
         self.assertIn("Sweep: since", p.git("log", "-1", "--format=%b", "main"))
         self.assertEqual(p.rail("next")["reason"]["code"], "NO_WORK")
 
+    def test_a_sweep_names_a_language_no_profile_covers(self):
+        # A service in another language arrived after rail init, so the config has no [[profiles]] entry for it.
+        p = self.fixture(config=CONFIG + "\n[sweep]\nevery = 1\n", files={"api/go.mod": "module api\n"})
+        p.add(ticket())
+        p.rail("next")
+        p.fix_calc("1")
+        p.rail("advance", "1")
+        p.rail("advance", "1")
+        swept = p.rail("sweep")
+        self.assertEqual(swept["reason"]["code"], "SWEEP_TICKETS")  # something to file, so the agent gets the task
+        summary = read(os.path.join(p.worktree("2"), ".rail", "journal", "2-summary.md"))
+        self.assertIn("- languages: api/go.mod marks go: no [[profiles]] entry covers it", summary)
+
     def test_a_sweep_that_finds_nothing_merges_with_no_task(self):
         p = self.fixture(config=CONFIG + "\n[sweep]\nevery = 1\n")
         self.assertIn("Nothing merged since the last sweep", p.rail("sweep")["action"]["brief"])

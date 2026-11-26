@@ -42,6 +42,24 @@ Into a new `.rail/config.toml`, for each profile found:
 The seed's own `no-new-suppressions` rule stays, on every file. An existing `.rail/config.toml` is never
 touched: init lists what it found and writes nothing to it.
 
+## A language added later
+
+A service in another language, or a second folder in a language the project has, arrives after the config
+exists, so init writes none of the above for it. Three places say so:
+
+- `rail doctor` has a line `languages`. It fails when a tracked manifest of the four languages is covered by no
+  `[[profiles]]` entry of its language, and names the top-most folder's manifest.
+- `rail init`, run again with the `rail` that `install` put on `PATH`, prints what the config lacks: the
+  `[[profiles]]` entry and the language's rules to add at the end of the file, what `migration_paths`,
+  `[size] exclude` and `[tests] paths` gain, and what `setup` and `verify` gain for each new folder. For a new
+  folder of a language the config has, it prints the entry's new `paths` and the commands. It writes nothing to
+  the config: `.rail/config.toml` is a person's to approve, so the text goes into a ticket.
+- The sweep's free part names the same manifests on the base branch, so a project where nobody runs doctor
+  still hears of it.
+
+A manifest that marks no code of the project's own, such as a `package.json` kept for a formatter, goes under
+`[init] other_manifests`, a list of globs. Vendored, installed and built folders are skipped as at init.
+
 ## The commands init writes
 
 Into the new config's `[commands]`, init also writes a default `setup` and `verify` for each profile found.

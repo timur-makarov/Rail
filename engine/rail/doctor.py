@@ -121,6 +121,11 @@ def checks(project):
         found.append(("guides", not gone, f"the {len(guides)} pages [guides] names are there" if not gone else
                       f"[guides] names pages or sections that aren't there, so no brief carries them:"
                       f" {', '.join(gone)}"))
+    from . import init
+    bare = init.unprofiled(init.tracked_files(root), project.config)
+    if bare or project.config["profiles"]:
+        found.append(("languages", not bare, "every tracked manifest is covered by a [[profiles]] entry" if not bare
+                      else init.uncovered(bare)))
     from . import sources
     if sources.names(project):
         bad = sources.problems(project)

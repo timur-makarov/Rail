@@ -149,10 +149,74 @@ class Init(RailTest):
         p.git("commit", "--quiet", "-m", "start")
         done = p.rail("init")
         self.assertEqual(read(p.path(".rail/config.toml")), CONFIG)
-        self.assertEqual(step(done, "profiles")["detail"],
-                         "found go (**); .rail/config.toml was there already, so nothing was written to it")
+        detail = step(done, "profiles")["detail"]
+        self.assertTrue(detail.startswith("found go (**); .rail/config.toml was there already, so nothing was written"
+                                          " to it. It lacks what follows"), detail)
+        self.assertIn('go in the root:\n- a new entry and its rules, at the end of the file:\n[[profiles]]', detail)
+        self.assertIn("gitleaks", detail)  # a config with no profile has no secret scan from one either
         domains = json.loads(read(p.path(".claude/settings.json")))["sandbox"]["network"]["allowedDomains"]
         self.assertEqual(domains, ["api.anthropic.com", "proxy.golang.org", "sum.golang.org"])
+
+    def test_the_engines_manifest_lists_are_the_profiles_own(self):
+        # A project's copy of the engine has no profiles/ folder, so doctor reads these two lists from the engine.
+        self.assertEqual(initmod.MANIFESTS, {name: profile(name)["manifests"] for name in LANGUAGES})
+        self.assertEqual(initmod.VENDORED, profile("common")["ignore"])
+
+    def test_a_language_added_after_init_is_named_and_init_prints_what_the_config_lacks(self):
+        p = Fixture(os.path.join(self.tmp, "later"), init=False, files={"api/pyproject.toml": "[project]\nname = 'api'\n"})
+        p.git("add", "-A")
+        p.git("commit", "--quiet", "-m", "start")
+        p.rail("init")
+        config = read(p.path(".rail/config.toml"))
+        doctor = lambda: {s["step"]: s for s in p.rail("doctor", expect=None)["steps"]}["languages"]  # noqa: E731
+        self.assertEqual(doctor()["result"], "pass")
+
+        # A Rust service is added next year, and a vendored manifest with it.
+        for path in ("worker/Cargo.toml", "worker/vendor/dep/Cargo.toml", "worker/sub/Cargo.toml"):
+            os.makedirs(os.path.dirname(p.path(path)), exist_ok=True)
+            with open(p.path(path), "w") as f:
+                f.write("[package]\nname = 'x'\n")
+        p.git("add", "-A")
+        found = doctor()
+        self.assertEqual(found["result"], "fail")
+        self.assertIn("worker/Cargo.toml marks rust: no [[profiles]] entry covers it", found["detail"])
+        self.assertNotIn("vendor", found["detail"])
+        self.assertNotIn("worker/sub", found["detail"])  # the top-most folder stands for those below it
+
+        detail = step(p.rail("init"), "profiles")["detail"]
+        self.assertEqual(read(p.path(".rail/config.toml")), config)  # init writes nothing to a config that is there
+        self.assertIn("found python (api/**), rust (worker/**); .rail/config.toml was there already, so nothing was"
+                      " written to it. It lacks what follows", detail)
+        self.assertIn('rust in worker:\n- a new entry and its rules, at the end of the file:\n[[profiles]]', detail)
+        self.assertIn('name = "rust"\npaths = "worker/**"', detail)
+        self.assertIn(f'id = "{profile("rust")["rules"][0]["id"]}"', detail)
+        manager = profile("rust")["managers"][0]
+        self.assertIn(f"- [commands] setup gains: (cd worker && {manager['setup']})", detail)
+        self.assertIn(f"(cd worker && {manager['verify'][0]['run']})", detail)
+        self.assertNotIn("gitleaks", detail)  # the secret scan is in the config's verify already
+        self.assertNotIn("python in", detail)
+
+        # What init printed, put into the config, covers the manifest; so does naming it as no code of the project's.
+        added = detail.split("at the end of the file:\n")[1].split("\n- ")[0]
+        with open(p.path(".rail/config.toml"), "w") as f:
+            f.write(config + "\n" + added + "\n")
+        self.assertEqual(doctor()["result"], "pass")
+        with open(p.path(".rail/config.toml"), "w") as f:
+            f.write(config.replace("other_manifests = []", 'other_manifests = ["worker/**"]'))
+        self.assertEqual(doctor()["result"], "pass")
+
+        # A second folder of a language the config has: its entry's paths are what changes.
+        with open(p.path(".rail/config.toml"), "w") as f:
+            f.write(config.replace("other_manifests = []", 'other_manifests = ["worker/**"]'))
+        os.makedirs(p.path("jobs"))
+        with open(p.path("jobs/pyproject.toml"), "w") as f:
+            f.write("[project]\nname = 'jobs'\n")
+        p.git("add", "-A")
+        self.assertIn("jobs/pyproject.toml marks python", doctor()["detail"])
+        detail = step(p.rail("init"), "profiles")["detail"]
+        self.assertIn('python in jobs:\n- the python entry of [[profiles]]: paths = "{api,jobs}/**" (it is "api/**")', detail)
+        self.assertNotIn("rust in", detail)
+        self.assertNotIn("a new entry", detail)
 
     def test_a_repository_in_no_profiles_language_gets_the_seed_config_as_it_is(self):
         p = Fixture(os.path.join(self.tmp, "plain"), init=False)

@@ -96,6 +96,9 @@ READERS = {
     "init.skill_dirs": "init: the folders, from the repository root, that rail init writes the skills to. An agent"
                        " other than Claude Code reads SKILL.md files from a folder of its own: add it, and run rail"
                        " init again. The [guides] pages that are skills name the first",
+    "init.other_manifests": "init, doctor and the sweep: globs of tracked manifests that mark no code of the project's"
+                            " own, such as a package.json kept for a formatter. Any other manifest of Python,"
+                            " TypeScript, Rust or Go needs a [[profiles]] entry that covers it (rail docs languages)",
     "tools": "next, advance, review and doctor: a [tools.NAME] table for each thing the work reaches outside the"
              " repository, listed in the briefs; a ticket is not claimed while a name in its `env` is not set, and"
              " only the key of a tool with `ci = true` may be in a ticket branch's reach (rail docs tools)",

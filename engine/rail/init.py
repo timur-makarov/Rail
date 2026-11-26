@@ -15,6 +15,12 @@ from .util import RailError, globmatch, match_any
 FRAMEWORK = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 PROFILES = os.path.join(FRAMEWORK, "profiles")
 
+# Each language's manifest names, and the folders whose manifests mark no code of the project's own: the lists of
+# profiles/*/profile.toml, which a project's copy of the engine doesn't have, so `rail doctor` reads them here.
+MANIFESTS = {"go": ["go.mod"], "python": ["pyproject.toml", "setup.cfg", "requirements*.txt"],
+             "rust": ["Cargo.toml"], "typescript": ["package.json"]}
+VENDORED = ["node_modules", "vendor", "target", ".venv", "dist"]
+
 LAUNCHER = '''#!/usr/bin/env python3
 """This project's rail launcher: it runs the engine in ../engine. The SessionStart hook puts this folder on PATH."""
 import os
@@ -311,6 +317,75 @@ def _describe(found):
     return ", ".join(words)
 
 
+def tracked_files(root):
+    return [path for path in gitx.git(["ls-files", "-z"], root).stdout.split("\0") if path]
+
+
+def unprofiled(files, config):
+    """[(language, folder, manifest)]: the top-most folders holding a manifest that no [[profiles]] entry of its
+    language covers, "" for the root, each with one such manifest's path. A manifest under a vendored folder, or one
+    [init] other_manifests names, marks no language of the project's own."""
+    entries, left_out = config.get("profiles") or [], (config.get("init") or {}).get("other_manifests") or []
+    out = []
+    for name, manifests in sorted(MANIFESTS.items()):
+        paths = [e.get("paths") or "**" for e in entries if e.get("name") == name]
+        bare = {}
+        for path in files:
+            if (match_any(manifests, os.path.basename(path)) and not set(VENDORED).intersection(path.split("/")[:-1])
+                    and not match_any(paths, path) and not match_any(left_out, path)):
+                bare.setdefault(os.path.dirname(path), path)
+        out += [(name, folder, bare[folder]) for folder in sorted(bare)
+                if not any(folder.startswith(above + "/") or (above == "" and folder) for above in bare)]
+    return out
+
+
+UNCOVERED = ("{what}: no [[profiles]] entry covers it, so its suppression rule, test paths, generated files and"
+             " commands are not in .rail/config.toml. Run `rail init` here with the rail that install put on PATH: it"
+             " prints what to add and writes nothing to the config. A manifest that marks no code of the project's"
+             " own goes under [init] other_manifests")
+
+
+def uncovered(bare):
+    """One sentence on the manifests unprofiled() found, for doctor and the sweep."""
+    return UNCOVERED.format(what="; ".join(f"{path} marks {name}" for name, _, path in bare))
+
+
+def additions(found, config, files):
+    """What a config that is there already lacks for the profiles found, as text for a person or a ticket to put
+    into it: rail init never writes to a project's own config. "" when every manifest is covered."""
+    bare, entries = unprofiled(files, config), config.get("profiles") or []
+    blocks = []
+    for f in found:
+        folders = [folder for name, folder, _ in bare if name == f["name"]]
+        if not folders:
+            continue
+        entry = next((e for e in entries if e.get("name") == f["name"]), None)
+        profile = f["profile"]
+        lines = [f"{f['name']} in {', '.join(folder or 'the root' for folder in folders)}:"]
+        if entry:
+            lines.append(f'- the {f["name"]} entry of [[profiles]]: paths = {json.dumps(f["paths"])}'
+                         f' (it is {json.dumps(entry.get("paths") or "**")})')
+        else:
+            lines.append("- a new entry and its rules, at the end of the file:")
+            lines.append(_toml_table("profiles", {"name": f["name"], "paths": f["paths"]},
+                                     "from rail init (rail docs languages)").rstrip("\n"))
+            lines += [_toml_table("rules", rule, f"from the {f['name']} profile").rstrip("\n") for rule in profile["rules"]]
+            for label, have, want in (("migration_paths", config.get("migration_paths") or [], profile["migration_paths"]),
+                                      ("[size] exclude", (config.get("size") or {}).get("exclude") or [], profile["generated"]),
+                                      ("[tests] paths", (config.get("tests") or {}).get("paths") or [], profile["tests"])):
+                new = [item for item in want if item not in have]
+                if new:
+                    lines.append(f"- {label} gains {', '.join(json.dumps(item) for item in new)}")
+        setup, parts, _ = default_parts([dict(f, dirs=folders)])
+        parts = [part for part in parts if part["profile"] != "common" or not entries]
+        if setup:
+            lines.append(f"- [commands] setup gains: {' && '.join(setup)}")
+        if parts:
+            lines.append(f"- [commands] verify gains: {' && '.join(part['run'] for part in parts)}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
 def _base_branch(root):
     """The remote's default branch; with no remote, the branch init runs on."""
     head = gitx.git(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], root, check=False).stdout.strip()
@@ -355,6 +430,20 @@ def with_skill_dirs(text, dirs):
     end = text.find("\n[", start + 1)
     end = len(text) if end < 0 else end
     return text[:start] + text[start:end].replace(f'"{SKILL_DIR}/', f'"{dirs[0]}/') + text[end:]
+
+
+def lacking(root, found):
+    """The receipt's words on what the project's config lacks for the languages found; "" when it lacks nothing or
+    can't be read."""
+    try:
+        with open(os.path.join(root, ".rail", "config.toml"), "rb") as f:
+            config = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return ""
+    text = additions(found, config, tracked_files(root))
+    return ("" if not text else ". It lacks what follows, which is a change to .rail/config.toml for a person to"
+            " approve; a manifest that marks no code of the project's own goes under [init] other_manifests instead:\n"
+            + text)
 
 
 def init(cwd, skills_to=None):
@@ -407,7 +496,7 @@ def init(cwd, skills_to=None):
         step("profiles", True, f"found {_describe(found)}; " + (
             "wrote each to .rail/config.toml with its default setup and verify, rules, migration paths, generated"
             " files and [tests] paths"
-            if config_new else ".rail/config.toml was there already, so nothing was written to it"))
+            if config_new else ".rail/config.toml was there already, so nothing was written to it" + lacking(root, found)))
 
     copies = {
         "config.toml": ".rail/config.toml",
