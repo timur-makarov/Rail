@@ -1,0 +1,23 @@
+description = "Arm 1 of the first run (PLAN section 6): Rail, nobody to ask; worker ladder Sonnet 5.5 medium then Opus 5.5 medium, contract and review on Opus 5.5 high, consult on Fable 5.2 high; the worker never resumes a session"
+
+# The two-rung ladder is not in this file: an arm can name one rung only (bench/arms.py turns worker.model and
+# effort into a one-rung ladder), so every project file this arm runs on sets [rail.config.worker] ladder =
+# ["claude-sonnet-5-5:medium", "claude-opus-5-5:medium"]. worker.model is left out here on purpose: setting it
+# would replace that ladder with one rung. person_ladder stays as Rail's seed has it (Opus 5.5 medium, then high).
+
+[worker]
+# Rail's seed command, with the bench's budget flag and tool list, and without --resume (as arm `rail`).
+command = '''claude -p --output-format stream-json --verbose ${RAIL_MODEL:+--model "$RAIL_MODEL"} ${RAIL_EFFORT:+--effort "$RAIL_EFFORT"} --tools {tools} --permission-mode auto --permission-prompts none --max-turns 300 --max-budget-usd {budget}'''
+
+[contract]
+# [worker] contract = "claude-opus-5-5:high": Rail runs the contract writer through the worker's command.
+model = "claude-opus-5-5"
+effort = "high"
+
+[review]
+# The seed's review command, which holds --effort high; the model is [review] model.
+model = "claude-opus-5-5"
+
+[consult]
+# The seed's consult command, which holds --effort high; the model is [consult] model.
+model = "claude-fable-5-2"
