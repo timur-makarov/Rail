@@ -10,7 +10,7 @@ import re
 import shlex
 import tempfile
 
-from . import areas, gitx
+from . import areas, flakes, gitx
 from .project import event, review_path, ticket_path
 from .ticket import KINDS, Ticket
 from .util import could_not_run, match_any, now_iso, run_shell, tail
@@ -274,12 +274,17 @@ def brief(project, f, role, ledger, disputed=None):
                     "doesn't hold, return an empty list. `summary` says why. When it has evidence, run the command again.")
         job = f"Decide whether finding {disputed} holds. You are the refuter."
     guidance = review_guidance(project, ref)
+    patch = project.patch_id(ref)
+    flaky = list(dict.fromkeys(flakes.name(x) for x in flakes.of(t.events) if x["patch_id"] == patch))
     parts = [
         f"# Review brief: ticket {t.id}, {f.tier}", "", f"This run's job: {job}", "",
         "## The ticket", ticket_text.strip(), "",
         f"Risk: tier {f.tier}. scope_paths: {', '.join(f.ticket.scope)}.", "",
         *((first_contract(project, t) or []) if role == "review" else []),
         *([BASE_GREEN, ""] if role == "review" and checks_green_on_base(t) else []),
+        *(["## Flaky checks on this change",
+           "Each of these both failed and passed on this same code. It may be an old flake, or a race this change"
+           " brought in:", *[f"- `{name}`" for name in flaky], ""] if flaky and role != "refuter" else []),
         "## The diff", "```diff", diff, "```", "",
         "## Areas this change touches", "| Area | Paths | Holds |", "|---|---|---|", rows, "",
         "Directories:", found["digest"], "",

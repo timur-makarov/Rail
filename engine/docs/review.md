@@ -49,6 +49,10 @@ that change only in the diff. Before each run the engine also writes the base's 
 where those two files are the ticket's own copies: a command that names them by their path there lets a change
 rewrite the prompt of its own review, and `rail doctor` says so.
 
+**Flaky checks.** When a `verify` or `Check:` command both failed and passed on the patch under review, the
+brief of the review and of the security seat lists it under "Flaky checks on this change": it may be an old
+flake, or a race the change brought in (`rail docs retries`).
+
 **When the checks can't show the work.** When every `Check:` line already passed on the base branch before
 the work began (the `base_checks` event, `rail docs loop`), the review run's brief says so, and asks the
 reviewer to look at whether the change is tested.

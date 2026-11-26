@@ -370,7 +370,7 @@ class Sweep(RailTest):
         self.assertEqual(swept["reason"]["code"], "SWEEP_TICKETS")  # every change was reviewed, and still there is a task
         self.assertIn("Open one ticket for each pattern in the worker runs", swept["action"]["brief"])
         self.assertEqual(swept["steps"][-1]["detail"],
-                         "no review run: 0 parked findings, 0 proposed checks, 1 patterns in the worker runs")
+                         "no review run: 0 parked findings, 0 proposed checks, 1 patterns in the worker runs, 0 flaky checks")
         with open(os.path.join(p.worktree("4"), ".rail", "journal", "4-summary.md")) as f:
             summary = f.read()
         self.assertIn("## Patterns in the worker runs\n- `pytest` failed before it first passed, in 3 tickets (1, 2, 3)",

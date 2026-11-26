@@ -6,7 +6,7 @@ consult); `next` makes the move, derives the facts again, and reads the table on
 
 import json
 
-from . import gitx
+from . import flakes, gitx
 from .project import advice_path, ticket_path
 from .util import MISSING_HELP
 
@@ -167,6 +167,9 @@ def _failure_output(f, e):
 def _step_failed(f):
     e = f.last_fail
     output = _failure_output(f, e)
+    if flakes.TOLD not in output and any(x["step"] == e.get("step") and x["patch_id"] == e.get("patch_id")
+                                         for x in flakes.of(f.t.events)):
+        output = f"{output}\n\n{flakes.TOLD}".strip()  # another machine's ship: the journal still says so
     end = f".\n{output}\n\n" if output else ". "
     if e.get("status") == "could_not_run":
         return (f"The last ship of ticket {f.id} could not run '{e.get('step')}': {e.get('detail', '')}{end}"
@@ -400,7 +403,8 @@ ROWS = [
                f" test lives gets no ticket. Open one ticket \"make it a check: ...\" for"
                f" each kind of proposed check. Open one ticket for each pattern in the worker runs, for what would have"
                f" told the worker: a setup or provision command, a line in the project's part of AGENTS.md, or a guide's"
-               f" text. Drop duplicates. Change no code here. Then run: rail advance {f.id}"),
+               f" text. Open one ticket for each flaky check, to make it deterministic, with the Check: line the summary"
+               f" gives for it. Drop duplicates. Change no code here. Then run: rail advance {f.id}"),
     ("SETUP_FAILED",       "agent", "agent_task",  lambda f: f.state == "implementing" and f.setup_failed,
      _setup_failed),
     ("VERIFY_ASSUMPTIONS", "agent", "agent_task",  lambda f: f.state == "implementing" and f.open_assumptions,

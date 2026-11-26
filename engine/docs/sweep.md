@@ -33,17 +33,21 @@ next sweep starts. The first sweep starts where Rail was set up.
   the machine doesn't have, a call a rule or the guard denied, a file read more than twice. The same key in the
   runs of three or more tickets merged since the last sweep is a pattern: something the project could have
   told the worker. No model reads for this, and the run logs, which are never committed, aren't needed.
+- **Flaky checks:** a command that both failed and passed on the same code (`rail docs retries`) in two or more
+  tickets merged since the last sweep. Commands are matched as failure signatures are, with numbers, hashes and
+  paths left out. The summary gives each with a `Check:` line that runs it 20 times in a row.
 - **Output:** tickets, never edits, and a one-page summary in `.rail/journal/NN-summary.md`: the free part,
-  the review's findings, the parked and open advisory findings, the proposed checks by kind and the patterns. The agent opens a ticket for
+  the review's findings, the parked and open advisory findings, the proposed checks by kind, the patterns and the flaky checks. The agent opens a ticket for
   each finding that names something wrong (a finding about style gets none), and one ticket
   "make it a check: ..." for each kind of proposed check, so a mistake that could happen again ends as a
   test, a rule or a lint. It opens one ticket for each pattern, for what would have told the worker: a `setup`
-  or `provision` command, a line in the project's part of `AGENTS.md`, or a guide's text. Filing tickets is writing contracts, so the answer (`SWEEP_TICKETS`) names
+  or `provision` command, a line in the project's part of `AGENTS.md`, or a guide's text; and one ticket for each
+  flaky check, to make it deterministic, with the `Check:` line the summary gives. Filing tickets is writing contracts, so the answer (`SWEEP_TICKETS`) names
   `[worker] contract`'s model and effort, and `rail work NN` runs it like any ticket's work: a script that
   drives Rail with `rail next`, `rail work` and `rail advance` goes through a sweep with no step of its own.
 
 When the sweep finds nothing (no unreviewed change, no parked or open advisory finding, no proposed check, no
-pattern, and doc-lint is clean), the agent gets no task: `rail next` answers `SWEEP_EMPTY` with `rail advance NN`, and the sweep's
+pattern, no flaky check, and doc-lint is clean), the agent gets no task: `rail next` answers `SWEEP_EMPTY` with `rail advance NN`, and the sweep's
 ticket merges, which moves the marker.
 
 A sweep never blocks a merge. To turn other signals into tickets, such as failed CI runs or an error

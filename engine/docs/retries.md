@@ -25,6 +25,16 @@ tried and why it stopped; and removes the worktree and branches. The closed pull
 GitHub. To try again, label the issue `rail` again. A PERSON ticket that is stuck waits for a person
 (`RETRY_CAP`): a person is there anyway.
 
+**A flaky check.** A flake is a `verify` or `Check:` command that both failed and passed on the same code (the
+same `patch_id`). When one of them fails at ship, the engine runs that one command once more, at once. When the
+second run passes, the step still fails and counts like any failure: a race the change brought in looks exactly
+like an old flake, so a pass on the second try proves nothing about the change. The engine writes a `flake`
+event, and the failure's brief says to find why the command is not deterministic and to add no retry, sleep or
+skip. A command that fails on a patch where another ship passed it, or the other way round, is a flake too.
+A command the shell couldn't start is not run again, and `rail ci` runs nothing twice. The reviewer's brief
+names each flake on the patch it reviews; the sweep opens a ticket for a command that was flaky in two or more
+merged tickets (`rail docs sweep`); `rail stats` has a FLAKES table.
+
 **Spending has two caps of its own.** They are sums of what the runs reported (`cost_usd` on the `worked`
 events of `rail work` and on the review, security, refuter and sweep steps): the CLI's own estimate, not the
 bill. Consult records no cost, and neither does a session a person drives.

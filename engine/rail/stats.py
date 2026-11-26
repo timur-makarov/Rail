@@ -10,7 +10,7 @@ import statistics
 import time
 from collections import Counter
 
-from . import gitx, timing
+from . import flakes, gitx, timing
 from .project import events_path, parse_events, review_path
 from .review import Ledger, load_doc
 from .state import SHIP_STEPS
@@ -319,6 +319,7 @@ def collect(project, tickets, since=None, states=None, now=None):
     by_worker, by_profile, names_cause, counted = {}, {}, 0, []
     fixed_by_person, under = _held_a_kind(tickets), {"tickets": 0, "kinds": Counter()}
     workers, acted = {}, {"tickets": 0, "cost_usd": 0.0}  # worker runs by model and effort; tickets a person acted on
+    flaky = {}  # command -> the merged tickets it was flaky on, its flakes and its runs at ship
     for nn, t in tickets.items():
         ships = [e for e in t.events if e.get("event") == "shipped"]
         tier = (ships[-1] if ships else t.last("accepted") or {}).get("tier")
@@ -353,6 +354,14 @@ def collect(project, tickets, since=None, states=None, now=None):
             side["reverted_or_fixed"] += nn in reverted or nn in caused
         counted.append(nn)
         review_usd, worker_usd = _cost(t)
+        found_flakes = flakes.of(t.events)
+        for name, n in flakes.runs(t.events).items():
+            if found_flakes or name in flaky:
+                flaky.setdefault(name, {"tickets": 0, "flakes": 0, "runs": 0})["runs"] += n
+        for name in dict.fromkeys(flakes.name(x) for x in found_flakes):
+            flaked = flaky.setdefault(name, {"tickets": 0, "flakes": 0, "runs": 0})
+            flaked["tickets"] += 1
+            flaked["flakes"] += sum(flakes.name(x) == name for x in found_flakes)
         if _acts(t):
             acted["tickets"] += 1
             acted["cost_usd"] += review_usd + worker_usd
@@ -450,6 +459,9 @@ def collect(project, tickets, since=None, states=None, now=None):
         "outcomes": {"held_days": held_days, "tiers": {tier: _outcome_done(row) for tier, row in outcomes.items()},
                      "names_cause": names_cause, "by_worker": _split(by_worker), "by_profile": _split(by_profile)},
         "time": timing.collect(tickets, merged_at, counted),
+        # Commands that both failed and passed on the same code, in the merged tickets: flakes of the runs counted.
+        "flakes": {name: dict(row, share=round(row["flakes"] / row["runs"], 3) if row["runs"] else None)
+                   for name, row in sorted(flaky.items()) if row["flakes"]},
         # What rail work's runs on the merged tickets reported, by model and effort, and what the tickets a person
         # acted on cost. A session a person drives records no cost.
         "worker": {"runs": {name: _rounded(workers[name]) for name in sorted(workers)},
@@ -570,6 +582,15 @@ def render_drops(data):
     return [line]
 
 
+def render_flakes(data):
+    rows = data["flakes"]
+    if not rows:
+        return []
+    return ["", *_table(["FLAKES", "tickets", "flakes", "runs", "share"], [
+        [name if len(name) <= 60 else name[:57] + "...", r["tickets"], r["flakes"], r["runs"], _pct(r["share"])]
+        for name, r in rows.items()])]
+
+
 def render_worker(data):
     """What the worker runs of the merged tickets cost and how they ended, once rail work ran one."""
     runs = data["worker"]["runs"]
@@ -687,6 +708,7 @@ def render(data):
         lines.append(f"Consult ran {data['consults']} times.")
     lines += render_guides(data)
     lines += timing.render(data["time"], _table)
+    lines += render_flakes(data)
     lines += render_worker(data)
     if not review["roles"]:
         return "\n".join(lines + ["", "No review ran.", *render_sources(data), *render_grilling(data)])

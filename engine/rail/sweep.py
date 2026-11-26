@@ -9,7 +9,7 @@ import json
 import re
 from collections import defaultdict
 
-from . import doclint, gitx
+from . import doclint, flakes, gitx
 from .project import events_path, parse_events
 from .util import globmatch, match_any
 
@@ -25,6 +25,8 @@ reviewers proposed are below: report a parked one again when it is real, and gro
 
 NOTHING = "nothing to file"  # the detail of a harvest step that found nothing: the ticket merges with no task
 PATTERN_TICKETS = 3  # the same dead end in the worker runs of this many merged tickets is a pattern
+FLAKE_TICKETS = 2    # the same command flaky in this many merged tickets gets a ticket
+FLAKE_RUNS = 20      # how often in a row that ticket's check runs the command
 # What a worker run counts (rail docs journal, the `worked` event), as the summary says it.
 DEAD_ENDS = {"failed": "`{key}` failed before it first passed", "not_found": "`{key}` wasn't on the machine",
              "denied": "a call was denied (`{key}`)", "reread": "`{key}` was read more than twice in a run"}
@@ -148,6 +150,24 @@ def patterns(project, merged):
     return sorted(found, key=lambda x: (-len(x[2]), x[0], x[1]))
 
 
+def flaky(project, merged):
+    """The commands that were flaky (rail docs retries) in FLAKE_TICKETS or more of the tickets merged since the last
+    sweep, as [(command, ticket ids)]. The command is matched as the failure signatures are: lower-cased, with
+    numbers, hashes and paths left out, so a temp path in it doesn't make it two commands."""
+    from .steps import normalise
+
+    ids = sorted(set(merged), key=int)
+    blobs = gitx.read_blobs([f"{project.base_ref}:{events_path(nn)}" for nn in ids], project.root)
+    seen, shown = defaultdict(list), {}
+    for nn in ids:
+        for key in dict.fromkeys(flakes.name(x) for x in flakes.of(parse_events(blobs.get(f"{project.base_ref}:{events_path(nn)}")))):
+            seen[normalise(key)].append(nn)
+            shown.setdefault(normalise(key), key)
+    verify = project.config["commands"]["verify"]
+    return [(verify if shown[key] == "verify" and verify else shown[key], where)
+            for key, where in sorted(seen.items(), key=lambda x: (-len(x[1]), x[0])) if len(where) >= FLAKE_TICKETS]
+
+
 def brief(project, commits, parked, checks):
     from .review import DO_NOT_REPORT, SECURITY, project_conventions
 
@@ -168,7 +188,7 @@ def brief(project, commits, parked, checks):
     return "\n".join(parts) + "\n"
 
 
-def summary(nn, start, commits, merged, problems, counts, entry, parked, checks, recurring=()):
+def summary(nn, start, commits, merged, problems, counts, entry, parked, checks, recurring=(), flaked=()):
     review = (entry["summary"] if entry else "(the review run failed)") if commits else \
         "(no review run: nothing merged without a review)"
     lines = [f"# Sweep {nn}", "", f"Since {start[:12]}: {len(merged)} tickets merged; {len(commits)} commits merged"
@@ -183,7 +203,11 @@ def summary(nn, start, commits, merged, problems, counts, entry, parked, checks,
               "", "## Proposed checks, by kind", *([f"- {c} ({', '.join(w)})" for c, w in checks.items()] or ["(none)"]),
               "", "## Patterns in the worker runs",
               *([f"- {DEAD_ENDS[kind].format(key=key)}, in {len(where)} tickets ({', '.join(where)})"
-                 for kind, key, where in recurring] or ["(none)"])]
+                 for kind, key, where in recurring] or ["(none)"]),
+              "", "## Flaky checks",
+              *([f"- `{command}` both failed and passed on the same code, in {len(where)} tickets"
+                 f" ({', '.join(where)}). Check: `for i in $(seq {FLAKE_RUNS}); do {command} || exit 1; done`"
+                 for command, where in flaked] or ["(none)"])]
     return "\n".join(lines) + "\n"
 
 
@@ -196,14 +220,14 @@ def run(project, f, receipt):
     start, commits, merged = since_last(project)
     problems, counts = free_part(project)
     parked, checks = history(project, merged)
-    recurring = patterns(project, merged)
+    recurring, flaked = patterns(project, merged), flaky(project, merged)
     entry = None
     if commits:
         entry = review.run(project, f, "sweep", receipt, prompt=brief(project, commits, parked, checks))
     else:
-        receipt.record("harvest", True, f.patch_id, NOTHING if not (problems or parked or checks or recurring) else
-                       f"no review run: {len(parked)} parked findings, {len(checks)} proposed checks,"
-                       f" {len(recurring)} patterns in the worker runs")
+        receipt.record("harvest", True, f.patch_id, NOTHING if not (problems or parked or checks or recurring or flaked)
+                       else f"no review run: {len(parked)} parked findings, {len(checks)} proposed checks,"
+                            f" {len(recurring)} patterns in the worker runs, {len(flaked)} flaky checks")
     receipt.files[f".rail/journal/{f.id}-summary.md"] = summary(f.id, start, commits, merged, problems, counts, entry,
-                                                               parked, checks, recurring)
+                                                               parked, checks, recurring, flaked)
     return entry

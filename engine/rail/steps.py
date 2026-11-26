@@ -8,7 +8,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from . import config as configmod, doclint, gitx, rules
+from . import config as configmod, doclint, flakes, gitx, rules
 from .project import event, events_path, ticket_path
 from .state import raised_tier
 from .util import cloud
@@ -94,15 +94,25 @@ def keep_alive(project, t):
         project.append_events(t, [event(t.id, "saved", via="advance", files=0)], "still at work [skip ci]")
 
 
-def run_command(project, cwd, nn, step, command, run, patch_id=None, label=None):
-    """Run one configured command in `cwd` and record it."""
+def run_command(project, cwd, nn, step, command, run, patch_id=None, label=None, again=False):
+    """Run one configured command in `cwd` and record it. With `again`, a command that fails is run once more at
+    once: when that passes, the step still fails, and a `flake` event and the brief say that it did both on the same
+    code. A race the change brought in looks exactly like a flake, so the second run proves nothing about the change."""
     keep_alive(project, run.t)
-    code, output, ms = run_shell(command, cwd, {"RAIL_TICKET": nn, "RAIL_BASE": project.base_ref},
-                                 configmod.timeout(project.config, step))
+    env = {"RAIL_TICKET": nn, "RAIL_BASE": project.base_ref}
+    code, output, ms = run_shell(command, cwd, env, configmod.timeout(project.config, step))
     missing = could_not_run(code)
     status = missing or ("timeout" if code is None else f"exit {code}")
     detail = (f"{label}: {status}" if code != 0 else label) if label else status
-    return run.record(step, code == 0, patch_id, detail, ms, output=f"$ {command}\n{tail(output)}",
+    shown = f"$ {command}\n{tail(output)}"
+    if again and code != 0 and not missing:
+        keep_alive(project, run.t)
+        second, _, _ = run_shell(command, cwd, env, configmod.timeout(project.config, step))
+        if second == 0:
+            run.events.append(event(nn, "flake", step=step, command=command, patch_id=patch_id,
+                                    codes=["timeout" if code is None else code, 0]))
+            shown += f"\n\n{flakes.TOLD}"
+    return run.record(step, code == 0, patch_id, detail, ms, output=shown,
                       status="could_not_run" if missing else "ran")
 
 
@@ -195,7 +205,7 @@ def _stop(run, step):
     return None
 
 
-def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, offer=False):
+def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, offer=False, again=False):
     """The checks ship and CI share, in order, stopping at the first failure.
 
     Returns the tier the change needs (it may rise), or None when a check failed or, with `offer`, when an AUTO change
@@ -267,13 +277,13 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
 
     verify = project.config["commands"]["verify"]
     if verify:
-        if not run_command(project, cwd, nn, "verify", verify, run, patch_id):
+        if not run_command(project, cwd, nn, "verify", verify, run, patch_id, again=again):
             return _stop(run, "verify")
     else:
         run.not_run("verify")
 
     for command in ticket.checks():
-        if not run_command(project, cwd, nn, "checks", command, run, patch_id, label=command):
+        if not run_command(project, cwd, nn, "checks", command, run, patch_id, label=command, again=again):
             return None
     return tier
 
@@ -320,7 +330,7 @@ def ship(project, f, run):
     patch_id = project.patch_id(ref)
     text = gitx.read_blobs([f"{ref}:{ticket_path(t.id)}"], project.root)[f"{ref}:{ticket_path(t.id)}"]
     tier = check(project, t.id, Ticket(text or ""), ref, wt, f.tier, run, patch_id, accepted=f.accepted,
-                 offer=not t.last("split_offered"))
+                 offer=not t.last("split_offered"), again=True)
     if tier is None and run.failure and run.failure[0] == "verify" and run.events[-1].get("status") != "could_not_run":
         # A red base spends no budget: two tickets that each pass can break main together. A verify that could
         # not start is the machine's lack, not the base's: it is never taken for a red base.
