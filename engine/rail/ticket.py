@@ -17,8 +17,10 @@ KINDS = ("data-loss", "data-shape", "data-exposure", "external-effect", "access"
 FIELDS = {
     "id": str, "title": str, "tier": str, "scope_paths": list, "after": list,
     "caused_by": str, "external_id": str, "reversibility": str, "rollback": str, "person_reason": str,
-    "kind": str, "reverts": str,
+    "kind": str, "reverts": str, "priority": str,
 }
+# `priority`: "first" puts the ticket before the others where rail next picks. One level: first, then the rest.
+PRIORITIES = ("first",)
 TICKET_KINDS = ("revert",)  # `kind`: a ticket whose contract is built in. A revert takes ticket `reverts` out again
 # The `## Grilling` record a bot or a session writes when it questioned the person who asked for the ticket.
 TOPICS = ("scope", "done", "behaviour", "tier", "out-of-scope", "other")
@@ -256,6 +258,9 @@ def lint(ticket, expect_id=None):
         errors.append("scope_paths must list at least one path glob")
     elif any(p.startswith("/") or ".." in p.split("/") for p in scope):
         errors.append("scope_paths must be relative to the repository root")
+    if ticket.get("priority", "") not in ("", *PRIORITIES):
+        errors.append(f"priority must be \"{PRIORITIES[0]}\", or left out: rail next takes a ticket marked first"
+                      " before the others")
     if ticket.id and ticket.id in ticket.after:
         errors.append("a ticket can't come after itself")
     if not ticket.sections.get("Why"):

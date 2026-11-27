@@ -58,7 +58,7 @@ Each cloud session is a new session on a new clone, and `rail next` is all it ne
 - It resumes work an ended session left. A ticket another session is implementing or reviewing is left
   alone while it keeps moving; after `[claim] stale_minutes` (30) with no journal event, the next session
   resumes it from the pushed branch. `rail next --ticket NN` takes one over at once.
-- Then it takes new work, in ID order.
+- Then it takes new work, in ID order, with a ticket a person marked to go first before the others.
 
 Work that isn't pushed is lost when a machine goes away. So the work in flight is saved as it goes: hooks
 run `rail save` at the end of each turn and at most every ten minutes of work, and `rail advance` commits
@@ -148,6 +148,8 @@ The source only files tickets. The runner above picks them up on its own schedul
 - **Change a contract:** comment on its pull request. **Reject it:** close the pull request.
 - **Stop a ticket:** add the label `rail:hold` to its pull request. Nothing moves it until you add `rail:go`.
   `rail:needs-you` is the engine's own label: adding or removing it by hand changes nothing.
+- **Put a ticket first:** add the label `rail:first` to its pull request, or to the issue it came from. The
+  next run that takes new work takes it before the others (`rail docs tickets`).
 - **Revert a merged ticket:** add the label `rail:revert` to its merged pull request. The next run files a
   ticket that takes the change out again, comments with its number, and removes the label; the revert ships,
   is reviewed and merges like any ticket (`rail docs tickets`).

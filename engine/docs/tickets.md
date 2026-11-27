@@ -21,6 +21,7 @@ after = ["12"]                     # waits for 12 to merge
 caused_by = ""                     # on a fix ticket
 external_id = "github#123"
 kind = ""                          # "revert" on a ticket that takes another one out; then reverts = "NN"
+priority = ""                      # "first": rail next takes it before the others
 +++
 
 ## Why
@@ -124,6 +125,23 @@ file one with `rail add`.
   label counted as the approval of its contract, and a person still merges it.
 - **Its squash commit** carries `Reverts: <sha>`, which `rail stats` counts as a revert of NN.
 - **A brake doesn't stop it** (`rail docs cloud`): `rail:stop` can't block its own way out.
+
+## A ticket that goes first
+
+`rail next` takes new work in the order of the tickets' numbers. A ticket a person marked goes before the
+others. There is one level: first, then the rest; two marked tickets go in the order of their numbers. The
+mark is any of:
+
+- the line `priority = "first"` in the ticket. `rail amend NN "why" --file FILE` sets or removes it on a
+  filed ticket; no person approves that change.
+- the label `rail:first` on the ticket's pull request.
+- the label `rail:first` on the issue the ticket came from. `rail next` and `rail status` read the open
+  issues with the label in one call, and only while a ticket from an issue is unfinished.
+
+The mark orders new work. A session still goes on with the ticket it holds first, and a shipped ticket still
+moves before new work is claimed (`rail docs loop`). A marked ticket waits like any other for a ticket named
+in its `after` and for a ticket that is changing the same paths. `rail status` shows `goes first` on the
+ticket's row. On a person's own machine, `rail next --ticket NN` takes one ticket at once, with no mark.
 
 ## A ticket is its branch
 

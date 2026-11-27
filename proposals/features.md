@@ -323,9 +323,24 @@ checked on a machine with every toolchain**).
 
 ### 10. Priority
 
-A label or a front matter line that `rail next` reads before the ticket's number, so that one ticket can go
-first. `proposals/team.md` describes it in its section on priority; it is as useful to one person as to a
-team, and it is built from that page.
+Built (`rail docs tickets`): a person marks a ticket to go first, and `rail next` reads the mark before the
+ticket's number.
+
+**Settled while building.**
+- The page offered a label or a front matter line. Both are built: the line `priority = "first"` works with
+  no remote, and the label `rail:first` is the act a person has on GitHub.
+- The label counts on the ticket's pull request and on the issue the ticket came from. A ticket has no pull
+  request before its claim unless a person approves its contract first, so the issue is where a person on
+  GitHub marks new work. The open issues with the label are read in one call, only while a ticket from an
+  issue is unfinished.
+- The mark orders tickets within each group `rail next` goes through: the session's own, the ones no session
+  holds, the ones whose wait a person answered, and new work. It does not put new work before work in flight.
+- `rail amend` takes a change of `priority` as it takes a change of `after`: a reason, and no approval.
+- `rail status` shows `goes first` on the row, and `first: true` in JSON.
+
+**Left.**
+- More than one level. A ticket named in a marked ticket's `after` does not go first with it.
+- Model run: none of this is wording a model reads.
 
 ### 11. A skill that adds a tool
 

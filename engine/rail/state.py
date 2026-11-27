@@ -139,6 +139,9 @@ class Facts:
             # branch by its own pull request, and not inside another ticket's merge.
             self.pr = self.forge.merged_from(t.id)
         self.labels = self.forge.labels(self.pr) if self.pr else set()
+        # A person's mark that rail next takes this ticket before the others: the line in the ticket, or the label on
+        # its pull request. The label on the issue a ticket came from is read where the order is made (cli.first_ids).
+        self.first = (bool(self.ticket) and self.ticket.get("priority") == "first") or "rail:first" in self.labels
         self.stopped = self._stop()
         self.tools_missing = project.tools_missing()
         self.revert = self._revert(project)

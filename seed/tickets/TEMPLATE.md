@@ -8,6 +8,7 @@ scope_paths = ["src/feature/**"]   # globs; a change outside them fails at ship
 after = []                         # ticket IDs that must merge first
 caused_by = ""                     # on a fix ticket: the ticket that caused the defect
 external_id = ""                   # "github#123" or "PROJ-123"
+priority = ""                      # "first": rail next takes this ticket before the others
 +++
 
 ## Request

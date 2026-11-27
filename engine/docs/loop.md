@@ -87,7 +87,8 @@ its worktree in `.claude/worktrees/NN`, copies the files `.worktreeinclude` list
 each project's that the ticket's scope reaches, as a step `setup:NAME`, then `[commands] setup` (`rail docs
 languages`).
 It prefers this session's own tickets; then tickets no session holds (a shipped ticket, which any session
-may move through CI and the merge, and work an ended session left); then new work in ID order. A ticket
+may move through CI and the merge, and work an ended session left); then new work in ID order. Within
+each of these, a ticket a person marked to go first comes before the others (`rail docs tickets`). A ticket
 another session is implementing or reviewing is left alone while it keeps moving. After
 `[claim] stale_minutes` (30) with no journal event, the next `rail next` resumes it, and
 `rail next --ticket NN` takes it over at once. A ticket that waited for a person goes on with whoever

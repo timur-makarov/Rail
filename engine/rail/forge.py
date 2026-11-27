@@ -21,6 +21,8 @@ LABELS = {
     "rail:stop": ("b60205", "Rail: while an issue with this label is open, Rail does nothing here"),
     # only a person sets it, on a merged pull request; the engine removes it once the revert ticket is filed
     "rail:revert": ("b60205", "Rail: on a merged pull request, files a ticket that reverts it"),
+    # only a person sets it, on a ticket's pull request or on the issue the ticket came from
+    "rail:first": ("fbca04", "Rail: rail next takes this ticket before the others"),
 }
 
 STOP_PATHS = re.compile(r"(?im)^[ \t]*paths:[ \t]*(\S.*)$")
@@ -330,6 +332,7 @@ class Forge:
         self._checks = {}
         self._required = earlier._required if earlier else None  # the base branch's rules don't change mid-command
         self._stops = earlier._stops if earlier else None        # a person's brake is read once per command
+        self._firsts = earlier._firsts if earlier else None      # and so are the issues a person marked to go first
 
     @property
     def stale(self):
@@ -499,6 +502,18 @@ class Forge:
         """Every open issue with the label, however many pages they fill."""
         found = pages(f"repos/{self.repo}/issues?labels={label}&state=open&per_page={PAGE}")
         return [i for i in found if "pull_request" not in i]
+
+    def firsts(self):
+        """The numbers of the open issues a person labelled rail:first. Read once per command; with GitHub out of
+        reach there is nothing to read, and the order is the one the tickets themselves give."""
+        if self._firsts is None:
+            if not self.ok:
+                return set()
+            try:
+                self._firsts = {i["number"] for i in self.issues("rail:first")}
+            except ForgeError:
+                return set()
+        return self._firsts
 
     def open_issue(self, title, body, labels):
         return self.call("POST", "issues", {"title": title, "body": body, "labels": list(labels)})

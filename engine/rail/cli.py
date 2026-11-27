@@ -1100,8 +1100,25 @@ def cmd_answer(project, args):
     return from_facts(facts[f.id])
 
 
+def first_ids(project, facts):
+    """The ids of the tickets a person marked to go first: a `priority = "first"` line in the ticket, the label
+    rail:first on its pull request, or that label on the issue the ticket came from. The issues are read in one
+    call, and only when an unfinished ticket came from one."""
+    marked = {nn for nn, f in facts.items() if f.first}
+    issues = {}
+    for nn, f in facts.items():
+        external = (f.ticket.get("external_id") or "") if f.ticket else ""
+        if nn not in marked and f.state not in ("merged", "dropped") and re.fullmatch(r"github#\d+", external):
+            issues[nn] = int(external[len("github#"):])
+    if issues and project.forge and project.forge.ok:
+        labelled = project.forge.firsts()
+        marked |= {nn for nn, number in issues.items() if number in labelled}
+    return marked
+
+
 def cmd_amend(project, args):
-    """Change a frozen contract: the Done Contract, the scope or the tier, which only rises."""
+    """Change a frozen contract: the Done Contract, the scope or the tier, which only rises. A change to `after` or
+    to `priority` goes the same way, and needs no approval."""
     project.sync()
     tickets, facts = load(project)
     f = facts[project.find(args.ticket or requested(project, args), tickets).id]
@@ -1134,7 +1151,8 @@ def cmd_amend(project, args):
             ("done_contract", new.done_hash() != last.get("done")),
             ("scope", sorted(new.scope) != last.get("scope_paths")),
             ("tier", rank(new.tier) > rank(last.get("tier"))),
-            ("after", f.ticket is not None and sorted(new.after) != sorted(f.ticket.after))) if differs]
+            ("after", f.ticket is not None and sorted(new.after) != sorted(f.ticket.after)),
+            ("priority", f.ticket is not None and new.get("priority", "") != f.ticket.get("priority", ""))) if differs]
         if not changed:
             raise RailError(f"the contract of ticket {t.id} matches the accepted one; there is nothing to amend",
                             code="NOTHING_TO_AMEND")
@@ -1442,14 +1460,16 @@ def cmd_next(project, args):
                 pass
 
     # Any ticket the agent can act on comes first: this session's own, then tickets no session holds (shipped ones,
-    # which the engine moves from anywhere, and work an ended session left), then new work in ID order.
+    # which the engine moves from anywhere, and work an ended session left), then new work in ID order. Within each
+    # of these, a ticket a person marked to go first comes before the others.
     mine = [f for f in facts.values() if f.state in OPEN and not f.claimed_elsewhere]
     free = [f for f in facts.values() if f.state in OPEN and f.claimed_elsewhere and not f.held]
     # Another session's ticket that waited for a person, and has its answer: that session rested at the wait, and
     # the label is removed once read, so the run that reads it goes on.
     answered = [f for f in facts.values() if f.state in OPEN and f.held and answers_wait(f)]
     fresh = [f for f in facts.values() if f.state in ("new", "accepted")]
-    for candidate in mine + free + answered + fresh:
+    first = first_ids(project, facts)
+    for candidate in [f for group in (mine, free, answered, fresh) for f in sorted(group, key=lambda f: f.id not in first)]:
         if first_match(candidate)[1] != "agent":
             continue
         f, receipts = settle(project, candidate.id, explicit=False)
@@ -1803,6 +1823,7 @@ def cmd_status(project, args):
     project.sync()
     tickets, facts = load(project)
     rows, leftovers = [], []
+    first = first_ids(project, facts)
     for nn, f in facts.items():
         t = f.t
         code, owner, action = first_match(f)
@@ -1822,8 +1843,12 @@ def cmd_status(project, args):
             note = action["brief"]
         if f.pr and not note:
             note = f"PR #{f.pr['number']}"
+        marked = nn in first and f.state not in ("merged", "dropped")
+        if marked:
+            note = "; ".join(part for part in ("goes first", note) if part)
         rows.append({"ticket": nn, "title": t.ticket.title if t.ticket else t.label, "state": f.state, "owner": owner,
                      "tier": f.tier, "last_event": age(last), "branch": t.name, "note": note,
+                     **({"first": True} if marked else {}),
                      **({"pr": f.pr["html_url"]} if f.pr else {})})
         if f.state in ("merged", "dropped"):
             if t.worktree:
