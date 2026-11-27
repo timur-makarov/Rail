@@ -9,11 +9,11 @@ here are built, and is brought up to date then.
 
 ## How to read this page
 
-- **Next, in this order** holds the steps the owner confirmed on 2026-11-26. Nothing in them waits for
-  anything.
+- **Next, in this order** holds the steps the owner confirmed on 2026-11-26 and 2026-11-27. Nothing in them
+  waits for anything but the step before.
 - **Later** holds features that wait for nothing and that the owner put after those steps.
 - **Waits for a condition** groups the rest by what has to be true first: tools on the machine, model tests,
-  real tickets, a deploy target, more people or repositories, the owner taking up a feature set aside.
+  real tickets, a deploy target, more people, the owner taking up a feature set aside.
 - **Dropped** names what the owner decided not to build, so that it is not proposed again.
 
 Each feature says what it does, how, the test that decides whether it is kept, what it waits for, the
@@ -34,7 +34,8 @@ Size: S.
 **What it does.** On 2026-11-26 the current Rail was set up in a real repository from a cloud session, and its
 pull request ran the `rail` check on GitHub's runner. Two defects were fixed that day: the check's answer for
 a pull request with no ticket did not print why `verify` failed, and Rail's own example line for a tool was read
-as a credential by the secret scan. These came out of the same run and are left.
+as a credential by the secret scan. These came out of the same run and are left. The answer to a finding of
+the secret scan that is no secret is in **An exemption the worker writes is confirmed**.
 
 **How.**
 
@@ -52,11 +53,6 @@ as a credential by the secret scan. These came out of the same run and are left.
   lockfile tracked, a tracked `requirements*.txt` picks pip, and the pip commands name the file that was found
   (`pip-audit -r requirements-dev.txt`). A `pyproject.toml` with no lockfile and no requirements file stays
   with uv. `profiles/python/profile.toml`, `engine/rail/init.py`, `rail docs languages`.
-- **A finding of the secret scan that is no secret.** The scan reads every commit of the branch, and the guard
-  forbids rewriting a branch, so a false finding has no answer today: the line can be changed, and its first
-  commit still fails. `rail docs languages` gains the answer: put the finding's fingerprint, which the scan
-  prints, into `.gitleaksignore` and commit it; a real secret is rotated and never ignored. The file lets a
-  secret through, so it joins `person_paths` in the seed config, as a file that weakens a gate.
 - **The older engine's `needs_person`.** `engine/rail/review.py` and `readthese.py` still read a
   `needs_person` sentence from a review run stored by an older engine, and `rail docs journal` describes it.
   Rail keeps no compatibility with its earlier versions, so the reads and the sentence go.
@@ -65,19 +61,11 @@ as a credential by the secret scan. These came out of the same run and are left.
   `engine/rail/docs.py` says so.
 
 **Kept when.** The language tests pass on a machine that has every tool (`python3 tests/run.py --languages`
-prints no "not run" line for Python). Gate cases, no model: a fixture with `requirements-dev.txt` and no lockfile gets the pip
-commands; one with `uv.lock` beside it keeps uv; a ticket that adds `.gitleaksignore` is PERSON; a review run
-that holds only `needs_person` raises nothing and adds no "Read these" row.
+prints no "not run" line for Python). Gate cases, no model: a fixture with `requirements-dev.txt` and no
+lockfile gets the pip commands; one with `uv.lock` beside it keeps uv; a review run that holds only `needs_person` raises nothing and
+adds no "Read these" row.
 
 **Waits for.** Nothing.
-
-**Open decision.** Whether `.gitleaksignore` makes a ticket PERSON (proposed), or stays an AUTO change that
-the reviewer sees.
-
-**Assumed, not verified.**
-
-- That gitleaks honours `.gitleaksignore` when it scans commits (`gitleaks git`), as its documentation says.
-  Not checked here.
 
 #### One line of work per ticket, in the docs
 
@@ -223,207 +211,408 @@ Not covered: whether `facts` lowers misreadings (no model test until a layout ch
 - That the string literals in `table.py` hold all of the briefs' wording. The review brief (`review.py`) and
   the consult brief (`consult.py`) are built elsewhere; the renderers cover them only if they hold literals.
 
-### 4. Old tests run against the new code
+### 4. A triage step for the questions the engine raises
 
-Size: L.
+Four features, built in this order. The first is the step itself. The other three are the questions it answers
+first.
+
+The reason for the step: wherever the worker judges its own case today, a run with no stake in the answer judges
+it instead. The engine states a fact, a fresh run answers one closed question about it, and the engine acts on
+the answer. The owner decided this on 2026-11-27.
+
+#### The triage step
+
+Size: M.
+
+**What it does.** The engine raises a question from a fact it produced itself, such as a test that fails or a
+line the change added. A fresh run that did not write the change answers it with one of a few fixed answers, and
+the engine does what that answer means. The refuter already works this way for one question, whether a finding
+holds. This makes it one step with a list of question types, so that a new question costs a table entry and its
+test.
+
+**How.**
+
+- **One table of question types**, `QUESTIONS` in a new `engine/rail/triage.py`. Each entry holds: the type's
+  id; the fact that raises it; what the brief shows; the two to four answers allowed, each with one line on what
+  it means; what the engine does on each answer; and for an answer that lets the change through, the evidence it
+  must name and how the engine checks it.
+- **Events.** `question`, with the type, the `patch_id` and the fact; `answered`, with the answer, its evidence,
+  whether the evidence passed its check, and the run's cost. A question is open while its patch has no
+  `answered` event.
+- **One row.** `TRIAGE` in `engine/rail/table.py` fires for a shipped ticket with an open question, before any
+  review, so that no review is spent on a patch that is about to change.
+- **The run.** The engine starts it as it starts a review: a fresh session with tools that read and run and
+  never push, a brief that holds only what the type says to show, and a JSON answer checked against a schema.
+  `[triage] command` and `[triage] model` in `.rail/config.toml`; empty means the review seat's.
+- **Evidence.** An answer that lets the change through names its evidence, and the engine checks what it can: a
+  quoted contract line is in the ticket, a named file is in the change. An answer whose evidence fails its check
+  is invalid output: the run is repeated once, and a second invalid answer is the wait an invalid review already
+  has (`STUCK_REVIEW`).
+- **An answer that stops the change** fails a step named `triage`. The worker gets the fact and the answer in
+  its brief, and the failure counts toward the retry budget like any failed step. The next patch raises the
+  question again only if the fact still holds. Nothing goes to the refuter: a second run on the first one's
+  answer is not added.
+- **Numbers.** `rail stats` counts, for each type, the questions, each answer's share and the cost. The sweep
+  names a type that got the same answer in 19 of its last 20 questions: such a type is a rule the engine can
+  apply with no run.
+- **Only closed questions.** Whether a change is good stays the reviewer's question.
+- Files that change: `engine/rail/triage.py` (new), `engine/rail/table.py`, `engine/rail/steps.py`,
+  `engine/rail/config.py`, `engine/rail/stats.py`, `engine/rail/sweep.py`, `seed/config.toml`, a new page
+  `engine/docs/triage.md`, `engine/docs/journal.md`, `engine/docs/loop.md`, `CHANGELOG.md`.
+
+**Kept when.** Gate cases, no model, with a stand-in for the run as `tests/fake_reviewer.py` is for the
+reviewer: a fact raises one question for a patch and no second one for the same patch; an answer that passes
+with checked evidence lets the ticket go on to review; an answer that stops fails `triage` and returns the
+ticket to the worker; evidence that fails its check repeats the run once and then waits; `rail stats` shows the
+counts on fixture journals. Kept when every case behaves as written.
+
+**Waits for.** Nothing. The wording of each brief is not tested with a model until the owner restarts the model
+tests.
+
+**Open decision.** None.
+
+**Assumed, not verified.**
+
+- That a run with a narrow brief answers a closed question better than the worker does about its own change. No
+  measurement from Rail; each type's own test decides whether it is kept.
+- That the review seat's model suits the step. `rail stats` shows the cost for each type once it runs.
+
+#### Old tests run against the new code
+
+Size: M.
 
 **What it does.** When a ticket edits, deletes or renames a test file that existed on the base, Rail runs the
 checks again with the base version of that file. If a command that passed with the edited test fails with the
-old one, the engine adds a blocking finding, which the author must answer like any finding. The reviewer's
-brief also names every change to what checks the change. Reason: about one in five benchmark patches that pass
-their tests fail stronger tests, and agents bend checks by editing tests until they pass. The `Check:` lines
-are frozen at acceptance, but the test files they run are not.
+old one, the engine raises the question `old-test`. Reason: about one in five benchmark patches that pass their
+tests fail stronger tests, and agents bend checks by editing tests until they pass. The `Check:` lines are
+frozen at acceptance, but the test files they run are not.
 
 **How.**
 
 - `[tests] paths` is read for the first time. It holds globs of the files that hold tests and their runner's
-  settings (such as `tests/**`, `**/*_test.go`, `**/conftest.py`, `vitest.config.*`). `rail init` already
-  writes it from the language profiles, and the agent adjusts the list. Empty switches this feature off,
-  including the brief section. `engine/rail/docs.py` drops "nothing yet" from the `tests.paths` line.
+  settings (such as `tests/**`, `**/*_test.go`, `**/conftest.py`, `vitest.config.*`). `rail init` already writes
+  it from the language profiles, and the agent adjusts the list. Empty switches this feature off, including the
+  brief section. `engine/rail/docs.py` drops "nothing yet" from the `tests.paths` line.
 - When a ship passes, and the change edits or deletes a file that existed on the base and matches `[tests]
   paths`, the engine runs the checks once more with the base version of those files:
-  1. In the ticket's worktree, `git checkout <base> -- <files>` for each edited or deleted test file. A
-     renamed file counts under its old path. `changed_files` (`engine/rail/project.py`) runs `git diff
-     --name-only`, which with git's default rename detection lists only the new path, so this step reads `git
-     diff --name-status <base>...<ref>` and takes the old path of each `R` row. A rename to a path outside
-     `[tests] paths` counts too.
+  1. In the ticket's worktree, `git checkout <base> -- <files>` for each edited or deleted test file. A renamed
+     file counts under its old path. `changed_files` (`engine/rail/project.py`) runs `git diff --name-only`,
+     which with git's default rename detection lists only the new path, so this step reads `git diff
+     --name-status <base>...<ref>` and takes the old path of each `R` row. A rename to a path outside `[tests]
+     paths` counts too.
   2. Run `verify` and each `Check:` line, as ship runs them.
-  3. Put the worktree back with `git reset --hard <head>` and `git clean -fdq`, as `base_checks` does after
-     its run (`engine/rail/steps.py`). `clean` without `-x` keeps ignored files such as installed
-     dependencies.
+  3. Put the worktree back with `git reset --hard <head>` and `git clean -fdq`, as `base_checks` does after its
+     run (`engine/rail/steps.py`). `clean` without `-x` keeps ignored files such as installed dependencies.
   4. Record a `base_tests` event: `patch_id`, the files, and per command `green` or `red` (the same values as
      `base_checks`). It runs once per `patch_id`, so a clean rebase does not run it again.
-- It runs only at ship, not in `rail ci`: it fails no step, and CI repeats only what can fail a ship (`CHECKS`
-  in `engine/rail/steps.py`). A new test file is the author's and is left alone: the agent's hands stay on new
-  tests and off old ones.
-- Finding: when a command was green with the edited tests and is red with the base ones, the engine adds a
-  blocking finding: "The base version of `tests/x.py` fails on this change: `<command>`, exit N."
-- How the finding enters the ledger. A `finding` event alone is not enough: `Ledger` builds its findings only
-  from the runs stored in `NN-review.json`, and reads `finding` events only for ids those runs hold
-  (`engine/rail/review.py`). So the engine stores a run entry, as `_read` does for a reviewer, with:
-  - `role: "engine"`, `patch_id`, `head`, `at`, and `summary`: "base versions of edited tests, run against
-    this change";
-  - one finding per red command: `severity: "blocking"`, `file` (the old test path), `claim`, and `evidence`:
-    the command, its output's tail, and `rerun` filled from the engine's own run with `reproduced: true`. The
-    engine ran it, so the evidence is not run a second time (`_read` re-runs a reviewer's evidence; this run
-    does not go through `_read`);
-  - a `finding` event `by: "engine"` with `outcome: "open"`, `severity` and `claim`, as `_read` writes for a
-    reviewer's new finding.
-- Ship adds the updated `NN-review.json` to `run.files`, which commits journal files with the events. On a
-  later patch, a command that is still red is stored with `repeats` set to the open finding's id, so it stays
-  one finding.
-- The author answers it like any finding (`unanswered`, `disputed` and `complete` read every role):
-  - `fixed`: the old test's behaviour is kept. `rail answer NN F fixed` needs no new commit today
-    (`engine/rail/cli.py`), and `needed_run` re-checks a fixed blocking finding only by a later run of
-    `review` or `security`, so an `engine` finding marked fixed on an unchanged patch would close unchecked.
-    So `rail answer` refuses `fixed` for an `engine` finding while the ticket's `patch_id` is the one the
-    finding was reported on, with one sentence: "Change the code or the test, then `rail advance NN`: the base
-    tests run again on the new patch." Once the patch changed, the rule runs again at ship, before any review
-    of that patch; a command still red is reported again with `repeats`, and the ledger reopens the finding as
-    for a reviewer's repeat. `needed_run` keeps its two roles, and its docstring says why.
-  - `declined`: the contract changes that behaviour on purpose. The answer names the Done Contract line or `##
-    Why` sentence that says so. A disputed blocking finding goes to the refuter, as today, with the contract
-    in its brief.
-- `rail stats` counts `engine` findings on their own line, with their outcomes, not under the reviewer's hit
-  rate or `BY MODEL`.
+- It runs only at ship, not in `rail ci`: it fails no step by itself, and CI repeats only what can fail a ship
+  (`CHECKS` in `engine/rail/steps.py`). A new test file is the author's and is left alone.
+- **The question.** A command that was green with the edited tests and red with the base ones raises `old-test`.
+  The brief shows the old test, the test's diff, the command and the tail of its output, and the Done Contract
+  with its `## Why`. It does not show the rest of the change. The answers:
+
+  | Answer | Meaning | Evidence the engine checks | What the engine does |
+  |---|---|---|---|
+  | `contract` | The contract asks for this change in behaviour | The quoted Done Contract line or `## Why` sentence is in the ticket | Records it; the ticket goes on |
+  | `moved` | The behaviour is kept; the test was moved, renamed or rewritten | The named test file is in the change and matches `[tests] paths` | Records it; the ticket goes on |
+  | `lost` | Behaviour is lost that the contract does not ask for | None | Fails `triage`; the worker keeps the behaviour, or amends the contract |
+
 - The reviewer's brief gains a section, "Changes to what checks this change", listing: each changed file that
-  matches `[tests] paths`, with whether it existed on the base; each changed `REVIEW.md`; and the `base_tests`
-  result. A change that weakened a test and passed is then seen twice: by the rule and by the reviewer.
-- These items go to the reviewer only, not to a person's "Read these" list: a changed test can be undone, and
-  only what cannot be undone reaches a person. A change to `.rail/config.toml`, where `verify` lives, is
-  already PERSON through `person_paths`, and a change to CI workflows is PERSON under the kind
-  `runs-with-secrets` (`rail docs kinds`).
-- `REVIEW.md` stays out of `person_paths`: an AUTO ticket can change it for later tickets, and the new brief
-  section names that change to the reviewer of the ticket that makes it (open decision below).
-- Files that change: `engine/rail/review.py` (the brief section; a function that stores the `engine` run entry
-  and its `finding` events, with `repeats` and the `rerun`); `engine/rail/cli.py` (`rail answer` refusal);
-  `engine/rail/steps.py` (`base_tests` after a passing ship, `--name-status`, `NN-review.json` in
-  `run.files`); `engine/rail/stats.py` (engine findings line); `engine/rail/config.py` and
-  `engine/rail/docs.py` (`[tests] paths` read); `engine/docs/review.md`; `engine/docs/journal.md` (the
-  `base_tests` event, `by: engine` on a finding, the `engine` role in `NN-review.json`);
-  `engine/docs/stats.md`; `CHANGELOG.md`.
-- Not covered: a test that runs real services or secrets the ticket's machine lacks (the base run then fails
-  on both versions and finds nothing). For Rust, unit tests live in `#[cfg(test)]` modules inside source
-  files, so this feature covers only integration tests there.
+  matches `[tests] paths`, with whether it existed on the base; each changed `REVIEW.md`; the `base_tests`
+  result; and the answer to each `old-test` question.
+- These items go to the reviewer only, not to a person's "Read these" list: a changed test can be undone. A
+  change to `.rail/config.toml`, where `verify` lives, is already PERSON through `person_paths`, and a change to
+  CI workflows is PERSON under the kind `runs-with-secrets` (`rail docs kinds`).
+- `REVIEW.md` stays out of `person_paths`: it is guidance, the look-for list is engine code, and the brief
+  section names a change to it to the reviewer of the ticket that makes it.
+- Files that change: `engine/rail/steps.py` (`base_tests` after a passing ship, `--name-status`);
+  `engine/rail/triage.py` (the type); `engine/rail/review.py` (the brief section); `engine/rail/config.py` and
+  `engine/rail/docs.py` (`[tests] paths` read); `engine/docs/review.md`; `engine/docs/triage.md`;
+  `engine/docs/journal.md` (the `base_tests` event); `CHANGELOG.md`.
+- Not covered: a test that runs real services or secrets the ticket's machine lacks (the base run then fails on
+  both versions and raises nothing). For Rust, unit tests live in `#[cfg(test)]` modules inside source files, so
+  this feature covers only integration tests there.
 - The paths of driving checks (see **Language fixtures checked on a machine with every toolchain** and the
-  per-surface recipes) join `[tests] paths`, so this rule covers driving checks too.
+  per-surface recipes) join `[tests] paths`, so this covers driving checks too.
 
 **Kept when.**
 
-1. Gate cases, no model, with the stand-in reviewer (`tests/fake_reviewer.py`):
-   - a ticket that removes an assertion from an existing test gets a `base_tests` event with `red` and an open
-     blocking finding `by: engine`, stored as an `engine` run in `NN-review.json` with reproduced evidence,
-     and the ticket cannot merge until it is answered;
-   - marked fixed while the base test is still red on the new patch, it is reported again with `repeats` and
-     reopens;
-   - disputed, it goes to the refuter;
-   - a ticket that edits a test and keeps its behaviour gets `green` and no finding;
+1. Gate cases, no model, with the stand-in for the triage run:
+   - a ticket that removes an assertion from an existing test gets a `base_tests` event with `red` and one
+     `old-test` question, and no review starts before it is answered;
+   - answered `lost`, the `triage` step fails and the worker's brief holds the command and the answer;
+   - answered `contract` with a line that is in the ticket, or `moved` with a test file that is in the change,
+     the ticket goes on to review; with a line or a file that is not there, the run is repeated;
+   - a ticket that edits a test and keeps its behaviour gets `green` and no question;
    - a deleted test is restored for the run; a renamed test is restored under its old path;
-   - `rail answer NN F1 fixed` on an `engine` finding is refused while the patch is unchanged, and accepted
-     after a commit changes it;
-   - a new test file is not run in its base version; an empty `[tests] paths` runs nothing; a clean rebase
-     does not run it again; the worktree is unchanged afterwards;
-   - the review brief lists changed test files and `REVIEW.md`;
-   - `rail stats` shows the engine's findings on fixture journals.
+   - a new test file is not run in its base version; an empty `[tests] paths` runs nothing; a clean rebase does
+     not run it again; the worktree is unchanged afterwards;
+   - the review brief lists changed test files, `REVIEW.md` and the answers.
    Kept when every case behaves as written.
 2. On real history, no model. On the history of three open-source repositories, one per language profile where
-   possible: every commit that edits an existing test file is run with the base version of those files. Each
-   red result is read by hand and sorted: a weakened test, a behaviour change the commit message states, or
-   neither. Kept when the red results are not dominated by the third kind (at most one in three), since each
-   of those would cost an answer and maybe a refuter run. The share of commits that edit tests also tells the
-   time this feature adds to ships. This test comes before the feature is kept.
+   possible: every commit that edits an existing test file is run with the base version of those files. Each red
+   result is read by hand and sorted into the three answers. The share of commits that edit tests tells the time
+   this feature adds to ships, and the share of red results tells how many runs it costs. The sorted results are
+   kept: they are the answer key for the model test below. This test comes before the feature is built.
+3. Model test, four runs for each case, once the owner restarts the model tests: the triage brief on the sorted
+   results of test 2. Kept when it gives the hand-sorted answer in at least 3 of 4 runs on at least four cases
+   in five, and answers `contract` or `moved` on no case sorted as `lost` in more than 1 of 4 runs.
 
-**Waits for.** Nothing. The test on real history comes first.
+**Waits for.** **The triage step**. The test on real history comes first and waits for nothing.
 
-**Open decision.**
-
-- The engine's finding when an old test fails on the new code. Proposed: blocking, answered like any finding.
-  The other option is a line in the reviewer's brief only.
-- Decision 2: `REVIEW.md` in `person_paths`. Proposed: no. It is guidance; the look-for list is engine code,
-  already a person's, and a change to `REVIEW.md` is named to the reviewer.
+**Open decision.** None. The owner chose the triage run over a finding the worker answers (2026-11-27).
 
 **Assumed, not verified.**
 
-- That the base version of an edited test usually still runs against the new code. A test that imports a
-  renamed helper fails for that reason; test 2 measures how often.
+- That the base version of an edited test usually still runs against the new code. A test that imports a renamed
+  helper fails for that reason, and `moved` is its answer; test 2 measures how often.
 - That `git checkout <base> -- <file>` followed by `reset --hard` and `clean -fdq` leaves the worktree as it
   was, ignored files included, as `base_checks` already relies on.
 
-### 5. Projects within a repository
+#### An exemption the worker writes is confirmed
 
-Size: L.
+Size: M.
 
-**What it does.** One repository may hold several projects: services, apps and libraries, in one language or
-several. Rail learns which they are and what each one uses, and a ticket then sets up and checks only the
-projects its change reaches. Today `setup` and `verify` are one command each for the whole repository, so
-every ticket pays for every project, and a change to a shared library is checked no differently from a change
-to a leaf. The owner expects one repository for each team to become the usual shape, so this ranks above work
-across repositories.
+**What it does.** Three things a worker writes today excuse its own change from a check, and the engine takes
+each at its word: a `SENSOR(NN): why` comment on a line a sensor flags, a `VERIFIED: decided, not checked:` row
+in the ticket, and, once the docs name it, a line in `.gitleaksignore`. Each now raises a question.
+
+**How.** Three question types, each raised at ship from the change's added lines:
+
+| Type | Raised when the change adds | Answers that let it through | Answers that stop it |
+|---|---|---|---|
+| `sensor-exempt` | a `SENSOR(NN): why` comment | `holds`: the sensor misreads the line, or the contract requires the line as it is (quotes the contract line) | `does-not-hold`: fails `triage`; the worker removes the comment and mends the line |
+| `decided` | a `VERIFIED: decided, not checked:` row | `choice`: nothing in the repository or its dependencies settles it, and no Done Contract item depends on it | `checkable` (names where it can be checked): fails `triage`, and the worker checks it. `contract` (quotes the item that depends on it): fails `triage`, and the worker amends the contract so that the choice stands where the reviewer reads it |
+| `secret` | a line in `.gitleaksignore` | `not-a-secret`: says what the string is, such as an example, a fixture or a public id | `secret`: a wait for a person, who rotates it; the line may not stay |
+
+- **The secret scan's false finding gets its answer.** The scan reads every commit of the branch, and the guard
+  forbids rewriting a branch, so a false finding has no answer today: the line can be changed, and its first
+  commit still fails. `rail docs languages` gains the answer: put the finding's fingerprint, which the scan
+  prints, into `.gitleaksignore` and commit it. That line raises `secret`. The file does not join
+  `person_paths`: a person adds nothing to a string that is already pushed, unless it is a real secret, and then
+  the act is to rotate it.
+- **A real secret.** After the person's act the engine starts the ticket's branch again from the base under a
+  new name, because the scan would fail on the old branch's commits for good.
+- The `secret` brief shows the finding with its rule, file and line, and the string itself only as the scan
+  redacts it, with the lines around it.
+- Files that change: `engine/rail/triage.py`, `engine/rail/steps.py` (the added lines that raise each type),
+  `engine/docs/sensors.md`, `engine/docs/tickets.md`, `engine/docs/languages.md`, `engine/docs/triage.md`,
+  `CHANGELOG.md`.
+
+**Kept when.** Gate cases, no model, with the stand-in: each added line raises its question once for a patch;
+each answer does what the table says; a `SENSOR` comment that was on the base raises nothing. In use, over the
+first 20 questions of a type: a type answered the same way 19 times is turned into a rule or removed.
+
+**Waits for.** **The triage step**.
+
+**Open decision.** None.
+
+**Assumed, not verified.**
+
+- That gitleaks honours `.gitleaksignore` when it scans commits (`gitleaks git`), as its documentation says. Not
+  checked here.
+- That a redacted finding with its surrounding lines is enough to tell an example from a secret.
+
+### 5. A PERSON ticket takes one act
+
+Size: M.
+
+**What it does.** A person acts once on a PERSON ticket: at the merge, after reading the lines `## Read these`
+lists. The approval of the contract before the build is no longer asked for unless the project turns it on for a
+kind. The owner decided this on 2026-11-27.
+
+The reason follows from what a person is responsible for, which is what can't be undone. A kind takes effect at
+the merge, at a release or at a push (`rail docs kinds`, "Takes effect"), never when a contract is accepted: a
+contract is text, and nothing has been built. The lines a person has to read exist only once the change does.
+What an approval before the build buys is that no build is spent on a change the person would refuse. That is a
+matter of cost, so it is a setting.
 
 **How.**
 
-- **A table for each project.** `[[projects]]` in `.rail/config.toml`: `name`; `paths`, a glob; `profile`,
-  the language profile its rules come from; `setup`; `verify`; `uses`, the names of the projects it depends on.
-  `rail init` writes one entry for each folder a manifest marks, with the profile's commands run in that
-  folder. `[[profiles]]` keeps what belongs to a language: the rules, the test paths, the generated files.
-- **What stays for the whole repository.** `[commands] setup` and `verify` stay. In a repository with one
-  project they are all there is, as now. With `[[projects]]`, they hold only what belongs to the whole
+- **A new key**, `approve_contract`, beside `person_paths` in `.rail/config.toml`: a list of kind ids, empty in
+  the seed. A ticket with one of those kinds waits at `APPROVE_CONTRACT` before it is built, and at
+  `APPROVE_AMEND` when its contract is amended, as every PERSON ticket does today. A PERSON ticket with none of
+  them is accepted by the engine, as an AUTO ticket is.
+- **An amended contract** on any ticket is a row of `## Read these`, as it is on an AUTO ticket today.
+- **The other waits of a PERSON ticket go the way of an AUTO ticket.** A finding the refuter upheld stands. A
+  ticket that comes after a dropped one is decided by the contract writer's model (`AFTER_DROPPED`). A ticket at
+  its retry cap goes to **A diagnosis before a stuck ticket is dropped or waits**.
+- **What stays a person's.** The merge (`MERGE_BY_PERSON`). The grants: a tool that is missing or down, a merge
+  that failed, the budget. `rail:hold` on any ticket.
+- **A release ticket** keeps its own act, the approval of the release, because the release is where its kinds
+  take effect (**Release tickets**).
+- A PERSON ticket still starts on `person_ladder`, and the security seat still reviews it.
+- **Numbers.** `rail stats` counts the PERSON tickets a person closed without a merge, by kind. The sweep's
+  summary names a kind with three or more among the last 20 PERSON tickets as one to put in `approve_contract`.
+- Files that change: `engine/rail/table.py`, `engine/rail/config.py`, `engine/rail/readthese.py`,
+  `engine/rail/stats.py`, `engine/rail/sweep.py`, `seed/config.toml`, `engine/docs/kinds.md` (also its paragraph
+  on `runs-with-secrets` at push, which speaks of the approved contract), `engine/docs/loop.md`,
+  `engine/docs/retries.md`, `engine/docs/tickets.md`, `engine/docs/github.md`, `engine/docs/cloud.md`,
+  `CHANGELOG.md`.
+
+**Kept when.** Gate cases, no model: with the seed config, a ticket whose scope reaches `person_paths` is built
+with no wait and stops at `MERGE_BY_PERSON`; its amended contract is a "Read these" row and no wait; an upheld
+finding and a dropped `after` raise no wait; with `approve_contract = ["money"]`, a ticket of that kind waits
+before the build and one of another kind does not. Kept when every case behaves as written.
+
+**Waits for.** Nothing. Built before the diagnosis, which relies on a PERSON contract that no person approved.
+
+**Open decision.** None.
+
+**Assumed, not verified.**
+
+- That a person refuses few PERSON tickets at the merge. The count in `rail stats` shows it, and
+  `approve_contract` is the answer for a kind where it is not so.
+
+### 6. A diagnosis before a stuck ticket is dropped or waits
+
+Size: M.
+
+**What it does.** A ticket at its retry cap gets one diagnosis before anything else happens to it. Today an AUTO
+ticket at the cap is dropped with a record, and it is tried again only when a person labels its issue again; a
+PERSON ticket waits for a person to read the journal and the branch and say what to do differently. Both end at
+a person, and neither says why the ticket was stuck. A ticket that is stuck more often has a wrong or too large
+contract than a worker that needs a person's hint. The owner decided this on 2026-11-27.
+
+**How.**
+
+- **A question type, `stuck`**, of **The triage step**, raised once for a ticket, on either tier, when it
+  reaches the budget after consult, or the cap. It runs on the contract writer's model (`[worker] contract`).
+  The brief shows the ticket, each failure in the journal with its step, signature and output's tail, the
+  reviewer's findings, consult's advice, and the change.
+- **The answers.**
+
+  | Answer | Evidence | What the engine does |
+  |---|---|---|
+  | `contract`: a `Check:` line or Done Contract item is wrong, or two contradict each other | The quoted line or lines | An agent task for the contract writer: amend the contract. Then a fresh budget and cap |
+  | `too-large`: the work is more than one ticket | The parts it names | An agent task for the contract writer: split it with `rail-slice`. The ticket is dropped with a record that names the tickets that replace it |
+  | `approach`: the contract is right and the attempts share a mistake | What they share, and what to do instead | A new branch from the base, the note in the implement brief, a fresh budget and cap |
+  | `machine`: the failures are the machine's or a tool's | The failure it names | The wait that exists for it (`TOOL_DOWN`) |
+  | `cannot-tell` | None | As today: an AUTO ticket is dropped, a PERSON ticket waits (`RETRY_CAP`). The diagnosis is in the record and in the wait's brief |
+
+- **Once.** A ticket that reaches the cap again after its diagnosis is dropped or waits, as today, with the
+  diagnosis in the record.
+- **The tier is not changed by any answer.** The paths and kinds make a ticket PERSON, so a PERSON ticket whose
+  contract the diagnosis amended still stops at the person's merge.
+- **Not consult.** Consult advises the worker about the code, before the cap. The diagnosis asks whether the
+  contract is the fault.
+- A dropped ticket's issue gets the diagnosis as a comment.
+- **Numbers.** `rail stats` counts stuck tickets by answer, and how many merged after their diagnosis.
+- Files that change: `engine/rail/triage.py`, `engine/rail/table.py` (`STUCK`, `RETRY_CAP`, the two agent
+  tasks), `engine/rail/stats.py`, `engine/docs/retries.md`, `engine/docs/triage.md`, `engine/docs/loop.md`,
+  `CHANGELOG.md`.
+
+**Kept when.** Gate cases, no model, with the stand-in: a ticket at the cap gets one `stuck` question and no
+drop or wait before its answer; each answer does what the table says; a second cap drops an AUTO ticket and
+makes a PERSON ticket wait. In use, over the first 20 diagnosed tickets: kept when at least five merged
+afterwards, themselves or through the tickets that replaced them; otherwise the type is removed.
+
+**Waits for.** **The triage step** and **A PERSON ticket takes one act**. The wording of the brief is not tested
+with a model until the owner restarts the model tests.
+
+**Open decision.** How the issue of a ticket that was split follows the tickets that replace it: it stays open
+until the last of them merges (proposed), or it is closed with links to them.
+
+**Assumed, not verified.**
+
+- That a fresh run can tell a wrong contract from a wrong approach from the journal and the change. Not
+  measured.
+
+### 7. Projects within a repository
+
+Size: L.
+
+**What it does.** One repository may hold several projects: services, apps, libraries and infrastructure, in one
+language or several. Rail learns which they are and what each one uses, and a ticket then sets up and checks
+only the projects its change reaches. The shape the owner has in mind is a backend, three workers, a frontend
+and infrastructure in one repository, and one repository for each team.
+
+Tried on 2026-11-27 with today's `rail init`, on a tree with a backend, three workers and a shared library in
+Python, a TypeScript frontend and a Terraform folder. It wrote one `setup` of six installs and one `verify` of
+2,649 characters with about 26 checks in a row, so a change of one line in one worker runs all of them. It wrote
+no check for the Terraform folder and no path for the kind `infrastructure`. The result is safe only because
+everything always runs.
+
+**How.**
+
+- **One table, `[[projects]]`, in place of `[[profiles]]`** in `.rail/config.toml`. Each entry holds: `name`;
+  `paths`, a glob; `profile`, the language profile its rules come from; `setup`; `verify`; `uses`, the names of
+  the projects it depends on. A repository with one project has one entry with `paths = "**"`, so one project
+  and seven have the same shape. A language's rules, test paths and generated files apply to the paths of the
+  projects that name its profile. `rail init` writes one entry for each folder a manifest marks, with the
+  profile's commands run in that folder.
+- **A project with no profile.** Infrastructure, a docs site, a folder of scripts: `profile` is left out and the
+  init task asks the agent for its `setup` and `verify`. `rail init` names each top-level folder with tracked
+  files that no project covers.
+- **Infrastructure is found.** `rail init` writes the folders that hold Terraform files, Helm charts or
+  Kubernetes manifests under the kind `infrastructure` in `[kinds]`, so that a change there is PERSON. The agent
+  corrects the list in the init task, as it does the other kinds.
+- **What stays for the whole repository.** `[commands] setup` and `verify` hold only what belongs to the whole
   repository, such as the secret scan over the branch's commits, and they run after the projects' own.
-- **What a change reaches.** The projects whose `paths` match a changed file, and every project that uses one
-  of them, followed through `uses` to the end. A changed file inside no project reaches every project: a root
+- **What a change reaches.** The projects whose `paths` match a changed file, and every project that uses one of
+  them, followed through `uses` to the end. A changed file inside no project reaches every project: a root
   manifest, a CI workflow, `.rail/config.toml`. A lockfile at a workspace's root reaches the members of that
   workspace and no project outside it.
 - **Where the set is used.** At claim, `setup` runs for the projects the ticket's `scope_paths` reach. At ship
   and in CI, `verify` runs for the projects the changed files reach. Each run is its own step, named
   `verify:NAME`, in the receipts and the journal, so retries, flaky checks and time are counted for each
   project.
-- **One required check.** `rail ci` works the same set out from the pull request's diff against the base, so
-  the check GitHub requires stays the one check `rail`. No workflow uses a path filter: a required check that a
-  path filter skips never reports, and the pull request then waits for good.
-- **Where the graph comes from.** From the workspace's own files where there is one, read and not run: the
-  members of a uv workspace and their workspace sources, the `workspace:` dependencies of a pnpm workspace, the
-  path dependencies of a Cargo workspace, the modules of a `go.work`. Where there is none, the init task asks
-  the agent to write `uses`. The next section, **Workspace layouts**, is the detection and the commands, and is
-  built in this step.
-- **A repository with its own task graph.** Where Nx, Turborepo, Bazel or Pants already works out what a
-  change affects, the workspace is one project whose `verify` calls that tool with `$RAIL_BASE`, and Rail's
-  `uses` is left empty.
+- **One required check.** `rail ci` works the same set out from the pull request's diff against the base, so the
+  check GitHub requires stays the one check `rail`. No workflow uses a path filter: a required check that a path
+  filter skips never reports, and the pull request then waits for good.
+- **Where `uses` comes from.** Two sources. A dependency in code is read from the workspace's own files, read
+  and not run: the members of a uv workspace and their workspace sources, the `workspace:` dependencies of a
+  pnpm workspace, the path dependencies of a Cargo workspace, the modules of a `go.work`. A dependency no import
+  shows, such as a frontend that calls the backend's API, is written by the agent in the init task. The next
+  section, **Workspace layouts**, is the detection and the commands, and is built in this step.
+- **What `uses` does not do.** It decides which checks run. Whether the frontend still works against a changed
+  backend is shown only by a check that drives both (**Driving the real product**). A shape two services share,
+  such as a queue message or a database schema, is the kind `data-shape` and makes its ticket PERSON, as today.
+- **A repository with its own task graph.** Where Nx, Turborepo, Bazel or Pants already works out what a change
+  affects, the workspace is one project whose `verify` calls that tool with `$RAIL_BASE`, and its `uses` is left
+  empty.
 - **Checks on the table.** The config check refuses a `uses` name that is no project and a cycle. The
-  `languages` line of `rail doctor` and of the sweep, which names a manifest no profile covers, also names a
-  manifest inside no project.
+  `languages` line of `rail doctor` and of the sweep names a manifest inside no project, and a dependency
+  between two projects that a workspace file holds and `uses` lacks.
 - **Numbers.** `rail stats` gains a split by project beside the splits by worker and by language, with groups
   under five summed into `other`. `rail context NN` names the projects the ticket reaches.
 - **Docs.** `rail docs languages`, `rail docs config`, the init task's brief, and the seed config.
 
 The areas map is a different thing and stays as it is: `## Areas` says, in a bug reporter's words, what lives
-where, for people and for routing. A project is what gets installed and checked together.
+where, for people and for routing. It gets no column for which area may use which (dropped, 2026-11-27): `uses`
+in the config is the only graph. A package manager refuses most imports of a project that is not declared as a
+dependency, and a boundary inside one project is a rule of that language's sensor (**Sensor sets per
+language**).
+
+**Not built.** A task graph or a build cache of Rail's own; a required check for each project; a release for
+each project (**Release tickets** waits for a deploy target); the projects' checks run side by side, until the
+time per step in `rail stats` asks for it.
 
 **Kept when.**
 
-- Gate cases, no model, on a fixture with a Python service, a TypeScript app and a library both use. A change
-  in the app runs the app's `setup` and `verify` only. A change in the library runs the library's and both
-  users'. A change to a root file runs all three. `rail ci` on the same diff runs the same set as the ship did.
-  A `uses` name that is no project, and a cycle, are refused.
-- The same fixture from `rail init` to a merged ticket with the real toolchains, as the language tests run
-  their projects (`python3 tests/run.py --languages`).
+- Gate cases, no model, on a fixture with a Python service, a TypeScript app, a library both use and a Terraform
+  folder. A change in the app runs the app's `setup` and `verify` only. A change in the library runs the
+  library's and both users'. A change to a root file runs all. A change in the Terraform folder runs that
+  project's `verify` and makes the ticket PERSON. `rail ci` on the same diff runs the same set as the ship did.
+  A `uses` name that is no project, and a cycle, are refused. A repository with one manifest at its root gets
+  one project with `paths = "**"`.
+- The same fixture from `rail init` to a merged ticket with the real toolchains, as the language tests run their
+  projects (`python3 tests/run.py --languages`).
 
-**Waits for.** Nothing. The fixture's audit and type checks need the tools on the machine (**Provision lines
-and toolchain pins per language**).
+**Waits for.** Nothing. The fixture's audit and type checks need the tools on the machine (**Provision lines and
+toolchain pins per language**).
 
-**Open decision.**
-
-1. A new `[[projects]]` table (proposed), or `setup`, `verify` and `uses` as new keys of `[[profiles]]`. A
-   profile is a language and may cover several folders with different commands, which is why a table of its own
-   is proposed.
-2. Which paths decide `setup` at claim: the ticket's `scope_paths` (proposed), or every project, since the
-   changed files are not known yet.
+**Open decision.** Which paths decide `setup` at claim: the ticket's `scope_paths`, with a project first reached
+at ship set up then (proposed), or every project, since the changed files are not known yet.
 
 **Assumed, not verified.**
 
-- That GitHub leaves a pull request waiting when a required check is skipped by a path filter. Its
-  documentation says so; not tried here.
-- That each workspace tool keeps its members' dependencies on each other in files Rail can read without
-  running the tool.
+- That GitHub leaves a pull request waiting when a required check is skipped by a path filter. Its documentation
+  says so; not tried here.
+- That each workspace tool keeps its members' dependencies on each other in files Rail can read without running
+  the tool.
+- That each package manager refuses an import from a project that is not a declared dependency. A uv workspace
+  synced with every package in one environment does not.
 - That many tickets changing one lockfile at a workspace's root will not make claims rest on each other too
   often. `rail stats` shows the time a ticket rests; **Claims by changed files** is the answer if it does.
 
@@ -431,45 +620,38 @@ and toolchain pins per language**).
 
 Size: M.
 
-**What it does.** Profiles recognise uv workspaces, pnpm workspaces and `go.work`, write commands that run
-across the whole workspace, and for pnpm make `verify` run only the packages changed since the base. Reason:
-today `uv sync --locked` at a uv workspace's root syncs the root package only, and a `go.work` repository is
-read as one profile per folder that holds a `go.mod`, each with its own commands.
+**What it does.** `rail init` recognises uv workspaces, pnpm workspaces, Cargo workspaces and `go.work`, writes
+one project for each member with commands that name the member, and reads the members' dependencies on each
+other into `uses`. Reason: today `uv sync --locked` at a uv workspace's root syncs the root package only, and a
+`go.work` repository is read as one profile for each folder that holds a `go.mod`, with nothing between them.
 
 **How.**
 
-- Already built, so not described here: manifests below the root give one profile per language with the
-  folders that hold them (`web/**`, `{api,worker}/**`); a nested manifest inside another's folder counts for
-  the top-most folder only; each part of `verify` and `setup` runs in each folder (`(cd web && pnpm test)`);
-  Cargo's `cargo test --locked` at a workspace root runs every member.
-- Workspaces: one profile per workspace root, with the commands written to run across the workspace: `uv sync
-  --all-packages`, `pnpm -r`, and `go test` over each module of `go.work`. All not checked.
-- Affected-aware `verify`: the init task only asks the agent to make `verify` affected-aware in a monorepo;
-  nothing in the engine or profiles does. Per language, only pnpm has a built-in filter for packages changed
-  since a ref (`--filter "...[$RAIL_BASE]"`, not checked). Go caches test results for unchanged packages (not
-  checked). For Python and Rust the whole workspace runs. The decision: put the pnpm filter in the TypeScript
-  default when a `pnpm-workspace.yaml` is tracked, and add nothing for the other three until the time per step
-  shows `verify` is too slow (`rail docs stats`, "WHERE THE TIME GOES").
+- Already built, so not described here: manifests below the root are found with the folders that hold them; a
+  nested manifest inside another's folder counts for the top-most folder only; each part of `verify` and `setup`
+  runs in its folder (`(cd web && pnpm test)`).
+- A member's commands name it: `uv sync --locked --package NAME`, `pnpm --filter NAME`, `cargo test --locked -p
+  NAME`, and `go test ./...` in the module's folder. All not checked.
+- No filter for packages changed since the base is written into any command: the set a change reaches does that
+  work for every language.
 - Files that change: `profiles/*/profile.toml`, `engine/rail/init.py`, `engine/docs/languages.md`,
   `tests/test_languages.py`.
 
-**Kept when.** Gate cases, no model, no toolchains, on fixture trees: a tree with a `pnpm-workspace.yaml` gets
-the filtered `verify`, and a tree with `go.work` or a uv workspace gets the workspace commands. Kept when
-every case behaves as written. The commands themselves are checked on a machine with the toolchains
-(**Language fixtures checked on a machine with every toolchain**).
+**Kept when.** Gate cases, no model, no toolchains, on fixture trees: a tree with a `pnpm-workspace.yaml`, one
+with `go.work`, one with a uv workspace and one with a Cargo workspace each get one project for each member, the
+member's commands, and `uses` as the workspace's files say. Kept when every case behaves as written. The
+commands themselves are checked on a machine with the toolchains (**Language fixtures checked on a machine with
+every toolchain**).
 
-**Waits for.** Nothing for the pnpm filter and the workspace commands. The rest of the affected-aware work
-(Python, Rust, Go) waits for the time per step in `rail stats` to show that `verify` is too slow.
+**Waits for.** Nothing.
 
 **Assumed, not verified.**
 
-- That `pnpm --filter "...[$RAIL_BASE]"`, `uv sync --all-packages` and the `go.work` commands behave as
-  written: not checked.
+- That the commands above behave as written: not checked.
 
-### 6. The sweep reads more
+### 8. The sweep reads more
 
-Three features, built in this order. The first two make the sweep read what it skips today. The third gives
-the areas map the one fact about structure that the reviewer and the sweep lack: which area may use which.
+Two features, built in this order. Both make the sweep read what it skips today.
 
 #### The sweep reads reviewed merges
 
@@ -546,44 +728,6 @@ brief, so build them in the same pass.
 
 **Assumed, not verified.**
 - The implement brief stays short with `## Why`, the decided rows and five tickets of history added.
-
-#### A `Uses` column in the areas map
-
-Size: M.
-
-**What it does.** `## Areas` in `ARCHITECTURE.md` gains an optional fourth column, `Uses`: the areas this one
-may import. Boundaries are then written in one place, read by tools that understand each language's imports. A
-structure rule can already forbid one import text in a set of files (`rail docs rules`); this is the single
-place for the whole map.
-
-**How.**
-- `Uses` holds area names, comma separated. A path no row maps, and a row with no `Uses`, is unrestricted, so
-  a ticket that adds a directory (and must add its row, which doc-lint checks) fails nothing. A new row's
-  rules apply from the next ticket.
-- `engine/rail/areas.py`: `parse_areas` returns `area`, `paths` and `holds`, and ignores a fourth cell. Add
-  `uses` (a list, empty when the column is absent or the cell is blank).
-- `engine/rail/doclint.py`: every name in `Uses` must be an area in the same table.
-- `engine/rail/review.py`: the review brief shows the column. An agent may change `Uses` on an AUTO ticket;
-  the reviewer's brief asks it to judge any change to the column.
-- Docs: the `ARCHITECTURE.md` template in the seed and `rail docs` pages that describe `## Areas`.
-- The boundary sensors built from it wait for the per-language sensors (second paragraph below).
-
-The boundary sensors read the map from the base commit through `$RAIL_MAP` and build their tool's rules at run
-time, so no generated file goes stale. Python uses import-linter, TypeScript dependency-cruiser, Rust crates
-and `pub(crate)` plus cargo-deny bans, Go depguard or go-arch-lint. A new import cycle is also a violation.
-`ARCHITECTURE.md` stays out of `person_paths`, because every ticket that adds a directory must edit it.
-
-**Kept when.** Gate cases, no model: a doc-lint failure for a `Uses` name that is not an area; a row with no
-`Uses` restricts nothing; a new directory with a new map row passes the boundary sensor. For the boundary
-sensors, the past-commit test (see **Sensor sets per language**) runs on one project per language for which a
-map is written by hand.
-
-**Waits for.** The column itself waits for nothing. The boundary sensors wait for **Sensor sets per language**.
-
-**Open decision.** None; the column was decided by the owner on 2026-11-24.
-
-**Assumed, not verified.**
-- That CI checkouts hold the base commit's blobs for `$RAIL_SENSORS` and `$RAIL_MAP`.
 
 ## Later
 
@@ -1138,8 +1282,8 @@ the word for an optional feature that only adds hints, `rail docs packs`.)
 | Rust | rustc dead_code; cargo-shear | clippy, pinned, `clippy.toml` through `CLIPPY_CONF_DIR`: unwrap_used and expect_used in library crates, let_underscore_must_use, map_err_ignore | crates and `pub(crate)`; cargo-deny bans | rustc |
 | Go | golangci-lint v2 unused, unparam; deadcode; `go mod tidy -diff` | errcheck with check-blank, forcetypeassert, nolintlint with require-explanation | depguard or go-arch-lint | the compiler; go vet |
 
-- The boundary sensor builds its tool's config at run time from `$RAIL_MAP` (see **A `Uses` column in the
-  areas map**).
+- The boundary sensor runs its tool on the rules the project keeps in that tool's own config (import-linter
+  contracts, dependency-cruiser rules, a depguard list). Rail holds no map of which area may use which.
 - Tool facts checked on primary sources 2026-11-24 and 2026-11-25 (reported): Ruff has no baseline mode;
   oxlint has an undocumented bulk-suppression file; Clippy reads `clippy.toml` from `CLIPPY_CONF_DIR` first
   and calls the file unstable, so the profile pins Clippy; Clippy thresholds can't be set in `Cargo.toml`.
@@ -2085,8 +2229,8 @@ tool = ""           # the [tools.NAME] whose names the commands read (rail docs 
   changes the deploy workflow or a dependency whose build scripts the prod build runs: that code meets the
   prod secrets now (`rail docs kinds`). The release brief lists each PERSON reason with the tickets and kinds
   behind it.
-- **A PERSON release** waits at `APPROVE_CONTRACT`, as any PERSON contract does (`engine/rail/table.py`): the
-  person approves it with `rail accept NN` or `rail:go`. Then the engine runs it. Its merge is the engine's
+- **A PERSON release** waits at `APPROVE_CONTRACT` (`engine/rail/table.py`), whatever `approve_contract`
+  holds, because the release is where its kinds take effect: the person approves it with `rail accept NN` or `rail:go`. Then the engine runs it. Its merge is the engine's
   whatever its tier: the merge only records what happened, and the person's act was the approval. This is the
   one ticket kind where a PERSON ticket's merge is not a person's, and the docs say so. **The `MERGE` row
   exception**: today the `MERGE` row refuses the engine's merge of a non-AUTO ticket when there is a remote
@@ -2435,12 +2579,11 @@ doctor`**. A machine with hardware acceleration or a Mac. Last in the order of t
 - That `/dev/kvm` is a fair test for Android emulator acceleration on Linux (inferred).
 - That Maestro runs as the research describes on an emulator: reported, not run.
 
-### More people, or more repositories
+### More people
 
 `proposals/team.md` holds what a team needs: a ticket a person keeps, waits addressed to one person, code
 owners, a runner for each person, a warning when two tickets overlap. Its features are built when a second
-person works in a repository that runs on Rail. The features below wait for the same thing, or for a second
-repository.
+person works in a repository that runs on Rail. The features below wait for the same thing.
 
 #### A machine identity
 
@@ -2481,6 +2624,91 @@ decisions wait for** shows when the rate limit needs it.
 
 **Assumed, not verified.**
 - How a cloud session picks its GitHub identity.
+
+#### Sources on a schedule
+
+Size: M.
+
+**What it does.** A source declares how often it runs, so one runner runs every source and no scheduled task
+is needed per source (`engine/docs/sources.md`, "Running a source"). `rail next` answers a due source, and a
+due sweep with it, before it reports that a ticket waits for a person, so one open wait does not stop the
+sweep or starve the source.
+
+**How.**
+- A source's front matter gains `every = "1d"` (`engine/rail/sources.py`, `engine/docs/sources.md`).
+- Where `rail next` answers matters. Today it returns `WAITING_PERSON` whenever any ticket waits for a person,
+  before it reaches the sweep (`engine/rail/cli.py`). A due source and a due sweep are answered before the
+  `WAITING_PERSON` return: after every ticket the agent can act on, after a CI watch, and before reporting
+  waits. The waits still go into the answer's `waits` list and their labels are set earlier in the same
+  command, so the person's inbox is unchanged. The runner, which stops only when `rail next` says nothing is
+  left for an agent, keeps going until the source has run.
+- A source's last run is kept the way the sweep's is: the sweep finds its last run from the `Sweep:` trailer
+  on the base branch (`engine/rail/sweep.py`). A source files tickets and merges nothing, so it has no commit
+  of its own on the base. Its run time goes into the `requested` event of each ticket it files, and a run that
+  files nothing writes a one-line mark in the local cache (inferred design). A fresh cloud clone then runs a
+  source that filed nothing once more, which costs one `fetch` and files nothing new, since `external_id`s are
+  unique. The counter branch is not used: it holds ids and drop marks (`engine/rail/project.py`).
+- Files: `engine/rail/cli.py`, `engine/rail/table.py`, `engine/rail/sources.py`, `engine/docs/sources.md`,
+  `engine/docs/cloud.md` (sources without their own tasks).
+
+**Kept when.** Gate cases, no model: a due source is answered by `rail next` when no ticket work is left, and
+not before. With a ticket waiting for a person, the due source and a due sweep are still answered, the waiting
+ticket keeps its label, and the next `rail next` after the source ran returns `WAITING_PERSON`.
+
+**Waits for.** Nothing.
+
+### The owner takes it up again
+
+The owner set these two aside on 2026-11-27. They are the two directions between the framework and a project
+that runs on it. The first was a confirmed step, and neither waits for anything else.
+
+#### Taking Rail's changes into a project
+
+Size: M.
+
+**What it does.** A project learns what changed in Rail since its copy of the engine, through a source a
+person schedules, instead of a person asking an agent to clone the framework and "see what we can integrate"
+(owner, 2026-11-09). No `upgrade` verb is added; that decision of 2026-11-09 holds.
+
+**How.**
+- A seed source `seed/sources/rail-framework.md`, copied by `rail init` (`engine/rail/init.py`) and scheduled
+  by a person. Its `fetch` fetches the framework at the URL in `.rail/SOURCE` into a temporary folder and
+  prints the `CHANGELOG.md` lines added since the commit in `.rail/SOURCE`, each with its commit.
+- `.rail/SOURCE`: `rail init` writes the framework's URL and commit there (built; no docs page describes it,
+  so add a short description to `engine/docs/sources.md` or the page that covers `rail init`). The source
+  reads it and its work updates the commit in it.
+- Its prompt files one ticket per change worth taking, `external_id = "rail-framework#SHA"`, with `tier =
+  "PERSON"`, because every such ticket changes Rail's own gates. Its work copies the changed files from that
+  commit, keeps the project's own changes to them, and updates the commit in `.rail/SOURCE`.
+- `person_paths` additions in `seed/config.toml`. The default covers only part of what `rail init` copies:
+  `.rail/bin/**`, `.rail/engine/**`, `.rail/config.toml` and `.rail/sensors/**`; `.claude/**` and
+  `.github/workflows/**` are PERSON through the kind `runs-with-secrets`. The seed's `person_paths` gain:
+  - `.rail/packs/**` (a pack runs code, as consult runs a model),
+  - `.rail/sources/**` (a source's prompt files tickets),
+  - `.rail/ruleset.json` (the branch protection a person imports),
+  - `.rail/tickets/TEMPLATE.md`.
+  With these, the paths make the tier PERSON too, and the front matter is a second hold.
+- `README.md` says how a project takes Rail's changes (the source) instead of the prompt.
+  `engine/docs/sources.md` lists the source.
+
+- Seen on 2026-11-26: running `rail init` again in a project that has Rail merges the settings and creates
+  missing labels, and refreshes neither `.rail/engine/` nor a skill that is already there. Until this source
+  exists, a project takes a newer Rail by copying the engine by hand.
+
+**Kept when.** Gate cases, no model:
+- `rail-framework`'s `fetch` against a fixture framework repository prints the CHANGELOG lines after the
+  recorded commit and none before it.
+- With the seed's `person_paths`, a ticket that changes only `.rail/packs/consult/` or `.rail/sources/` is
+  PERSON at add.
+
+Model test, four runs, built once model runs are available (until then the wording of the prompt is untested):
+on a fixture changelog of three changes, one of which the project already has, kept when it files two tickets
+in at least 3 of 4 runs.
+
+**Waits for.** The owner restarting the paused model tests (for the model test only). Order of work: the
+`person_paths` additions first, then the source after its model test.
+
+**Open decision.** Nothing open beyond the source form, which is settled for this source (a source, no verb).
 
 #### Sending a project's fixes back to the framework
 
@@ -2535,113 +2763,6 @@ add`.
 **Assumed, not verified.**
 - That a cloud session's GitHub access can open an issue on another repository. If not, it is a grant: an
   identity for the machine with access to the framework's repository.
-
-#### One inbox across repositories
-
-Size: S.
-
-**What it does.** A person who owns the waits of many repositories gets one search that shows them all. For
-one repository the inbox is the search `is:open label:rail:needs-you` (`rail docs cloud`, "Where your acts
-go"). Across repositories it is one saved search on GitHub.
-
-**How.**
-- The same search with `user:OWNER`, or `author:@me` when the work carries the person's login, or
-  `author:app/NAME` with a machine identity. These qualifiers are from the author's knowledge, not checked.
-- `rail doctor` prints the search for this repository's owner (`engine/rail/doctor.py`).
-- A paragraph in `engine/docs/cloud.md`. No code beyond the doctor line.
-
-**Kept when.** Gate case: the doctor line prints the search for the repository's owner. Check the qualifiers
-by hand on GitHub once.
-
-**Waits for.** Nothing. The `author:app/NAME` form needs **A machine identity**.
-
-**Assumed, not verified.**
-- That the search qualifiers work across repositories as written.
-
-#### Sources on a schedule
-
-Size: M.
-
-**What it does.** A source declares how often it runs, so one runner runs every source and no scheduled task
-is needed per source (`engine/docs/sources.md`, "Running a source"). `rail next` answers a due source, and a
-due sweep with it, before it reports that a ticket waits for a person, so one open wait does not stop the
-sweep or starve the source.
-
-**How.**
-- A source's front matter gains `every = "1d"` (`engine/rail/sources.py`, `engine/docs/sources.md`).
-- Where `rail next` answers matters. Today it returns `WAITING_PERSON` whenever any ticket waits for a person,
-  before it reaches the sweep (`engine/rail/cli.py`). A due source and a due sweep are answered before the
-  `WAITING_PERSON` return: after every ticket the agent can act on, after a CI watch, and before reporting
-  waits. The waits still go into the answer's `waits` list and their labels are set earlier in the same
-  command, so the person's inbox is unchanged. The runner, which stops only when `rail next` says nothing is
-  left for an agent, keeps going until the source has run.
-- A source's last run is kept the way the sweep's is: the sweep finds its last run from the `Sweep:` trailer
-  on the base branch (`engine/rail/sweep.py`). A source files tickets and merges nothing, so it has no commit
-  of its own on the base. Its run time goes into the `requested` event of each ticket it files, and a run that
-  files nothing writes a one-line mark in the local cache (inferred design). A fresh cloud clone then runs a
-  source that filed nothing once more, which costs one `fetch` and files nothing new, since `external_id`s are
-  unique. The counter branch is not used: it holds ids and drop marks (`engine/rail/project.py`).
-- Files: `engine/rail/cli.py`, `engine/rail/table.py`, `engine/rail/sources.py`, `engine/docs/sources.md`,
-  `engine/docs/cloud.md` (sources without their own tasks).
-
-**Kept when.** Gate cases, no model: a due source is answered by `rail next` when no ticket work is left, and
-not before. With a ticket waiting for a person, the due source and a due sweep are still answered, the waiting
-ticket keeps its label, and the next `rail next` after the source ran returns `WAITING_PERSON`.
-
-**Waits for.** Nothing.
-
-### The owner takes it up again
-
-The owner set this aside on 2026-11-27. It was the sixth confirmed step, and it waits for nothing else.
-Until it is built, a project takes a newer Rail by copying the engine by hand.
-
-#### Taking Rail's changes into a project
-
-Size: M.
-
-**What it does.** A project learns what changed in Rail since its copy of the engine, through a source a
-person schedules, instead of a person asking an agent to clone the framework and "see what we can integrate"
-(owner, 2026-11-09). No `upgrade` verb is added; that decision of 2026-11-09 holds.
-
-**How.**
-- A seed source `seed/sources/rail-framework.md`, copied by `rail init` (`engine/rail/init.py`) and scheduled
-  by a person. Its `fetch` fetches the framework at the URL in `.rail/SOURCE` into a temporary folder and
-  prints the `CHANGELOG.md` lines added since the commit in `.rail/SOURCE`, each with its commit.
-- `.rail/SOURCE`: `rail init` writes the framework's URL and commit there (built; no docs page describes it,
-  so add a short description to `engine/docs/sources.md` or the page that covers `rail init`). The source
-  reads it and its work updates the commit in it.
-- Its prompt files one ticket per change worth taking, `external_id = "rail-framework#SHA"`, with `tier =
-  "PERSON"`, because every such ticket changes Rail's own gates. Its work copies the changed files from that
-  commit, keeps the project's own changes to them, and updates the commit in `.rail/SOURCE`.
-- `person_paths` additions in `seed/config.toml`. The default covers only part of what `rail init` copies:
-  `.rail/bin/**`, `.rail/engine/**`, `.rail/config.toml` and `.rail/sensors/**`; `.claude/**` and
-  `.github/workflows/**` are PERSON through the kind `runs-with-secrets`. The seed's `person_paths` gain:
-  - `.rail/packs/**` (a pack runs code, as consult runs a model),
-  - `.rail/sources/**` (a source's prompt files tickets),
-  - `.rail/ruleset.json` (the branch protection a person imports),
-  - `.rail/tickets/TEMPLATE.md`.
-  With these, the paths make the tier PERSON too, and the front matter is a second hold.
-- `README.md` says how a project takes Rail's changes (the source) instead of the prompt.
-  `engine/docs/sources.md` lists the source.
-
-- Seen on 2026-11-26: running `rail init` again in a project that has Rail merges the settings and creates
-  missing labels, and refreshes neither `.rail/engine/` nor a skill that is already there. Until this source
-  exists, a project takes a newer Rail by copying the engine by hand.
-
-**Kept when.** Gate cases, no model:
-- `rail-framework`'s `fetch` against a fixture framework repository prints the CHANGELOG lines after the
-  recorded commit and none before it.
-- With the seed's `person_paths`, a ticket that changes only `.rail/packs/consult/` or `.rail/sources/` is
-  PERSON at add.
-
-Model test, four runs, built once model runs are available (until then the wording of the prompt is untested):
-on a fixture changelog of three changes, one of which the project already has, kept when it files two tickets
-in at least 3 of 4 runs.
-
-**Waits for.** The owner restarting the paused model tests (for the model test only). Order of work: the
-`person_paths` additions first, then the source after its model test.
-
-**Open decision.** Nothing open beyond the source form, which is settled for this source (a source, no verb).
 
 ### `rail replay` is taken up again
 
@@ -2916,6 +3037,8 @@ None of these is to be built. A project that wants one uses what Rail has.
 - Short-lived apps with a retire-by date as a kind of ticket: Rail is for code with a future, and a project
   can drop an app with a ticket.
 - Languages other than Python, TypeScript, Rust and Go, for now; Windows.
+- Work across repositories. A Rail serves one repository: no ticket, wait, inbox or number spans two.
+- Any earlier version of Rail. No feature reads, converts or keeps working with what an earlier Rail wrote.
 
 ## What the owner has decided
 
@@ -2924,7 +3047,8 @@ Stated here once, as facts the features rest on.
 - A person bears responsibility for what can't be undone, and only for that. Review before merge stays: the
   machine's review runs on every AUTO change (2026-11-25).
 - Rail is for software development. Python, TypeScript, Rust and Go come first (2026-11-25).
-- Rail keeps no compatibility with its earlier versions.
+- Rail keeps no compatibility with its earlier versions. No decision weighs what it would cost a project that
+  already holds a copy of Rail (2026-11-27).
 - Rail is developed without Rail: its own repository has no `.rail/`, and no feature adds one (2026-11-26).
 - A feature that needs model runs builds its part that needs none, and marks its wording as not tested
   (2026-11-26).
@@ -2933,6 +3057,12 @@ Stated here once, as facts the features rest on.
   (2026-11-26). **Taking Rail's changes into a project** was one of them and is set aside (2026-11-27).
 - `## Read these` and its line comments stay on the pull request of an AUTO ticket, for whoever chooses to
   read one. They ask nothing of anyone (2026-11-27).
+- Where the worker judged its own case, a fresh run with no stake answers one closed question the engine
+  raises (2026-11-27).
+- A person acts once on a PERSON ticket, at the merge. Approval of a contract before the build is a setting,
+  off unless a project turns it on for a kind (2026-11-27).
+- A stuck ticket gets one diagnosis before it is dropped or waits (2026-11-27).
+- A Rail serves one repository (2026-11-27).
 - A check that produces a fact is built before wording that asks a model for the same behaviour. The wording
   is added only when a model test shows it moves the number that check reports (2026-11-27).
 
@@ -2951,3 +3081,16 @@ The owner decided on 2026-11-26 not to build these.
   its section on the shared view; that page is brought up to date last.
 - **A local sudo grant for `rail provision`.** On a person's own machine `rail provision` shows the command and
   the person runs it.
+
+The owner decided on 2026-11-27 not to build these.
+
+- **One inbox across repositories**: a saved search over the waits of many repositories. A Rail serves one
+  repository.
+- **A `Uses` column in the areas map**, and boundary sensors built from it. `uses` in `[[projects]]` is the only
+  graph.
+- **`[[profiles]]` beside `[[projects]]`.** One table, `[[projects]]`, takes its place.
+- **Roles in place of model names**: a `[models]` table that the ladders and seats would name. The model names
+  stay where they are in the config.
+- **A blocking finding of the engine's that the worker answers**, for an old test that fails on the new code.
+  The triage run answers it.
+- **`.gitleaksignore` in `person_paths`.** A line in it raises a question for the triage run.
