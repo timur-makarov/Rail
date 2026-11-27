@@ -22,7 +22,10 @@ The rest is yours, in the repository's settings; a cloud session can't change th
 - Turn on Dependabot or Renovate.
 
 `rail doctor` checks the required check, the squash setting, branch deletion and the labels, with a link to
-each page.
+each page. Its `github rate limit` line shows the REST calls the token has left this hour, of its limit, and
+when the limit resets, as GitHub's answer to the doctor's first call says. Every app and token that acts as
+the same person shares one limit. The line is a warning under a tenth of the limit; `rail stats` shows what a
+merged ticket costs in calls.
 
 ## How tickets use pull requests
 

@@ -1982,7 +1982,11 @@ def cmd_save(project, args):
 # --- provisioning: the machine carries the tools --------------------------------------
 
 
-MACHINE_SETUP = "machine-1"  # raise it when what provision writes onto a cloud machine changes
+MACHINE_SETUP = "machine-2"  # raise it when what provision writes onto a cloud machine changes
+# The Bash tool's own default is 2 minutes a call and its ceiling 10: the runner's one Bash call that runs rail work
+# would be cut. The repository's settings set these, and the machine's get the same for a session that doesn't load
+# the repository's.
+BASH_TIMEOUTS = {"BASH_DEFAULT_TIMEOUT_MS": "1800000", "BASH_MAX_TIMEOUT_MS": "7200000"}
 
 
 def bin_dir():
@@ -2036,10 +2040,12 @@ def provisioned(project):
 
 
 def install_machine(project, run):
-    """On a cloud machine: link rail onto PATH, and write Rail's hooks into the machine's own Claude Code settings.
-    Claude Code loads a repository's hooks only in a session that starts with that one repository; the machine's
-    settings load in every session, so the guard and the saves also work above several repositories and in a
-    project's threads. Where the repository's hooks do run, these step aside."""
+    """On a cloud machine: link rail onto PATH, and write Rail's hooks and the Bash tool's two timeouts into the
+    machine's own Claude Code settings. Claude Code loads a repository's settings only in a session that starts
+    with that one repository; the machine's settings load in every session, so the guard and the saves also work
+    above several repositories and in a project's threads, and a Bash call there may run as long as a worker run.
+    Where the repository's hooks do run, these step aside. A timeout the machine's settings already set stays; one
+    they lack takes the value the repository's settings give it, or Rail's own."""
     launcher = os.path.join(project.root, ".rail", "bin", "rail")
     link = os.path.join(bin_dir(), "rail")
     try:
@@ -2074,14 +2080,24 @@ def install_machine(project, run):
             continue
         entries.append({**({"matcher": matcher} if matcher else {}), "hooks": [{"type": "command", "command": hook_command}]})
         added.append(name)
-    if added:
+    try:
+        with open(os.path.join(project.root, ".claude", "settings.json")) as f:
+            theirs = json.load(f).get("env") or {}
+    except (OSError, ValueError, AttributeError):
+        theirs = {}
+    env = settings.get("env") if isinstance(settings.get("env"), dict) else {}
+    timeouts = {name: str(theirs.get(name) or value) for name, value in BASH_TIMEOUTS.items() if name not in env}
+    if timeouts:
+        settings["env"] = {**env, **timeouts}
+    if added or timeouts:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             json.dump(settings, f, indent=2)
             f.write("\n")
     detail = ("rail linked into " + bin_dir() if linked else "rail not linked (no write access to " + bin_dir() + ")")
-    return run.record("machine", True, None, detail + ("; hooks written to ~/.claude/settings.json" if added
-                                                       else "; the machine's hooks are there already"))
+    return run.record("machine", True, None, detail + (
+        "; hooks and the Bash tool's timeouts written to ~/.claude/settings.json" if added or timeouts
+        else "; the machine's hooks and the Bash tool's timeouts are there already"))
 
 
 def run_provision(project, run):
@@ -2403,5 +2419,16 @@ def main(argv=None):
         code = 2
     except RateLimited as e:
         result, code = github_limit(e), 0
+    finally:
+        _keep_calls()
     print(json.dumps(result, indent=2) if as_json else render(result))
     return code
+
+
+def _keep_calls():
+    """The GitHub calls this command made after its last event stay in the clone's cache for the next event."""
+    from . import forge
+    try:
+        forge.keep_calls(os.getcwd())
+    except OSError:
+        pass  # the folder is gone, or the cache can't be written: a count is not worth a failed command

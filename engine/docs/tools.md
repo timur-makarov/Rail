@@ -49,6 +49,14 @@ sake: no attempt is counted, the brief says which tool and to run the ship once 
 failure in a row waits for a person as `TOOL_DOWN` (`rail docs retries`). So a probe has to be fast and change
 nothing: it has 60 seconds.
 
+**A worker run records the tools it used.** The `worked` event of a `rail work` run has `tools`: the names of
+the declared tools the run reached. A tool counts as used when the run called the MCP server of that name
+(a tool call named `mcp__NAME__...`), ran a Bash command whose program is `NAME`, or ran one that names a
+variable the tool lists in `env`. Only the name is kept. A tool reached some other way, such as a library
+that reads the key by itself, is not seen, so read the count as a lower bound. `rail stats` has a `TOOLS`
+table: for each tool, the merged tickets and worker runs that used it, and how often its probe failed after
+a failed step. A session a person drives records no `worked` event, so its tools are not counted.
+
 **`rail doctor` shows each tool:** its names, set or not, where to set a missing one, and the result of its
 probe. A probe is not run while a name is missing.
 

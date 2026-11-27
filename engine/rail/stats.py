@@ -333,6 +333,7 @@ def collect(project, tickets, since=None, states=None, now=None):
     fixed_by_person, under = _held_a_kind(tickets), {"tickets": 0, "kinds": Counter()}
     workers, acted = {}, {"tickets": 0, "cost_usd": 0.0}  # worker runs by model and effort; tickets a person acted on
     flaky = {}  # command -> the merged tickets it was flaky on, its flakes and its runs at ship
+    gh_calls, tools = 0, {}  # GitHub REST calls on the merged tickets' events; declared tools the worker runs used
     for nn, t in tickets.items():
         ships = [e for e in t.events if e.get("event") == "shipped"]
         tier = (ships[-1] if ships else t.last("accepted") or {}).get("tier")
@@ -378,6 +379,16 @@ def collect(project, tickets, since=None, states=None, now=None):
         if _acts(t):
             acted["tickets"] += 1
             acted["cost_usd"] += review_usd + worker_usd
+        gh_calls += sum(e.get("gh_calls") or 0 for e in t.events)
+        for name in {name for e in t.events if e.get("event") == "worked" for name in e.get("tools") or []}:
+            _tool_row(tools, name)["tickets"] += 1
+        for e in t.events:
+            if e.get("event") == "worked":
+                for name in e.get("tools") or []:
+                    _tool_row(tools, name)["runs"] += 1
+            elif e.get("event") == "step":
+                for name in e.get("tools_down") or {}:
+                    _tool_row(tools, name)["probe_failed"] += 1
         for e in t.events:
             if e.get("event") == "worked":
                 rung = ":".join(part for part in (e.get("model"), e.get("effort")) if part) or NO_MODEL
@@ -480,6 +491,9 @@ def collect(project, tickets, since=None, states=None, now=None):
         # acted on cost. A session a person drives records no cost.
         "worker": {"runs": {name: _rounded(workers[name]) for name in sorted(workers)},
                    "person_acted": {"tickets": acted["tickets"], "cost_usd": round(acted["cost_usd"], 4)}},
+        # What the engine asked of GitHub for the merged tickets, and the declared tools their work reached.
+        "github": {"calls": gh_calls, "calls_per_ticket": round(gh_calls / merged, 1) if merged else None},
+        "tools": dict(sorted(tools.items())),
         "tiers": tiers, "raised": dict(raised), "drops": drops(tickets, start),
         # AUTO tickets a later PERSON ticket names as its cause, by that ticket's kinds: nobody was asked.
         "auto_held_a_kind": {"tickets": under["tickets"], "kinds": dict(sorted(under["kinds"].items()))},
@@ -509,6 +523,10 @@ def collect(project, tickets, since=None, states=None, now=None):
             "hit_rate": round(blocking["fixed"] / decided, 3) if decided else None,
         },
     }
+
+
+def _tool_row(tools, name):
+    return tools.setdefault(name, {"tickets": 0, "runs": 0, "probe_failed": 0})
 
 
 def _step_rank(name):
@@ -624,6 +642,22 @@ def render_worker(data):
     return lines
 
 
+def render_tools(data):
+    """The declared tools the merged tickets' worker runs used, and the probes that failed after a failed step."""
+    rows = data["tools"]
+    if not rows:
+        return []
+    return ["", *_table(["TOOLS", "tickets", "worker runs", "probe failed"], [
+        [name, r["tickets"], r["runs"], r["probe_failed"]] for name, r in rows.items()])]
+
+
+def render_github(data):
+    found = data["github"]
+    if not found["calls"]:
+        return []
+    return [f"GitHub REST calls: {found['calls']}, {found['calls_per_ticket']:g} for each merged ticket."]
+
+
 def render_sources(data):
     rows = data["sources"]
     head = ["filed", "merged", "reverted", "dropped", "open"]
@@ -724,10 +758,12 @@ def render(data):
         lines.append("No step failed.")
     if data["consults"]:
         lines.append(f"Consult ran {data['consults']} times.")
+    lines += render_github(data)
     lines += render_guides(data)
     lines += timing.render(data["time"], _table)
     lines += render_flakes(data)
     lines += render_worker(data)
+    lines += render_tools(data)
     if not review["roles"]:
         return "\n".join(lines + ["", "No review ran.", *render_sources(data), *render_grilling(data)])
     roles = review["roles"]

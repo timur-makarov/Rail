@@ -652,7 +652,80 @@ class Scale(RailTest):
         self.assertTrue(all(later - earlier >= 0.99 for earlier, later in zip(writes, writes[1:])), writes)
 
 
+class Calls(RailTest):
+    """Every REST call the engine makes is on an event, or waits in the clone's cache for the next one."""
+
+    def kept(self, fx):
+        folder = fx.path(".git", "rail", "cache", "gh_calls")
+        names = os.listdir(folder) if os.path.isdir(folder) else []
+        total = 0
+        for name in names:
+            with open(os.path.join(folder, name)) as f:
+                total += int(f.read())
+        return total
+
+    def on_events(self, fx, *refs):
+        fx.git("fetch", "--quiet")
+        total = 0
+        for ref, nn in refs:
+            rows = [json.loads(line) for line in fx.git("show", f"{ref}:.rail/journal/{nn}-events.jsonl").splitlines()]
+            self.assertTrue(all(isinstance(e.get("gh_calls", 1), int) and e.get("gh_calls", 1) > 0 for e in rows), rows)
+            total += sum(e.get("gh_calls", 0) for e in rows)
+        return total
+
+    def test_gh_calls_on_the_events_match_the_fake_githubs_request_log(self):
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        a.rail("status")  # a command that writes no event: its calls wait in the cache
+        self.assertGreater(self.kept(a), 0)
+        a.rail("next")
+        logged = len(github.read()["log"])
+        self.assertGreater(logged, 0)
+        self.assertEqual(self.on_events(a, ("origin/1-fix-add", "1")) + self.kept(a), logged)
+        a.fix_calc("1")
+        a.rail("advance", "1")
+        github.ci("1-fix-add", "success")
+        a.rail("next")
+        self.assertEqual(self.on_events(a, ("origin/1-fix-add", "1")) + self.kept(a), len(github.read()["log"]))
+        self.assertEqual(a.rail("advance", "1")["state"], "merged")
+        merged_with = self.on_events(a, ("origin/main", "1"))
+        self.assertGreater(merged_with, 0)
+        self.assertEqual(merged_with + self.kept(a), len(github.read()["log"]))  # the merge's own calls wait
+
+        stats = a.rail("stats")["stats"]["github"]
+        self.assertEqual(stats, {"calls": merged_with, "calls_per_ticket": float(merged_with)})
+        self.assertIn(f"GitHub REST calls: {merged_with}, {merged_with} for each merged ticket.",
+                      a.rail("stats", raw=True).stdout)
+
+        # The next event written in this clone carries what waited, whatever its ticket.
+        a.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
+        a.rail("next")
+        both = self.on_events(a, ("origin/main", "1"), ("origin/2-add-a-status-code", "2"))
+        self.assertEqual(both + self.kept(a), len(github.read()["log"]))
+
+    def test_a_project_with_no_remote_counts_nothing(self):
+        p = self.fixture()
+        p.add(ticket())
+        p.rail("next")
+        rows = [json.loads(line) for line in p.git("show", "1-fix-add:.rail/journal/1-events.jsonl").splitlines()]
+        self.assertTrue(all("gh_calls" not in e for e in rows))
+        self.assertEqual(self.kept(p), 0)
+
+
 class Doctor(RailTest):
+    def test_doctor_shows_the_calls_the_token_has_left_this_hour(self):
+        a, b, github = self.github_pair()
+        self.assertNotIn("github rate limit", {s["step"] for s in a.rail("doctor", expect=3)["steps"]})  # no header
+        github.update(lambda s: s.update(rate={"limit": 5000, "remaining": 4321, "reset": int(time.time()) + 630}))
+        found = {s["step"]: s for s in a.rail("doctor", expect=3)["steps"]}["github rate limit"]
+        self.assertEqual((found["status"], found["result"]), ("ran", "pass"))
+        self.assertRegex(found["detail"], r"^4321 of 5000 REST calls left this hour, reset in (9|10) min$")
+        github.update(lambda s: s["rate"].update(remaining=499))
+        low = {s["step"]: s for s in a.rail("doctor", expect=3)["steps"]}["github rate limit"]
+        self.assertEqual(low["status"], "unavailable")  # a warning: nothing is wrong yet
+        self.assertIn("499 of 5000 REST calls left this hour", low["detail"])
+        self.assertIn("shares the limit", low["detail"])
+
     def test_doctor_checks_the_one_time_github_settings(self):
         a, b, github = self.github_pair()
         found = {s["step"]: s for s in a.rail("doctor", expect=3)["steps"]}

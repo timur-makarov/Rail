@@ -170,7 +170,14 @@ The source only files tickets. The runner above picks them up on its own schedul
 
 Claude Code loads a repository's hooks and permission rules only in a session that starts with that one
 repository. A session with several repositories, and a thread in a project, load neither. So
-`rail provision` also writes the hooks into the machine's own settings, which every session loads:
+`rail provision` also writes the hooks into the machine's own settings, which every session loads, and
+with them the Bash tool's two timeouts, `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`. The values are
+those of the repository's `.claude/settings.json` (30 minutes and 2 hours as Rail installs it); a value the
+machine's settings already hold is left alone. Without them a session that loads no repository settings has
+the Bash tool's own ceiling of 10 minutes, and the Bash call that runs `rail work` would end before a long
+worker run does. That such a session reads the two variables from the machine's settings is assumed from how
+the hooks reach it, and was not checked in a cloud session.
+
 
 - the guard finds the project a command runs in (`cd repo && git push origin main` is still denied), also
   further down when the command names its folder; the saves and the session's snapshot cover every Rail

@@ -28,56 +28,15 @@ section leaves this page.
 
 ### 2. Numbers later decisions wait for
 
-Size: S.
+Built, but for one question on how two numbers are shown. `rail stats` counts the GitHub REST calls for each
+merged ticket and the declared tools the worker runs used, `rail doctor` shows the calls the token has left,
+and `rail provision` writes the Bash tool's two timeouts into the machine's settings (`rail docs stats`,
+`rail docs tools`, `rail docs cloud`).
 
-**What it does.** Four small measurements, each a few lines in the engine, so that decisions on other features
-can rest on numbers: how many GitHub REST calls a merged ticket costs, which tools a run used, what dropped
-tickets cost and what a worker costs per merged ticket by tier, and whether the runner's Bash calls may run as
-long as a worker run.
-
-**How.**
-- Counting GitHub REST calls (feeds **A machine identity** and **Conditional GitHub reads**):
-  - Each engine event a command writes carries `gh_calls`, the REST calls that command made. Counted in
-    `engine/rail/forge.py`.
-  - `rail stats` gives calls per merged ticket (`engine/rail/stats.py`, `engine/docs/stats.md`).
-  - `rail doctor` shows `x-ratelimit-remaining` (`engine/rail/doctor.py`). The forge already reads that header
-    when a limit is hit; the doctor line is not built.
-  - Rule: when calls per merged ticket times merged tickets per hour passes half of the token's limit, the
-    machine identity is the fix, since an installation's budget is its own. GitHub's limits (confirmed on
-    GitHub's docs, 2026-11-25): 5,000 requests an hour for a person's token, shared by every app and token
-    acting as that person; 1,000 an hour per repository for `GITHUB_TOKEN`; a GitHub App installation gets at
-    least 5,000, rising with repositories and users up to 12,500. Secondary limits: at most 100 requests at
-    once, 900 points a minute per endpoint (a read costs 1, a write 5), and in general 80 content-creating
-    requests a minute and 500 an hour. A conditional request answered `304 Not Modified` does not count
-    against the primary limit.
-  - Every session, the runner and the person's own `gh` likely share one person's 5,000 (inferred: the
-    runner's work carries that person's login; how a cloud session picks its GitHub identity is not verified).
-- The tools a run used: the worker's `worked` event records them, so `rail stats` shows which tools tickets
-  use and which probes fail. Documented in `engine/docs/tools.md`.
-- Dropped-ticket cost and worker cost by tier. Already in `engine/rail/stats.py`: the `Dropped` line carries
-  the sum the drop marks keep ("Their runs reported $X.", JSON `drops.cost_usd`), and every tier's `OUTCOMES`
-  column has "cost for each merged ticket" (review and worker cost together, JSON `review_usd`, `worker_usd`,
-  `cost_per_ticket` per tier row). What is left, to settle with the person who reads the stats: whether the
-  dropped cost needs a line of its own rather than the sentence ending the `Dropped` line, and whether the
-  worker's cost alone (without the review's) is shown per tier, since only the JSON has it.
-- `rail provision` writes the two Bash variables `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS` into the
-  machine's settings with the hooks (`engine/rail/cli.py`). The repository's `seed/settings.json` already
-  gives the Bash tool a 30-minute default and a 2-hour ceiling, and `rail doctor` warns when `[worker]
-  timeout_minutes` is not under the ceiling. A session whose repository settings do not load (several
-  repositories, a project thread; `rail docs cloud`, "Session shapes") has the Bash tool's own defaults, so a
-  worker run of 90 minutes would be cut. `rail provision` writes the hooks there today and no Bash variable
-  (confirmed).
-
-**Kept when.**
-- `gh_calls` on events matches the fake GitHub's request log (`tests/fake_gh.py`).
-- A tool a run used is on its `worked` event, and `rail stats` counts it.
-- A fixture checks that `rail provision` writes the two Bash variables into the machine's settings.
-
-**Waits for.** Nothing.
-
-**Assumed, not verified.**
-- That a session whose project settings do not load uses the machine's settings for the Bash variables
-  (inferred from how the hooks reach it).
+**Open decision**, to settle with the person who reads the stats: whether the dropped tickets' cost needs a
+line of its own rather than the sentence ending the `Dropped` line, and whether the worker's cost alone
+(without the review's) is shown for each tier, since only the JSON has it (`worker_usd`). Nothing was changed
+for either.
 
 ### 3. Answer facts, renderers and the answer schema
 

@@ -335,6 +335,11 @@ class Project:
         path = events_path(t.id)
         ref = f"refs/heads/{t.branch}"
         old = gitx.rev(ref, self.root)
+        if events and self.remote:
+            from . import forge
+            calls = forge.take_calls(self.common)
+            if calls:
+                events[-1]["gh_calls"] = calls + events[-1].get("gh_calls", 0)
         existing = gitx.read_blobs([f"{old}:{path}"], self.root)[f"{old}:{path}"] or ""
         text = existing + "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events)
         writes = {path: text, **(files or {})}

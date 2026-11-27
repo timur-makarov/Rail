@@ -163,10 +163,33 @@ class Machine(RailTest):
         for name in ("session-start", "guard", "pulse", "stop"):
             self.assertIn(f"hook {name} --machine", commands)
         self.assertEqual(settings["hooks"]["PreToolUse"][0]["matcher"], "Bash")
+        # The Bash tool's two timeouts, as the repository's own settings hold them: a session that loads no
+        # repository settings reads the machine's.
+        with open(p.path(".claude", "settings.json")) as f:
+            theirs = json.load(f)["env"]
+        self.assertEqual(theirs, {"BASH_DEFAULT_TIMEOUT_MS": "1800000", "BASH_MAX_TIMEOUT_MS": "7200000"})
+        self.assertEqual(settings["env"], theirs)
+        self.assertIn("the Bash tool's timeouts written to ~/.claude/settings.json", done["steps"][0]["detail"])
         p.rail("provision", "--force", cloud=True)
         with open(os.path.join(home, ".claude", "settings.json")) as f:
             self.assertEqual(json.load(f), settings)  # written once
         self.assertEqual(p.rail("next", cloud=True)["reason"]["code"], "NO_WORK")
+
+    def test_provision_keeps_a_timeout_the_machine_has_and_takes_the_repositorys_for_one_it_lacks(self):
+        p = self.fixture()
+        home, bin_dir = self.machine(p)
+        os.makedirs(os.path.join(home, ".claude"))
+        with open(os.path.join(home, ".claude", "settings.json"), "w") as f:
+            json.dump({"env": {"BASH_MAX_TIMEOUT_MS": "10800000", "OTHER": "1"}}, f)
+        mine = p.path(".claude", "settings.json")
+        with open(mine) as f:
+            settings = json.load(f)
+        settings["env"]["BASH_DEFAULT_TIMEOUT_MS"] = "900000"
+        p.write(mine, json.dumps(settings))
+        p.rail("provision", cloud=True)
+        with open(os.path.join(home, ".claude", "settings.json")) as f:
+            self.assertEqual(json.load(f)["env"], {"BASH_MAX_TIMEOUT_MS": "10800000", "OTHER": "1",
+                                                   "BASH_DEFAULT_TIMEOUT_MS": "900000"})
 
     def test_a_tickets_newer_engine_leaves_the_machine_to_the_projects_own(self):
         """The link and the hooks call the engine in the project's checkout. An older one there doesn't know them,

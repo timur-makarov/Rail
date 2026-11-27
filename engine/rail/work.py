@@ -195,6 +195,21 @@ def counts(calls):
             {kind: sorted(set(items))[:KEYS] for kind, items in found.items() if items})
 
 
+def tools_used(project, calls):
+    """The declared tools ([tools.NAME], rail docs tools) the run's calls reached, by name: a call to the MCP server
+    of that name, a Bash command whose program is NAME, or one that names a variable the tool declares in `env`.
+    Only names the config already holds are recorded, never a command."""
+    found = set()
+    for name, tool in project.config["tools"].items():
+        names = [re.compile(rf"(?<![A-Za-z0-9_]){re.escape(var)}(?![A-Za-z0-9_])") for var in tool.get("env", [])]
+        for call in calls:
+            if call["tool"].startswith(f"mcp__{name}__") or (call["tool"] == "Bash" and (
+                    program(call["what"]) == name or any(var.search(call["what"]) for var in names))):
+                found.add(name)
+                break
+    return sorted(found)
+
+
 def log_lines(calls):
     """The run log: one line per tool call, its tool, outcome and command or path, cut to the caps."""
     lines = []
@@ -261,6 +276,9 @@ def run(project, f, result, save):
     fields["counts"] = tally
     if keys:
         fields["keys"] = keys
+    used = tools_used(project, calls)
+    if used:
+        fields["tools"] = used
     worked = event(f.id, "worked", **fields)
     write_log(project, f.id, worked, calls)
     reply = found.get("result") if found and isinstance(found.get("result"), str) else "".join(out[-5:] + err[-5:])

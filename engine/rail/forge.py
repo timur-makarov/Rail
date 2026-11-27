@@ -4,9 +4,11 @@
 """
 
 import json
+import os
 import re
 import subprocess
 import time
+import uuid
 
 from . import gitx, util
 
@@ -66,6 +68,58 @@ def github_repo(project):
     return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
+# Every REST call is counted: the next event the command writes carries the calls made since its last one, as
+# `gh_calls` (rail docs journal). Calls made after a command's last event, or by a command that writes none, are
+# kept in the clone's local cache, one file per command, and go onto the next event any command there writes. So
+# the sum over the journals is every call the engine made, and rail stats divides it by the merged tickets.
+_calls = 0
+
+
+def _count():
+    global _calls
+    _calls += 1
+
+
+def _kept(common):
+    return os.path.join(common, "rail", "cache", "gh_calls")
+
+
+def take_calls(common):
+    """The calls no event carries yet: this command's since its last event, and those other commands left in the
+    cache. A file is renamed before it is read, so two commands at once never count the same one."""
+    global _calls
+    found, _calls = _calls, 0
+    folder = _kept(common)
+    try:
+        names = [name for name in os.listdir(folder) if not name.endswith(".taken")]
+    except OSError:
+        return found
+    for name in names:
+        taken = os.path.join(folder, f"{name}.{os.getpid()}.taken")
+        try:
+            os.rename(os.path.join(folder, name), taken)
+            with open(taken) as f:
+                found += int(f.read().strip() or 0)
+            os.remove(taken)
+        except (OSError, ValueError):
+            pass  # another command took it first
+    return found
+
+
+def keep_calls(cwd):
+    """At a command's end: leave the calls no event carried in the clone's cache. Outside a repository they are
+    dropped, as there is no journal for them to reach."""
+    global _calls
+    if not _calls:
+        return
+    common = gitx.git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd, check=False).stdout.strip()
+    if common:
+        os.makedirs(_kept(common), exist_ok=True)
+        with open(os.path.join(_kept(common), uuid.uuid4().hex), "w") as f:
+            f.write(str(_calls))
+    _calls = 0
+
+
 PAGE = 100          # the most GitHub gives in one page of a list
 MAX_PAGES = 20      # of one list: a list longer than this is read no further
 WRITE_GAP = 1.0     # seconds between two writes, as GitHub's guide to its REST API asks
@@ -97,6 +151,7 @@ def call(method, path, body=None):
         args += ["--input", "-"]
     if method != "GET" and _last_write is not None:
         time.sleep(max(0.0, WRITE_GAP - (time.monotonic() - _last_write)))
+    _count()
     try:
         result = subprocess.run(args, input=json.dumps(body) if body is not None else None,
                                 capture_output=True, text=True, timeout=120)
@@ -147,6 +202,7 @@ def pages(path):
 
 def raw(path):
     """A REST call whose answer isn't JSON, such as a job's log. Returns the text, or None."""
+    _count()
     try:
         result = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired):
@@ -163,14 +219,35 @@ def log_tail(log, lines=60):
     return "\n".join([row for row in rows[start:end + 1] if row.strip()][-lines:])
 
 
+RATE_LOW = 0.1  # of the hour's limit: under it the doctor's line is a warning
+
+
+def rate_line(headers, now=None):
+    """rail doctor's line on the token's primary rate limit, from the headers of a call GitHub just answered: the
+    calls left this hour of the limit, and when it resets. Nothing when GitHub sent no such header (GitHub Enterprise
+    Server with rate limits off). Every app and token acting as the same person shares one limit."""
+    left, limit, reset = (headers.get(f"x-ratelimit-{name}", "") for name in ("remaining", "limit", "reset"))
+    if not left.isdigit():
+        return []
+    detail = f"{int(left)}" + (f" of {int(limit)}" if limit.isdigit() else "") + " REST calls left this hour"
+    if reset.isdigit():
+        detail += f", reset in {max(0, int(reset) - int(now if now is not None else time.time())) // 60} min"
+    low = limit.isdigit() and int(left) < RATE_LOW * int(limit)
+    if low:
+        detail += (". Everything that acts as this person on GitHub shares the limit: rail stats shows the calls for"
+                   " each merged ticket")
+    return [("github rate limit", None if low else True, detail)]
+
+
 def doctor_checks(project, repo):
     """[(name, passed or None, detail)] for the GitHub side of the setup."""
     found = []
     try:
-        info = api("GET", f"repos/{repo}")
+        info, headers = call("GET", f"repos/{repo}")
     except ForgeError as e:
         return [("gh", False, f"gh can't read {repo}: {e}. Log in with gh auth login")]
     found.append(("gh", True, f"gh reads {repo}"))
+    found += rate_line(headers)
     base = project.base
     contexts, plan_limit, ruleset_squash = set(), False, False
     try:

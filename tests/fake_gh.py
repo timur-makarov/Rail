@@ -53,7 +53,11 @@ def list_view(state, pr):
     return view
 
 
+RATE = {}  # the x-ratelimit-* headers every answer carries, when the state's "rate" sets them
+
+
 def respond(status, body=None, headers=None):
+    headers = {**RATE, **(headers or {})}
     reason = {200: "OK", 201: "Created", 202: "Accepted", 204: "No Content", 403: "Forbidden", 404: "Not Found",
               405: "Method Not Allowed", 409: "Conflict", 422: "Unprocessable Entity", 429: "Too Many Requests"}.get(status, "")
     extra = "".join(f"{name}: {value}\r\n" for name, value in (headers or {}).items())
@@ -83,6 +87,7 @@ def handle(state, method, path, body):
     rest = parts[3:]
     state.setdefault("calls", []).append(f"{method} {'/'.join(rest)}")
     state.setdefault("log", []).append({"method": method, "path": "/".join(rest), "query": query, "at": time.time()})
+    RATE.update({f"x-ratelimit-{name}": str(value) for name, value in (state.get("rate") or {}).items()})
     limit = state.get("limit")
     if limit and method in limit.get("methods", [method]):
         # A rate limit, as GitHub answers one: the status, and the headers that say when to come back.

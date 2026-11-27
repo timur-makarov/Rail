@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import CONFIG, RailTest, ticket
+from railtest import CONFIG, FAKE_WORKER, RailTest, ticket
 
 TOOLS = '''
 [tools.payments]
@@ -289,6 +289,76 @@ probe = 'test "$RAIL_TEST_PAY_KEY" = sk_test_1'
         p.rail("advance", "1", expect=3, env_extra=up)
         again = p.rail("advance", "1", expect=3, env_extra={"RAIL_TEST_PAY_KEY": "revoked"})
         self.assertNotEqual(again["reason"]["code"], "TOOL_DOWN")
+
+
+class Used(RailTest):
+    """A worker run records the declared tools it reached, and rail stats counts them."""
+    CONFIG = CONFIG + Down.PROBED + f'''
+[tools.errors]
+use = "The error tracker, an MCP server: read an issue's stack trace"
+
+[tools.deployer]
+use = "The deploy CLI, signed in on the machine"
+
+[tools.unused]
+use = "Declared, and no run reaches it"
+env = ["RAIL_TEST_UNUSED_KEY"]
+
+[worker]
+command = "python3 {FAKE_WORKER}"
+'''
+
+    def test_a_tool_a_run_used_is_on_its_worked_event_and_stats_counts_it(self):
+        from railtest import CHECK_ADD
+        up = {"RAIL_TEST_PAY_KEY": "sk_test_1", "RAIL_TEST_UNUSED_KEY": "u"}
+        down = dict(up, RAIL_TEST_PAY_KEY="revoked")
+        p = self.fixture(config=self.CONFIG)
+        p.add(ticket(check=f'test "$RAIL_TEST_PAY_KEY" = sk_test_1 && {CHECK_ADD}'))
+        p.rail("next", env_extra=up)
+        p.queue_work(
+            {"write": {"src/calc.py": "def add(a, b):\n    return a + b\n"}, "calls": [
+                ["Bash", {"command": 'curl -sf --oauth2-bearer "$RAIL_TEST_PAY_KEY" https://api.example.com/v1/balance'},
+                 "ok", "{}"],                                                      # a variable the tool declares
+                ["mcp__errors__get_issue", {"query": "PAY-12"}, "ok", "a stack trace"],  # the MCP server of that name
+                ["Bash", {"command": "cd infra && uv run deployer status"}, "ok", "idle"],   # the program
+                ["Bash", {"command": "echo $RAIL_TEST_UNUSED_KEY_OLD unused deployers"}, "ok", ""],  # none of them
+                ["mcp__notdeclared__read", {"path": "x"}, "ok", ""]]},
+            {"calls": [["mcp__errors__get_issue", {"query": "PAY-13"}, "ok", "another"]]},
+            {"calls": [["Read", {"file_path": "src/calc.py"}, "ok", "def add"]]})
+        p.rail("work", "1", env_extra=up)
+        p.rail("work", "1", env_extra=up)
+        p.rail("work", "1", env_extra=up)
+        worked = [e for e in journal(p) if e["event"] == "worked"]
+        self.assertEqual([e.get("tools") for e in worked], [["deployer", "errors", "payments"], ["errors"], None])
+        self.assertNotIn("sk_test_1", json.dumps(worked))  # names only
+
+        p.rail("advance", "1", expect=3, env_extra=down)  # the check fails with the payment service out of reach
+        p.queue_reviews(CLEAN)
+        p.rail("advance", "1", env_extra=up)
+        self.assertEqual(p.rail("advance", "1", env_extra=up)["state"], "merged")
+        stats = p.rail("stats", env_extra=up)["stats"]
+        self.assertEqual(stats["tools"], {"deployer": {"tickets": 1, "runs": 1, "probe_failed": 0},
+                                          "errors": {"tickets": 1, "runs": 2, "probe_failed": 0},
+                                          "payments": {"tickets": 1, "runs": 1, "probe_failed": 1}})
+        text = p.rail("stats", raw=True, env_extra=up).stdout
+        self.assertIn("TOOLS     tickets  worker runs  probe failed\n"
+                      "deployer        1            1             0\n"
+                      "errors          1            2             0\n"
+                      "payments        1            1             1\n", text)
+
+    def test_a_project_with_no_declared_tool_records_none(self):
+        p = self.fixture(config=CONFIG + f'\n[worker]\ncommand = "python3 {FAKE_WORKER}"\n')
+        p.add(ticket())
+        p.rail("next")
+        p.queue_work({"write": {"src/calc.py": "def add(a, b):\n    return a + b\n"},
+                      "calls": [["mcp__errors__get_issue", {"query": "PAY-12"}, "ok", ""]]})
+        p.rail("work", "1")
+        self.assertNotIn("tools", [e for e in journal(p) if e["event"] == "worked"][0])
+        p.queue_reviews(CLEAN)
+        p.rail("advance", "1")
+        p.rail("advance", "1")
+        self.assertEqual(p.rail("stats")["stats"]["tools"], {})
+        self.assertNotIn("TOOLS", p.rail("stats", raw=True).stdout)
 
 
 class Config(RailTest):
