@@ -13,7 +13,7 @@ here are built, and is brought up to date then.
   anything.
 - **Later** holds features that wait for nothing and that the owner put after those steps.
 - **Waits for a condition** groups the rest by what has to be true first: tools on the machine, model tests,
-  real tickets, a deploy target, more people or repositories, `rail replay`.
+  real tickets, a deploy target, more people or repositories, the owner taking up a feature set aside.
 - **Dropped** names what the owner decided not to build, so that it is not proposed again.
 
 Each feature says what it does, how, the test that decides whether it is kept, what it waits for, the
@@ -466,55 +466,7 @@ every case behaves as written. The commands themselves are checked on a machine 
 - That `pnpm --filter "...[$RAIL_BASE]"`, `uv sync --all-packages` and the `go.work` commands behave as
   written: not checked.
 
-### 6. Taking Rail's changes into a project
-
-Size: M.
-
-**What it does.** A project learns what changed in Rail since its copy of the engine, through a source a
-person schedules, instead of a person asking an agent to clone the framework and "see what we can integrate"
-(owner, 2026-11-09). No `upgrade` verb is added; that decision of 2026-11-09 holds.
-
-**How.**
-- A seed source `seed/sources/rail-framework.md`, copied by `rail init` (`engine/rail/init.py`) and scheduled
-  by a person. Its `fetch` fetches the framework at the URL in `.rail/SOURCE` into a temporary folder and
-  prints the `CHANGELOG.md` lines added since the commit in `.rail/SOURCE`, each with its commit.
-- `.rail/SOURCE`: `rail init` writes the framework's URL and commit there (built; no docs page describes it,
-  so add a short description to `engine/docs/sources.md` or the page that covers `rail init`). The source
-  reads it and its work updates the commit in it.
-- Its prompt files one ticket per change worth taking, `external_id = "rail-framework#SHA"`, with `tier =
-  "PERSON"`, because every such ticket changes Rail's own gates. Its work copies the changed files from that
-  commit, keeps the project's own changes to them, and updates the commit in `.rail/SOURCE`.
-- `person_paths` additions in `seed/config.toml`. The default covers only part of what `rail init` copies:
-  `.rail/bin/**`, `.rail/engine/**`, `.rail/config.toml` and `.rail/sensors/**`; `.claude/**` and
-  `.github/workflows/**` are PERSON through the kind `runs-with-secrets`. The seed's `person_paths` gain:
-  - `.rail/packs/**` (a pack runs code, as consult runs a model),
-  - `.rail/sources/**` (a source's prompt files tickets),
-  - `.rail/ruleset.json` (the branch protection a person imports),
-  - `.rail/tickets/TEMPLATE.md`.
-  With these, the paths make the tier PERSON too, and the front matter is a second hold.
-- `README.md` says how a project takes Rail's changes (the source) instead of the prompt.
-  `engine/docs/sources.md` lists the source.
-
-- Seen on 2026-11-26: running `rail init` again in a project that has Rail merges the settings and creates
-  missing labels, and refreshes neither `.rail/engine/` nor a skill that is already there. Until this source
-  exists, a project takes a newer Rail by copying the engine by hand.
-
-**Kept when.** Gate cases, no model:
-- `rail-framework`'s `fetch` against a fixture framework repository prints the CHANGELOG lines after the
-  recorded commit and none before it.
-- With the seed's `person_paths`, a ticket that changes only `.rail/packs/consult/` or `.rail/sources/` is
-  PERSON at add.
-
-Model test, four runs, built once model runs are available (until then the wording of the prompt is untested):
-on a fixture changelog of three changes, one of which the project already has, kept when it files two tickets
-in at least 3 of 4 runs.
-
-**Waits for.** The owner restarting the paused model tests (for the model test only). Order of work: the
-`person_paths` additions first, then the source after its model test.
-
-**Open decision.** Nothing open beyond the source form, which is settled for this source (a source, no verb).
-
-### 7. The sweep reads more
+### 6. The sweep reads more
 
 Three features, built in this order. The first two make the sweep read what it skips today. The third gives
 the areas map the one fact about structure that the reviewer and the sweep lack: which area may use which.
@@ -635,7 +587,7 @@ map is written by hand.
 
 ## Later
 
-These wait for nothing. The owner put them after the seven steps (2026-11-26).
+These wait for nothing. The owner put them after the steps above (2026-11-26).
 
 ### Driving the real product
 
@@ -969,46 +921,6 @@ needs a new service.
 for a new service.
 
 **Waits for.** Nothing. Order of work: with the tools-on-runs item in **Numbers later decisions wait for**.
-
-#### "Read these" on AUTO tickets
-
-Size: S.
-
-**What it does.** A person bears responsibility for what can't be undone, and for nothing else (owner,
-2026-11-25): "Anything that can be undone does not provoke any consideration about whether the change should
-be approved, reviewed or learnt about." The label `rail:look` is gone (owner, 2026-11-26), so Rail marks no
-merged AUTO change for a person. What is open is whether the AUTO rows of `## Read these` go, so that the list
-serves PERSON tickets only and lists only what can't be undone.
-
-**How.**
-- `## Read these` (`engine/rail/readthese.py`, `rail docs github`) lists only: the hunks in files that matched
-  a kind's paths, the reviewer's `kinds` items, the `person_reason`, and changed manifests when they add a
-  dependency.
-- Rows go for a declined finding, an amended contract, markers (`SHORTCUT`, `SENSOR`, `TODO`, `FIXME` with a
-  number), other manifests and `.gitattributes`: each can be undone. A flag rule stays only with a `kind`
-  (`flag = "access"`); one without a `kind` raises no row. Changes to tests and `REVIEW.md` get no row.
-- A person who wants to look at an AUTO change keeps `rail:hold`, the brake `rail:stop` and `rail:revert`:
-  those are the person's choice, never a step Rail asks for.
-- The case for keeping the rows: they ask nothing of anyone, and they are what a person, or an agent that
-  gathers things for a person to look at, would read.
-- Files: `engine/rail/readthese.py`, `engine/rail/table.py` if it builds the AUTO list,
-  `engine/docs/github.md`, `CHANGELOG.md`.
-
-**Kept when.** Gate cases, no model (once decided): a pull request of an AUTO ticket has, in its `## Read
-these`, no row for a declined finding, an amended contract, a marker or a manifest; a PERSON ticket's list has
-only the kind rows, its `person_reason`, and manifests that add a dependency; a flag rule without a `kind`
-raises no row. Kept when every case behaves as written. In use, over 50 AUTO tickets merged: if any is counted
-under "AUTO tickets that held a kind" in `rail stats`, the kind's detection (paths, the reviewer's text, or
-the contract writer's guide) is revisited before anything else.
-
-**Waits for.** The owner's decision. Then nothing.
-
-**Open decision.** Whether the AUTO rows of "Read these" go (proposed), or stay as a record for a person, or
-their agent, who chooses to look.
-
-**Assumed, not verified.**
-- That no person needs to learn about an AUTO change after it merges. The brake, the revert label and the
-  stats lines are what is left to notice a mistake, and the in-use measure is where it would show.
 
 ## Waits for a condition
 
@@ -1395,6 +1307,18 @@ Each of these is wording a model reads, or a behaviour only a model run can show
 tests. A part that needs no model may be built before, with its wording marked as not tested; whether the
 wording is kept is decided by its test.
 
+Wording comes after the check that measures the same thing (owner, 2026-11-27). The pairs:
+
+| Wording | The check built first |
+|---|---|
+| The worker stops on a wrong test and amends | **Old tests run against the new code** |
+| The reviewer looks for output special-cased to a test's inputs | **Held-out scenarios** |
+| The kinds of test the build guide lists | **Mutation score on changed lines** |
+| The build guide's lines on repeated code and interfaces | **Complexity and duplication sensors on by default** |
+
+A line of wording is built once its check has run on real changes, and it is kept only when its model test
+shows it moves the number the check reports.
+
 Two tests that belong to no single feature also wait here:
 
 - **Init with a model.** Four real repositories, one for each language, none prepared for Rail; `rail init`
@@ -1483,8 +1407,9 @@ only from 66% to 54% on another. **Old tests run against the new code** is the g
   rewrite), old and new `build.md`, 4 runs per arm. Kept when the new text writes such a test in at least 3 of
   4 runs and the mutation score on those tickets is not lower.
 
-**Waits for.** The owner restarting the paused model tests. The reviewer's line also waits for nothing else;
-the kinds-of-test check uses the mutation score, so it waits for **Mutation score on changed lines**. The
+**Waits for.** The owner restarting the paused model tests, and for each line the check that is built first:
+the worker's line waits for **Old tests run against the new code**, the reviewer's line for **Held-out
+scenarios**, and the kinds-of-test list for **Mutation score on changed lines**, whose score its test uses. The
 tool-name tables wait for the kinds-of-test guidance and the per-surface recipes in `rail-verify` to be
 written.
 
@@ -1553,9 +1478,10 @@ before it: erosion growth is lower by a third or more; the solve rate is not low
 person waits are not higher; and no ticket waits for a person because of `sensors`. The ownership sentence is
 kept on the same rule, and when it adds no more scope amends or split offers than arm D.
 
-**Waits for.** **Sensor sets per language** (arm C), the owner restarting the paused model tests, and replay
-for replay arms (set aside by the owner, to be written up as its own feature). For the arm E part, **The sweep
-gathers what tickets leave behind**.
+**Waits for.** **Complexity and duplication sensors on by default**, which is built first and reports the
+numbers this wording has to move; **Sensor sets per language** (arm C); the owner restarting the paused model
+tests; and replay for replay arms (set aside by the owner, to be written up as its own feature). For the arm E
+part, **The sweep gathers what tickets leave behind**.
 
 #### Findability probe
 
@@ -2664,6 +2590,59 @@ ticket keeps its label, and the next `rail next` after the source ran returns `W
 
 **Waits for.** Nothing.
 
+### The owner takes it up again
+
+The owner set this aside on 2026-11-27. It was the sixth confirmed step, and it waits for nothing else.
+Until it is built, a project takes a newer Rail by copying the engine by hand.
+
+#### Taking Rail's changes into a project
+
+Size: M.
+
+**What it does.** A project learns what changed in Rail since its copy of the engine, through a source a
+person schedules, instead of a person asking an agent to clone the framework and "see what we can integrate"
+(owner, 2026-11-09). No `upgrade` verb is added; that decision of 2026-11-09 holds.
+
+**How.**
+- A seed source `seed/sources/rail-framework.md`, copied by `rail init` (`engine/rail/init.py`) and scheduled
+  by a person. Its `fetch` fetches the framework at the URL in `.rail/SOURCE` into a temporary folder and
+  prints the `CHANGELOG.md` lines added since the commit in `.rail/SOURCE`, each with its commit.
+- `.rail/SOURCE`: `rail init` writes the framework's URL and commit there (built; no docs page describes it,
+  so add a short description to `engine/docs/sources.md` or the page that covers `rail init`). The source
+  reads it and its work updates the commit in it.
+- Its prompt files one ticket per change worth taking, `external_id = "rail-framework#SHA"`, with `tier =
+  "PERSON"`, because every such ticket changes Rail's own gates. Its work copies the changed files from that
+  commit, keeps the project's own changes to them, and updates the commit in `.rail/SOURCE`.
+- `person_paths` additions in `seed/config.toml`. The default covers only part of what `rail init` copies:
+  `.rail/bin/**`, `.rail/engine/**`, `.rail/config.toml` and `.rail/sensors/**`; `.claude/**` and
+  `.github/workflows/**` are PERSON through the kind `runs-with-secrets`. The seed's `person_paths` gain:
+  - `.rail/packs/**` (a pack runs code, as consult runs a model),
+  - `.rail/sources/**` (a source's prompt files tickets),
+  - `.rail/ruleset.json` (the branch protection a person imports),
+  - `.rail/tickets/TEMPLATE.md`.
+  With these, the paths make the tier PERSON too, and the front matter is a second hold.
+- `README.md` says how a project takes Rail's changes (the source) instead of the prompt.
+  `engine/docs/sources.md` lists the source.
+
+- Seen on 2026-11-26: running `rail init` again in a project that has Rail merges the settings and creates
+  missing labels, and refreshes neither `.rail/engine/` nor a skill that is already there. Until this source
+  exists, a project takes a newer Rail by copying the engine by hand.
+
+**Kept when.** Gate cases, no model:
+- `rail-framework`'s `fetch` against a fixture framework repository prints the CHANGELOG lines after the
+  recorded commit and none before it.
+- With the seed's `person_paths`, a ticket that changes only `.rail/packs/consult/` or `.rail/sources/` is
+  PERSON at add.
+
+Model test, four runs, built once model runs are available (until then the wording of the prompt is untested):
+on a fixture changelog of three changes, one of which the project already has, kept when it files two tickets
+in at least 3 of 4 runs.
+
+**Waits for.** The owner restarting the paused model tests (for the model test only). Order of work: the
+`person_paths` additions first, then the source after its model test.
+
+**Open decision.** Nothing open beyond the source form, which is settled for this source (a source, no verb).
+
 ### `rail replay` is taken up again
 
 The owner set the benchmark and `rail replay` aside on 2026-11-26. The code under `bench/` stays as it is and
@@ -2932,7 +2911,7 @@ None of these is to be built. A project that wants one uses what Rail has.
 - Runs of the same ticket side by side with the best one kept. A ticket has one line of work.
 - A formal-proof gate: a project that proves a component puts the prover in `verify` or a `Check:` line.
 - A design review step by a person.
-- An `upgrade` verb: a project takes Rail's changes through a source (step 6).
+- An `upgrade` verb: a project takes Rail's changes through a source (**Taking Rail's changes into a project**).
 - Reminders to rotate a credential.
 - Short-lived apps with a retire-by date as a kind of ticket: Rail is for code with a future, and a project
   can drop an app with a ticket.
@@ -2950,8 +2929,12 @@ Stated here once, as facts the features rest on.
 - A feature that needs model runs builds its part that needs none, and marks its wording as not tested
   (2026-11-26).
 - Secrets reach a pull request's CI only as keys declared `ci = true` (built).
-- The unit of planning is a feature, in the order of this page; the first seven steps are confirmed
-  (2026-11-26).
+- The unit of planning is a feature, in the order of this page; the steps under "Next" are confirmed
+  (2026-11-26). **Taking Rail's changes into a project** was one of them and is set aside (2026-11-27).
+- `## Read these` and its line comments stay on the pull request of an AUTO ticket, for whoever chooses to
+  read one. They ask nothing of anyone (2026-11-27).
+- A check that produces a fact is built before wording that asks a model for the same behaviour. The wording
+  is added only when a model test shows it moves the number that check reports (2026-11-27).
 
 ## Dropped
 
