@@ -485,7 +485,7 @@ contract than a worker that needs a person's hint. The owner decided this on 202
   | Answer | Evidence | What the engine does |
   |---|---|---|
   | `contract`: a `Check:` line or Done Contract item is wrong, or two contradict each other | The quoted line or lines | An agent task for the contract writer: amend the contract. Then a fresh budget and cap |
-  | `too-large`: the work is more than one ticket | The parts it names | An agent task for the contract writer: split it with `rail-slice`. The ticket is dropped with a record that names the tickets that replace it |
+  | `too-large`: the work is more than one ticket | The parts it names | An agent task for the contract writer: split it with `rail-slice`. The ticket is dropped with a record that names the tickets that replace it, and its issue stays open until the last of them merges |
   | `approach`: the contract is right and the attempts share a mistake | What they share, and what to do instead | A new branch from the base, the note in the implement brief, a fresh budget and cap |
   | `machine`: the failures are the machine's or a tool's | The failure it names | The wait that exists for it (`TOOL_DOWN`) |
   | `cannot-tell` | None | As today: an AUTO ticket is dropped, a PERSON ticket waits (`RETRY_CAP`). The diagnosis is in the record and in the wait's brief |
@@ -510,8 +510,8 @@ afterwards, themselves or through the tickets that replaced them; otherwise the 
 **Waits for.** **The triage step** and **A PERSON ticket takes one act**. The wording of the brief is not tested
 with a model until the owner restarts the model tests.
 
-**Open decision.** How the issue of a ticket that was split follows the tickets that replace it: it stays open
-until the last of them merges (proposed), or it is closed with links to them.
+**Open decision.** None. The issue of a ticket that was split stays open until the last of the tickets that
+replace it merges (owner, 2026-11-27).
 
 **Assumed, not verified.**
 
@@ -554,7 +554,8 @@ everything always runs.
   manifest, a CI workflow, `.rail/config.toml`. A lockfile at a workspace's root reaches the members of that
   workspace and no project outside it.
 - **Where the set is used.** At claim, `setup` runs for the projects the ticket's `scope_paths` reach. At ship
-  and in CI, `verify` runs for the projects the changed files reach. Each run is its own step, named
+  and in CI, `verify` runs for the projects the changed files reach, after `setup` for any of them the claim
+  did not set up. Each run is its own step, named
   `verify:NAME`, in the receipts and the journal, so retries, flaky checks and time are counted for each
   project.
 - **One required check.** `rail ci` works the same set out from the pull request's diff against the base, so the
@@ -602,8 +603,8 @@ time per step in `rail stats` asks for it.
 **Waits for.** Nothing. The fixture's audit and type checks need the tools on the machine (**Provision lines and
 toolchain pins per language**).
 
-**Open decision.** Which paths decide `setup` at claim: the ticket's `scope_paths`, with a project first reached
-at ship set up then (proposed), or every project, since the changed files are not known yet.
+**Open decision.** None. The ticket's `scope_paths` decide `setup` at claim, and a project the change first
+reaches at ship is set up then (owner, 2026-11-27).
 
 **Assumed, not verified.**
 
