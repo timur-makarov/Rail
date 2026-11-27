@@ -1115,6 +1115,61 @@ for a new service.
 
 **Waits for.** Nothing. Order of work: with the tools-on-runs item in **Numbers later decisions wait for**.
 
+### 12. One scenario for each language, from an empty repository to a merge
+
+Size: M.
+
+**What it does.** One scripted run for each of Python, TypeScript, Rust and Go carries a small real project
+through everything the steps above add, in one go, with the language's own toolchain. The gate cases of each
+feature show that the feature behaves as written; this shows that the features work together. The owner asked
+for it as the last step (2026-11-26).
+
+**How.**
+
+- It extends `Projects` in `tests/test_languages.py`, which today takes one small real program for each language
+  from `rail init` to one merged ticket. The stand-ins play GitHub, the worker, the reviewer and the triage run,
+  so it costs no model run and gives the same result every time.
+- The run, for each language:
+  1. `rail init` in a repository that holds only the sample project. No `[[projects]]` entry is written, and
+     `rail doctor` prints the derived project.
+  2. A plain AUTO ticket merges: `setup`, `verify:NAME`, the `Check:` lines, the review, the engine's merge.
+  3. A ticket adds a second project in a new folder that uses the first. It is set up and checked in its own
+     ship, and a later change to the first project runs both projects' checks.
+  4. A ticket edits an existing test so that the old test fails on the new code. The `old-test` question is
+     raised; answered `lost`, the ticket goes back to the worker, and with the behaviour restored it merges.
+  5. A ticket whose scope reaches a path of a kind is built with no wait, stops at the person's merge with its
+     `## Read these` list, and merges on `rail:go`.
+  6. A ticket is driven to its retry cap. The `stuck` question is raised once; answered `approach`, the ticket
+     starts again from the base and merges.
+  7. A ticket adds a folder no check reads. The `uncovered` question is raised; answered `needs-checks`, the
+     ticket `coverage:FOLDER` is filed and is PERSON.
+  8. A ticket changes a project of a surface. The product is started, seeded, driven and stopped, and with the
+     sample's planted fault switched on the step fails.
+  9. `rail stats` shows a number for each of these: the split by project, the questions by type and answer, the
+     PERSON tickets, the stuck tickets by answer, the driving-check failures.
+- **Once on real GitHub.** The same run, with the same stand-ins for the worker, the reviewer and the triage
+  run, in a repository on GitHub kept for such checks, for one language. It shows what the stand-in for GitHub
+  cannot: the required check, the labels, the line comments of `## Read these`, an issue carried to its merge.
+- **Once with a model**, when the owner restarts the model tests: the same run with a real worker, reviewer and
+  triage run, four runs for each language. This is the only place where the wording of every brief is read by a
+  model in the order a real ticket meets it.
+- Files that change: `tests/test_languages.py`, `tests/projects/*` (a second project, a planted fault, a driving
+  check script for each), `tests/fake_worker.py` and the stand-in for the triage run.
+
+**Kept when.** No model: every step of the run behaves as written for all four languages with `python3
+tests/run.py --languages`, on a machine that has every tool. On real GitHub: the one run ends with every ticket
+merged or waiting where the list above says. With a model: at least 3 of 4 runs for each language end the same
+way; a step that fails more often names the brief whose wording is revisited.
+
+**Waits for.** Steps 4 to 9, and every tool on the machine. A step of the run is added when its feature is
+built, so the run grows with the steps and is whole after the last one. The run with a model waits for the owner
+restarting the model tests.
+
+**Assumed, not verified.**
+
+- That the stand-ins can play each answer of the triage run without the run becoming a second copy of the gate
+  cases. Each step here checks only that the ticket ends where it should.
+
 ## Waits for a condition
 
 Each group names what has to be true before its features are built or kept. Within a group the features stand
