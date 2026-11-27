@@ -1564,19 +1564,38 @@ feature's own text adds only its situations and what is graded.
   test ran one to three situations four times each. Runs of one situation mostly agree with each other, and
   situations differ, so a wider set says more about the wording than repeats do. More certainty is bought with
   more situations, not more runs.
-- **Planted and control.** Where the wording asks for a behaviour, half the situations call for it and half do
-  not, so that wording which makes the model do it everywhere fails.
+- **Three sorts of situation.**
+  - *Hard*: the behaviour is called for, and today's text gets it wrong. Most of a test's situations are of
+    this sort, because a situation the old text already gets right cannot show that the new one is better.
+  - *Near miss*: a control that looks like a hard one and is fine as it is, such as a lookup table that
+    resembles output special-cased to a test's inputs. It catches wording that makes the model act everywhere.
+    At least a third of a test's situations.
+  - *Plain*: one or two that today's text gets right, kept as a floor: new wording must not break them.
+- **Hard is measured.** A candidate is written to be hard for a reason that can be named: the surface points
+  the wrong way; the cheap path passes the check; the evidence is in the data or in a second file; a likely
+  wrong cause is present; the instruction pulls against the task. It counts as hard only when today's text
+  gets it wrong in one calibration run, made before the test and not counted in it. Choosing situations from
+  the runs that are then compared would count the old text's chance failures as the new text's gain.
+- **Half are held back.** Half the situations of each sort are not read while the wording is written. The
+  wording is frozen, and then the held half is run. The test's result is the held half's.
 - **Graded by a command.** Each situation names the command that says whether a run is right. No result is
   read by hand to decide.
-- **Kept over the set.** The wording is kept when it is right in at least three quarters of the runs on the
-  situations that call for the behaviour, and wrong in no more than one run in eight on the controls. Where an
-  old text exists it is the second arm, and the new one must also be right in more runs than the old. No single
-  situation decides.
+- **Kept over the set.** On the hard situations the new text must be right in more runs than the old, by at
+  least a quarter of those runs. On the near misses and the plain ones it must be wrong in no more runs than
+  the old, and in no more than one run in eight. A brief that has no old text is tested against the brief with
+  the part under test left out. No single situation decides.
 - **A situation whose two runs disagree** is named in the result. It counts as one run right and one wrong.
-- **The fixtures of the gate cases are the situations** wherever a feature has them: the stand-in shows that
-  the engine acts on each answer, and the model on the same fixture shows that it gives the right one.
-- **The result** goes into the feature's `CHANGELOG.md` line with its counts, such as "right in 10 of 12 runs
-  over six situations, the old text in 4 of 12".
+- **A situation that told nothing** is named too: both arms right in every run, or both wrong in every run.
+  It is replaced before the next test.
+- **Where situations come from.** The fixtures of a feature's gate cases, wherever it has them: the stand-in
+  shows that the engine acts on each answer, and the model on the same fixture shows that it gives the right
+  one. Once real tickets run, the journal is the better source: a merge that was reverted, a triage answer
+  later shown wrong, a stuck ticket, a finding a reviewer missed. Each is hard by what happened.
+- **The result** goes into the feature's `CHANGELOG.md` line with its counts, such as "hard: right in 9 of 12
+  runs, the old text in 3 of 12; near misses and plain: no run wrong in either".
+
+Where a feature below still gives a share of runs, such as three quarters, it is read by these rules: the
+share holds for its hard situations against the old text's, and its controls are near misses.
 
 Wording comes after the check that measures the same thing (owner, 2026-11-27). The pairs:
 
@@ -1600,6 +1619,53 @@ Two tests that belong to no single feature also wait here:
   of the init task stays untested until this runs.
 - **Language-specific review lines.** None at first (proposed): a finding that repeats in one language becomes
   a sensor or a rule, not a line in the reviewer's brief.
+
+#### A runner for model tests
+
+Size: M.
+
+**What it does.** One command runs a model test by the rules at the head of this group: it reads the test's
+situations and arms, makes the calibration runs, runs each situation twice in each arm, grades each run with the
+situation's command, and prints the result with its counts, the situations whose runs disagree, the ones that
+told nothing, and the cost. Today the repository holds no script for a model test: each earlier one was run by
+hand, and its changelog line is all that is left of it.
+
+**How.**
+
+- **A folder for each test**, `tests/model/NAME/`. `test.toml` names the seat under test (worker, contract
+  writer, reviewer, triage run, consult) and the arms: for each arm, the files put in place of the framework's,
+  such as a guide or a brief's text. `situations/ID/` holds one situation: its fixture (a repository state, or
+  the input of one brief), its sort (`hard`, `near` or `plain`), its half (`work` or `held`), and `grade`, a
+  command that exits 0 when a run is right.
+- **One command**, `python3 tests/model.py NAME`, with `--calibrate` (one run of today's text on each hard
+  candidate; a candidate it gets right is marked as not hard), `--half work` or `--half held`, and `--arm`. A
+  run is a fresh copy of the fixture with Rail installed from the working tree, the arm's files in place, and
+  the seat's command started as the engine starts it.
+- **The rules are the runner's**, not each test's: two runs, the three sorts, the held half, the keep rule, the
+  named situations. A test cannot set its own number of runs or its own threshold.
+- **Cost.** Each run's cost is taken as `rail work` records a worker's, and the result sums it for each arm.
+- **Where results go.** Outside the repository, in `$RAIL_MODEL_STORE` or `~/.rail-model-tests`: the transcripts
+  are large. The counts go into the feature's `CHANGELOG.md` line.
+- **Not in the suite's default run.** `python3 tests/run.py` never starts a model. It runs the runner's own
+  tests, in which a stand-in plays the seat.
+- Where `bench/` already has a part this needs, such as putting an arm's files in place of the copy's, the
+  runner uses it. Not checked which parts fit.
+- Files that change: `tests/model.py` (new), `tests/model/` (new), `tests/test_model_runner.py` (new), a short
+  section in `README.md` on how a model test is run.
+
+**Kept when.** Gate cases, no model, with a stand-in for the seat: a test of six situations makes two runs of
+each in each arm; `--calibrate` marks a candidate today's text gets right as not hard; the held half is not run
+without `--half held`; a situation whose runs disagree and one that told nothing are named; on fixture results
+the keep rule says kept for a gain of a quarter of the hard runs and not kept below it, and not kept when a near
+miss goes wrong more often than in the old arm. Kept when every case behaves as written.
+
+**Waits for.** Nothing to build it. It is built before the first model test, which is the `old-test` brief of
+**Old tests run against the new code**. Running a test waits for the owner restarting the model tests.
+
+**Assumed, not verified.**
+
+- That one calibration run is enough to call a situation hard. A hard situation that turns out to tell nothing
+  is replaced, which is the correction.
 
 #### Wording about tests, for the reviewer and the worker
 
@@ -3174,8 +3240,9 @@ Stated here once, as facts the features rest on.
 - Anything may be put into a repository, and Rail drives what needs driving. What Rail knows about a
   repository is worked out from the tree on every change, not written once at `rail init`, and what no check
   reads is a fact that raises a question (2026-11-27).
-- A model test runs many situations twice each, not a few four times, and is decided over the set
-  (2026-11-27).
+- A model test runs many situations twice each, not a few four times, and is decided over the set. Most of
+  its situations are hard, which is measured against today's text; its controls are near misses; half are
+  held back until the wording is frozen (2026-11-27).
 - A check that produces a fact is built before wording that asks a model for the same behaviour. The wording
   is added only when a model test shows it moves the number that check reports (2026-11-27).
 
