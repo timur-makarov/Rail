@@ -46,6 +46,13 @@ the secret scan that is no secret is in **An exemption the worker writes is conf
   (its annotations, and a type checker that is not told where the project's environment is), or the profile's
   default is too strict for a project that has no settings for the type checker. This comes first, because
   the suite is red on any machine that has the tool.
+- **The TypeScript lint check lets a planted mistake through.** Seen on 2026-11-27, in the first session whose
+  machine has oxlint: `test_languages.Projects.test_typescript` fails with "typescript lint (oxlint) passed a
+  planted mistake". oxlint 1.95.0 reports the planted `debugger;` as a warning and exits 0; with
+  `--deny-warnings` it exits 1 (reported by that session, which ran both; not run here, where the tool is
+  missing). The profile's lint line for pnpm, npm, Yarn and Bun gains the flag, or the profile ships a config
+  that makes its rules errors; which of the two is settled while fixing. Until then the part was "not run" on
+  every machine, so nobody had seen it.
 - **pip for a pip project.** `rail init` wrote the uv commands into a project that tracks
   `requirements-dev.txt` and no lockfile. A profile takes the manager whose lockfile is tracked, and with none
   the first one, which is uv; pip's lockfile is `requirements.txt` and no other name. The change: with no
