@@ -4,8 +4,8 @@ This page lists every feature of Rail that is proposed and not built. The unit i
 can be built, tested and kept or thrown away on its own. The features stand in the order they are to be built.
 Nothing on this page is implemented, and nothing on it was run, unless a line says so.
 
-`proposals/team.md` is a separate page for a team that takes Rail up. It stays as it is until the features
-here are built, and is brought up to date then.
+`proposals/team.md` is a separate page for a team that takes Rail up. It was brought up to date on 2026-11-27
+with what the steps below built.
 
 ## How to read this page
 
@@ -1989,8 +1989,8 @@ line (the case is part of the bar's). The recipe has no model test of its own; i
 ### More people
 
 `proposals/team.md` holds what a team needs: a ticket a person keeps, waits addressed to one person, code
-owners, a runner for each person, a warning when two tickets overlap. Its features are built when a second
-person works in a repository that runs on Rail. The features below wait for the same thing.
+owners, a runner for each person. Its features are built when a second person works in a repository that runs
+on Rail. The features below wait for the same thing.
 
 #### A machine identity
 
@@ -2491,8 +2491,8 @@ The owner decided on 2026-11-26 not to build these.
   label that sends a person there, it has no reader.
 - **Support for GitHub's merge queue.** **One rebase at a time** is the answer to rebases that pile up, if they
   do.
-- **One label for each ticket state**, kept current for a board. `proposals/team.md` still describes it in
-  its section on the shared view; that page is brought up to date last.
+- **One label for each ticket state**, kept current for a board. `proposals/team.md` names it under what is
+  not built.
 - **A local sudo grant for `rail provision`.** On a person's own machine `rail provision` shows the command and
   the person runs it.
 
