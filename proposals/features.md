@@ -62,8 +62,8 @@ the secret scan that is no secret is in **An exemption the worker writes is conf
 
 **Kept when.** The language tests pass on a machine that has every tool (`python3 tests/run.py --languages`
 prints no "not run" line for Python). Gate cases, no model: a fixture with `requirements-dev.txt` and no
-lockfile gets the pip commands; one with `uv.lock` beside it keeps uv; a review run that holds only `needs_person` raises nothing and
-adds no "Read these" row.
+lockfile gets the pip commands; one with `uv.lock` beside it keeps uv; a review run that holds only
+`needs_person` raises nothing and adds no "Read these" row.
 
 **Waits for.** Nothing.
 
@@ -2230,13 +2230,13 @@ tool = ""           # the [tools.NAME] whose names the commands read (rail docs 
   changes the deploy workflow or a dependency whose build scripts the prod build runs: that code meets the
   prod secrets now (`rail docs kinds`). The release brief lists each PERSON reason with the tickets and kinds
   behind it.
-- **A PERSON release** waits at `APPROVE_CONTRACT` (`engine/rail/table.py`), whatever `approve_contract`
-  holds, because the release is where its kinds take effect: the person approves it with `rail accept NN` or `rail:go`. Then the engine runs it. Its merge is the engine's
-  whatever its tier: the merge only records what happened, and the person's act was the approval. This is the
-  one ticket kind where a PERSON ticket's merge is not a person's, and the docs say so. **The `MERGE` row
-  exception**: today the `MERGE` row refuses the engine's merge of a non-AUTO ticket when there is a remote
-  (`and not (f.project.remote and not f.auto)`), so a PERSON release would fall to `MERGE_BY_PERSON`. The row
-  gains `or kind == "release"`.
+- **A PERSON release** waits at `APPROVE_CONTRACT` (`engine/rail/table.py`), whatever `approve_contract` holds,
+  because the release is where its kinds take effect: the person approves it with `rail accept NN` or `rail:go`.
+  Then the engine runs it. Its merge is the engine's whatever its tier: the merge only records what happened,
+  and the person's act was the approval. This is the one ticket kind where a PERSON ticket's merge is not a
+  person's, and the docs say so. **The `MERGE` row exception**: today the `MERGE` row refuses the engine's merge
+  of a non-AUTO ticket when there is a remote (`and not (f.project.remote and not f.auto)`), so a PERSON release
+  would fall to `MERGE_BY_PERSON`. The row gains `or kind == "release"`.
 - **What the engine runs** (the release ticket's ship, in order):
   1. `command` with `RAIL_RELEASE_SHA` set to the candidate. A failure stops here and counts as a failed step,
      with the retry budget and cap as for any step (`engine/docs/retries.md`). Nothing reached prod, or CD's
