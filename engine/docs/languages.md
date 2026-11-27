@@ -63,13 +63,15 @@ A manifest that marks no code of the project's own, such as a `package.json` kep
 ## The commands init writes
 
 Into the new config's `[commands]`, init also writes a default `setup` and `verify` for each profile found.
-The package manager is the one whose lockfile is tracked beside the manifest; with no lockfile, the first
-in the row.
+The package manager is the one whose lockfile is tracked beside the manifest. With no lockfile tracked, a
+tracked `requirements*.txt` picks `pip`, and the pip commands name the file that was found, as
+`pip-audit -r requirements-dev.txt`. With neither, it is the first manager in the row: a `pyproject.toml` alone
+gets `uv`.
 
 | Profile | Manager, by lockfile | `setup` | `verify`, in order |
 |---|---|---|---|
-| `python` | `uv` (`uv.lock`), `poetry` (`poetry.lock`), `pip` (`requirements.txt`) | `uv sync --locked` | format `uv run ruff format --check --extend-exclude .rail --extend-exclude .claude .`; lint `uv run ruff check --extend-exclude .rail --extend-exclude .claude .`; types `uv run basedpyright`; tests `uv run pytest -q`; audit `uv export --locked --no-emit-project --format requirements-txt \| pip-audit --disable-pip -r /dev/stdin` |
-| `typescript` | `pnpm` (`pnpm-lock.yaml`), `npm` (`package-lock.json`), `yarn` (`yarn.lock`), `bun` (`bun.lock`) | `pnpm install --frozen-lockfile --ignore-scripts` | lint `pnpm exec oxlint`; types `pnpm exec tsc --noEmit`; tests `pnpm test`; audit `pnpm audit` |
+| `python` | `uv` (`uv.lock`), `poetry` (`poetry.lock`), `pip` (`requirements.txt`, or with no lockfile a tracked `requirements*.txt`) | `uv sync --locked` | format `uv run ruff format --check --extend-exclude .rail --extend-exclude .claude .`; lint `uv run ruff check --extend-exclude .rail --extend-exclude .claude .`; types `uv run basedpyright --level error`; tests `uv run pytest -q`; audit `uv export --locked --no-emit-project --format requirements-txt \| pip-audit --disable-pip -r /dev/stdin` |
+| `typescript` | `pnpm` (`pnpm-lock.yaml`), `npm` (`package-lock.json`), `yarn` (`yarn.lock`), `bun` (`bun.lock`) | `pnpm install --frozen-lockfile --ignore-scripts` | lint `pnpm exec oxlint --deny-warnings`; types `pnpm exec tsc --noEmit`; tests `pnpm test`; audit `pnpm audit` |
 | `rust` | `cargo` (`Cargo.lock`) | `cargo fetch --locked` | format `cargo fmt --check`; lint `cargo clippy --all-targets --locked -- -D warnings`; tests `cargo test --locked` (a workspace's root runs every member); audit `cargo deny check advisories` |
 | `go` | `go` (`go.sum`) | `go mod download` | format `test -z "$(gofmt -l .)"`; lint `go vet ./...` and `golangci-lint run`; tests `go test -race ./...` (the race detector needs cgo and a C compiler); audit `govulncheck ./...` |
 
@@ -80,6 +82,11 @@ together:
 - A profile below the root runs each command in its folder, as `(cd web && pnpm test)`. A language in two
   folders runs every part in both.
 - `types` is left out where type checking is off: a `package.json` with no `tsconfig.json`.
+- Python's `types` asks basedpyright for errors only (`--level error`). With no settings of the project's own,
+  basedpyright also fails on its warnings, and those are matters of style: a call's result that is not assigned,
+  a method not marked as an override. A project that wants them writes its own settings and command.
+- TypeScript's `lint` runs oxlint with `--deny-warnings`: oxlint reports its default rules, a `debugger`
+  statement among them, as warnings and exits 0 on them.
 - An audit runs only on a change that touches the lockfile:
   `{ git diff --quiet "$RAIL_BASE"...HEAD -- uv.lock || AUDIT; }`. A new advisory on an old dependency
   then doesn't fail a ticket that has nothing to do with it.
@@ -101,13 +108,14 @@ ticket: `setup` and `verify` pass, and one planted mistake for each part fails i
 
 | Profile | Run by Rail's tests | Not yet run by them |
 |---|---|---|
-| `python` | uv's setup, format, lint, tests | types (basedpyright), audit (pip-audit); every Poetry and pip line |
-| `typescript` | pnpm's setup, types, tests | lint (oxlint), audit; every npm, Yarn and Bun line |
+| `python` | uv's setup, format, lint, types, tests | audit (pip-audit); every Poetry and pip line |
+| `typescript` | pnpm's setup, lint, types, tests | audit; every npm, Yarn and Bun line |
 | `rust` | setup, format, lint, tests | audit (cargo-deny) |
 | `go` | setup, format, both lints, tests | audit (govulncheck) |
 
-The secret scan is not yet run by them either. Plant a mistake for each part on your own project before
-you rely on it, as the init task asks.
+The secret scan is run by them too, on a key planted in a commit. All of this holds on a machine that has
+every tool: a part whose tool is missing is left out and printed as "not run". Plant a mistake for each part
+on your own project before you rely on it, as the init task asks.
 
 ## Generated Go files
 

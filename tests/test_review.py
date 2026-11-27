@@ -843,12 +843,23 @@ class ReviewerKinds(RailTest):
         doc = json.loads(p.git("show", "1-fix-add:.rail/journal/1-review.json"))
         self.assertNotIn("kinds", doc["runs"][0])
 
-    def test_a_run_stored_with_needs_person_by_an_older_engine_still_shows(self):
-        sys.path.insert(0, ENGINE)
-        from rail.review import Ledger
-        ledger = Ledger.__new__(Ledger)
-        ledger.doc = {"runs": [{"needs_person": "It adds the first retry wrapper."}, {"kinds": [self.SHAPE]}]}
-        self.assertEqual(ledger.asked_for_person(), ["It adds the first retry wrapper.", self.SAID])
+    def test_a_run_that_holds_only_needs_person_raises_nothing_and_adds_no_read_these_row(self):
+        # Rail keeps no compatibility with an earlier engine: the sentence such an engine stored is read nowhere.
+        p = self.fixture()
+        Review.medium(self, p)
+        p.queue_reviews(clean())
+        self.assertEqual(p.rail("advance", "1")["reason"]["code"], "MERGE")
+        work = p.worktree("1")
+        doc = json.loads(read(os.path.join(work, ".rail/journal/1-review.json")))
+        doc["runs"][0]["needs_person"] = "It adds the first retry wrapper."
+        p.write(".rail/journal/1-review.json", json.dumps(doc), base=work)
+        p.git("commit", "--quiet", "-am", "a run as an earlier engine stored it", cwd=work)
+        merged = p.rail("advance", "1")
+        self.assertEqual((merged["state"], merged["tier"]), ("merged", "AUTO"))
+        body = p.git("log", "-1", "--format=%B", "main")
+        self.assertIn("## Read these\nNothing needs a person's eye.", body)
+        self.assertNotIn("retry wrapper", body)
+        self.assertEqual(events(p, "main", "tier_raised"), [])
 
     def test_the_schema_lists_every_kind(self):
         sys.path.insert(0, ENGINE)

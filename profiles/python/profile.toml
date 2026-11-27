@@ -8,9 +8,12 @@ migration_paths = ["**/alembic/versions/**"]               # Alembic's migration
 tests = ["**/tests/**", "**/test_*.py", "**/*_test.py", "**/conftest.py", "**/pytest.ini"]
 
 # The commands rail init writes into [commands] when the project's config is new: `setup`, and the parts of
-# `verify`. The manager is the first whose lockfile is tracked beside the manifest; with none, the first one. Each
-# part names the tool it needs on the machine. `types` runs only where type checking is on; `audit` only on a
-# change that touches the lockfile. ruff leaves out .rail and .claude: Rail's engine and the agent's files are
+# `verify`. The manager is the first whose lockfile is tracked beside the manifest. With none tracked, it is the
+# first whose `without_lockfile` names a tracked file, and its commands then name that file where they name the
+# lockfile; with neither, the first manager. Each part names the tool it needs on the machine. `audit` runs only on
+# a change that touches the lockfile. basedpyright fails on its warnings too unless the project's settings say
+# otherwise, and those are matters of style (a call's result not assigned, a method not marked as an override), so
+# the types part asks for errors only. ruff leaves out .rail and .claude: Rail's engine and the agent's files are
 # tracked in the project and are not its code. The repository's own commands win over these (rail docs languages).
 [[managers]]
 name = "uv"
@@ -19,7 +22,7 @@ setup = "uv sync --locked"
 verify = [
   { part = "format", tool = "ruff", run = "uv run ruff format --check --extend-exclude .rail --extend-exclude .claude ." },
   { part = "lint", tool = "ruff", run = "uv run ruff check --extend-exclude .rail --extend-exclude .claude ." },
-  { part = "types", tool = "basedpyright", run = "uv run basedpyright" },
+  { part = "types", tool = "basedpyright", run = "uv run basedpyright --level error" },
   { part = "tests", tool = "pytest", run = "uv run pytest -q" },
   { part = "audit", tool = "pip-audit", run = "uv export --locked --no-emit-project --format requirements-txt | pip-audit --disable-pip -r /dev/stdin" },
 ]
@@ -31,7 +34,7 @@ setup = "poetry install"
 verify = [
   { part = "format", tool = "ruff", run = "poetry run ruff format --check --extend-exclude .rail --extend-exclude .claude ." },
   { part = "lint", tool = "ruff", run = "poetry run ruff check --extend-exclude .rail --extend-exclude .claude ." },
-  { part = "types", tool = "basedpyright", run = "poetry run basedpyright" },
+  { part = "types", tool = "basedpyright", run = "poetry run basedpyright --level error" },
   { part = "tests", tool = "pytest", run = "poetry run pytest -q" },
   { part = "audit", tool = "pip-audit", run = "poetry export --format requirements.txt | pip-audit --disable-pip -r /dev/stdin" },
 ]
@@ -39,11 +42,12 @@ verify = [
 [[managers]]
 name = "pip"
 lockfile = "requirements.txt"
+without_lockfile = "requirements*.txt"   # a project that pins nothing still says what it installs
 setup = "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
 verify = [
   { part = "format", tool = "ruff", run = "ruff format --check --extend-exclude .rail --extend-exclude .claude ." },
   { part = "lint", tool = "ruff", run = "ruff check --extend-exclude .rail --extend-exclude .claude ." },
-  { part = "types", tool = "basedpyright", run = "basedpyright" },
+  { part = "types", tool = "basedpyright", run = "basedpyright --level error" },
   { part = "tests", tool = "pytest", run = ".venv/bin/python -m pytest -q" },
   { part = "audit", tool = "pip-audit", run = "pip-audit -r requirements.txt" },
 ]

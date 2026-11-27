@@ -333,6 +333,30 @@ class Defaults(RailTest):
         self.assertEqual(left, ["rust format (rustfmt)", "rust lint (cargo-clippy)", "rust audit (cargo-deny)",
                                 "typescript lint (oxlint)", "secrets (gitleaks)"])
 
+    def test_a_requirements_file_with_no_lockfile_picks_pip_and_its_commands_name_the_file(self):
+        [found] = tree(os.path.join(self.tmp, "pip"), "requirements-dev.txt", "src/app.py")
+        self.assertEqual((found["manager"]["name"], found["manager"]["lockfile"]), ("pip", "requirements-dev.txt"))
+        setup, verify, _ = initmod.default_commands([found])
+        self.assertEqual(setup, "python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt")
+        self.assertIn('{ git diff --quiet "$RAIL_BASE"...HEAD -- requirements-dev.txt || pip-audit -r'
+                      " requirements-dev.txt; }", verify)
+        self.assertNotIn("uv ", verify)
+        self.assertNotIn("requirements.txt", setup + verify)
+        # A lockfile beside it names the manager, whatever else is tracked; with neither, the first manager.
+        for name, files, manager in (("locked", ("requirements-dev.txt", "pyproject.toml", "uv.lock"), "uv"),
+                                     ("poetry", ("requirements-dev.txt", "pyproject.toml", "poetry.lock"), "poetry"),
+                                     ("bare", ("pyproject.toml",), "uv"),
+                                     ("pinned", ("requirements.txt", "requirements-dev.txt"), "pip")):
+            with self.subTest(name):
+                [found] = tree(os.path.join(self.tmp, name), *files)
+                self.assertEqual(found["manager"]["name"], manager)
+        self.assertEqual(found["manager"]["lockfile"], "requirements.txt")  # the last one: the file pip pins with
+        # Below the root, the file is looked for in the folder that holds the manifest.
+        [found] = tree(os.path.join(self.tmp, "below"), "api/requirements-test.txt", "requirements-dev.txt.bak")
+        self.assertEqual((found["dirs"], found["manager"]["lockfile"]), (["api"], "requirements-test.txt"))
+        self.assertEqual(initmod.default_commands([found])[0],
+                         "(cd api && python3 -m venv .venv && .venv/bin/pip install -r requirements-test.txt)")
+
     def test_every_default_is_a_command_the_config_can_hold(self):
         for name in LANGUAGES:
             for manager in profile(name)["managers"]:
@@ -403,18 +427,18 @@ PROJECTS = {
         "ticket": {
             "scope": ("src/**", "tests/**"),
             "check": "uv run pytest -q tests/test_trim.py",
-            "test": ("tests/test_trim.py", '''import pytest
+            "test": ("tests/test_trim.py", '''import unittest
 
 from notes.store import Store
 
 
-def test_the_spaces_around_a_title_are_dropped():
-    assert Store().add("  write the report ")["title"] == "write the report"
+class TrimTest(unittest.TestCase):
+    def test_the_spaces_around_a_title_are_dropped(self) -> None:
+        self.assertEqual(Store().add("  write the report ")["title"], "write the report")
 
-
-def test_a_title_of_only_spaces_is_refused():
-    with pytest.raises(ValueError):
-        Store().add("   ")
+    def test_a_title_of_only_spaces_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            Store().add("   ")
 '''),
             "fix": ("src/notes/store.py", "        if not title:\n", "        title = title.strip()\n        if not title:\n"),
         },

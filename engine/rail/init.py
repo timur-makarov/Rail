@@ -162,8 +162,9 @@ def detect(root):
     """The language profiles the tracked manifests mark: [{name, paths, dirs, manager, profile, type_check}]. A
     manifest at the root gives paths "**"; manifests only below it give the top-most folders that hold one, as
     "web/**" or "{a,b}/**". `dirs` are those folders ("" for the root), and `manager` is the profile's package
-    manager whose lockfile is tracked in one of them, else its first one. type_check is None for a profile with no
-    type_check_file, else whether one is tracked under its paths."""
+    manager whose lockfile is tracked in one of them; with no lockfile tracked, the one whose `without_lockfile`
+    names a file tracked there, with that file's name in its commands; else its first one. type_check is None for a
+    profile with no type_check_file, else whether one is tracked under its paths."""
     if not os.path.isdir(PROFILES):
         return []
     skip = set(_load_profile("common")["ignore"])
@@ -187,8 +188,24 @@ def detect(root):
         managers = profile.get("managers") or []
         locked = [m for m in managers if any(os.path.join(d, m["lockfile"]).lstrip("/") in tracked for d in dirs)]
         found.append({"name": name, "paths": paths, "dirs": dirs, "profile": profile, "type_check": type_check,
-                      "manager": (locked or managers[:1] or [None])[0]})
+                      "manager": (locked or _unlocked(managers, tracked, dirs) or managers[:1] or [None])[0]})
     return found
+
+
+def _unlocked(managers, tracked, dirs):
+    """The managers a file other than a lockfile picks, for a project that tracks no lockfile: each manager whose
+    `without_lockfile` glob names a file tracked in one of the folders, with that file's name put where its commands
+    and its `lockfile` name the lockfile. A project that tracks requirements-dev.txt then gets `pip install -r
+    requirements-dev.txt`, not the commands of a manager it doesn't use."""
+    out = []
+    for m in managers:
+        names = sorted({os.path.basename(path) for path in tracked if os.path.dirname(path) in dirs
+                        and globmatch(m.get("without_lockfile") or "", os.path.basename(path))})
+        if names:
+            swap = lambda text: text.replace(m["lockfile"], names[0])  # noqa: E731
+            out.append(dict(m, lockfile=names[0], setup=swap(m["setup"]),
+                            verify=[dict(part, run=swap(part["run"])) for part in m["verify"]]))
+    return out
 
 
 def default_parts(found, available=None):

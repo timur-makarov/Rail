@@ -64,6 +64,27 @@ two such runs in a row wait for a person. A command that
 times out at ship, such as `verify` or a check, counts like any other failure. A failed step event with no
 `signature`, written by an older engine, counts as the same failure as its neighbour.
 
+## One line of work per ticket
+
+A ticket has one line of work at a time: one worker carries it from its claim to its merge, on one branch. The
+engine starts no second line of work on the same ticket beside the first, and it does not build a ticket several
+times over to keep the best result.
+
+This is not the "attempt" of the retry budget. An attempt is one ship that counts toward `[retry] budget` and
+`cap` (above, and `rail docs journal`, "The retry budget"): the same line of work, tried again after a failed
+step. Every attempt of a ticket belongs to its one line of work.
+
+Why only one. Several lines of work with the best one kept pay only where something can rank them. For most web,
+API and command-line work every line of work that passes the checks looks the same to those checks. What differs
+is design and how well the code reads, which only a reviewer judges, at the price of a review for each line of
+work and with a reviewer's own false alarms.
+
+Three cases where several lines of work might pay, named so that they are recognised. None is built:
+
+- a bug that lines of work fail on in different ways;
+- performance work with a benchmark that ranks the results;
+- a rewrite with a check of the old code against the new that ranks them.
+
 ## The machine's failures
 
 Some failures are the machine's and not the change's, and more attempts would not mend them. They spend no

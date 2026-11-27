@@ -1,6 +1,13 @@
 """Notes in a SQLite database."""
 
 import sqlite3
+from typing import TypedDict
+
+
+class Note(TypedDict):
+    id: int
+    title: str
+    done: bool
 
 
 class Store:
@@ -12,14 +19,16 @@ class Store:
             " (id INTEGER PRIMARY KEY, title TEXT NOT NULL, done INTEGER NOT NULL)"
         )
 
-    def add(self, title: str) -> dict:
+    def add(self, title: str) -> Note:
         if not title:
             raise ValueError("a note needs a title")
         with self.db:
             row = self.db.execute("INSERT INTO notes (title, done) VALUES (?, 0)", (title,))
+        if row.lastrowid is None:
+            raise RuntimeError("the insert gave the note no id")
         return {"id": row.lastrowid, "title": title, "done": False}
 
-    def all(self) -> list[dict]:
+    def all(self) -> list[Note]:
         rows = self.db.execute("SELECT id, title, done FROM notes ORDER BY id").fetchall()
         return [{"id": i, "title": title, "done": bool(done)} for i, title, done in rows]
 

@@ -76,8 +76,6 @@ def items(project, t, ticket, tier, ledger, changed):
             if isinstance(k, dict):
                 item(k.get("file"), [k["line"]] if k.get("line") else [],
                      f"{k.get('kind')}: {_cut(k.get('why'))}", "the reviewer")
-        if run.get("needs_person"):
-            item(None, [], _cut(run["needs_person"]), "the reviewer")
     by_path = False
     for kind, hits, key in raised_tier(project, changed)[1]:
         by_path = True

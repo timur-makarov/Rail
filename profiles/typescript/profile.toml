@@ -12,14 +12,15 @@ tests = ["**/*.test.*", "**/*.spec.*", "**/__tests__/**", "**/e2e/**", "**/vites
 # The commands rail init writes into [commands] when the project's config is new: `setup`, and the parts of
 # `verify`. The manager is the first whose lockfile is tracked beside the manifest; with none, the first one. Each
 # part names the tool it needs on the machine. `types` runs only where a tsconfig.json is tracked; `audit` only on
-# a change that touches the lockfile. Installs run no dependency's lifecycle scripts. The project's own formatter
+# a change that touches the lockfile. Installs run no dependency's lifecycle scripts. oxlint reports its default
+# rules as warnings and exits 0 on them, so the lint part runs it with --deny-warnings. The project's own formatter
 # check and scripts win over these (rail docs languages).
 [[managers]]
 name = "pnpm"
 lockfile = "pnpm-lock.yaml"
 setup = "pnpm install --frozen-lockfile --ignore-scripts"
 verify = [
-  { part = "lint", tool = "oxlint", run = "pnpm exec oxlint" },
+  { part = "lint", tool = "oxlint", run = "pnpm exec oxlint --deny-warnings" },
   { part = "types", tool = "tsc", run = "pnpm exec tsc --noEmit" },
   { part = "tests", tool = "pnpm", run = "pnpm test" },
   { part = "audit", tool = "pnpm", run = "pnpm audit" },
@@ -30,7 +31,7 @@ name = "npm"
 lockfile = "package-lock.json"
 setup = "npm ci --ignore-scripts"
 verify = [
-  { part = "lint", tool = "oxlint", run = "npx --no-install oxlint" },
+  { part = "lint", tool = "oxlint", run = "npx --no-install oxlint --deny-warnings" },
   { part = "types", tool = "tsc", run = "npx --no-install tsc --noEmit" },
   { part = "tests", tool = "npm", run = "npm test" },
   { part = "audit", tool = "npm", run = "npm audit" },
@@ -41,7 +42,7 @@ name = "yarn"
 lockfile = "yarn.lock"
 setup = "yarn install --immutable"
 verify = [
-  { part = "lint", tool = "oxlint", run = "yarn oxlint" },
+  { part = "lint", tool = "oxlint", run = "yarn oxlint --deny-warnings" },
   { part = "types", tool = "tsc", run = "yarn tsc --noEmit" },
   { part = "tests", tool = "yarn", run = "yarn test" },
   { part = "audit", tool = "yarn", run = "yarn npm audit" },
@@ -52,7 +53,7 @@ name = "bun"
 lockfile = "bun.lock"
 setup = "bun install --frozen-lockfile --ignore-scripts"
 verify = [
-  { part = "lint", tool = "oxlint", run = "bunx oxlint" },
+  { part = "lint", tool = "oxlint", run = "bunx oxlint --deny-warnings" },
   { part = "types", tool = "tsc", run = "bunx tsc --noEmit" },
   { part = "tests", tool = "bun", run = "bun run test" },
 ]

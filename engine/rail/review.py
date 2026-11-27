@@ -160,13 +160,10 @@ class Ledger:
             and self.needed_run(patch_id, tier) is None
 
     def asked_for_person(self):
-        """What review and security runs found that a revert doesn't undo, each item once, as "kind: file:line: why".
-        A run stored by an older engine may hold a `needs_person` sentence instead."""
+        """What review and security runs found that a revert doesn't undo, each item once, as "kind: file:line: why"."""
         found = []
         for r in self.doc["runs"]:
             found += [kind_line(k) for k in r.get("kinds") or [] if isinstance(k, dict)]
-            if r.get("needs_person"):
-                found.append(r["needs_person"])
         return list(dict.fromkeys(found))
 
     def describe(self, fid, with_answer=True, scripts=False):
