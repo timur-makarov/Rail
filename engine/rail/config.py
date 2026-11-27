@@ -27,6 +27,9 @@ DEFAULTS = {
     "base_branch": "main",
     "person_paths": [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".rail/sensors/**"],  # the kind `controls`
     "migration_paths": ["**/migrations/**"],  # the kind `data-loss`
+    # Kinds whose tickets wait for a person's approval of the contract before the build. Empty: a person acts once
+    # on a PERSON ticket, at the merge.
+    "approve_contract": [],
     # Paths that hold each kind of change a revert doesn't undo (rail docs kinds).
     "kinds": {kind: [".github/workflows/**", ".claude/**"] if kind == "runs-with-secrets" else [] for kind in KINDS},
     "commands": {"setup": "", "verify": "", "provision": "", "timeout_secs": 900, "setup_timeout_secs": 0,
@@ -149,6 +152,10 @@ def load(root):
         else:
             raise RailError(f"config: unknown key '{key}'{_suggest(key, DEFAULTS)}")
     _check_ladder(config)
+    for kind in config["approve_contract"]:
+        if kind not in KINDS:
+            raise RailError(f"config: approve_contract names '{kind}', which is no kind{_suggest(kind, KINDS)}."
+                            f" The kinds: {', '.join(KINDS)}")
     for n, sensor in enumerate(config["sensors"]):
         if not sensor.get("command", "").strip():
             raise RailError(f"config: sensors[{n}] needs a command")

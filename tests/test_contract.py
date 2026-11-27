@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import CONFIG, RAIL, RailTest, check_shape, ticket  # noqa: E402
+from railtest import APPROVE, CONFIG, RAIL, RailTest, check_shape, ticket  # noqa: E402
 
 GRILLED = """
 ## Grilling
@@ -205,7 +205,7 @@ class Amend(RailTest):
         self.assertEqual(dropped["reason"]["message"], "ticket 2 is dropped; follow-up work is a new ticket with caused_by")
 
     def test_a_ticket_with_no_worktree_here_is_amended_with_a_file(self):
-        p = self.fixture()
+        p = self.fixture(config=APPROVE + CONFIG)
         p.add(ticket(tier="PERSON"))
         refused = p.rail("amend", "1", expect=2)
         self.assertEqual(refused["reason"]["message"], "edit the ticket in its worktree, or pass the new ticket with --file")
@@ -232,7 +232,7 @@ class Amend(RailTest):
         self.assertIn('tier = "PERSON"', p.git("show", "1-fix-add:.rail/tickets/1.md"))
 
     def test_an_amend_keeps_its_reason_and_shows_it_to_the_person_who_approves(self):
-        p = self.fixture()
+        p = self.fixture(config=APPROVE + CONFIG)
         p.add(ticket(tier="PERSON"))
         p.rail("accept", "1")
         p.rail("next")
@@ -341,7 +341,7 @@ class Reasons(RailTest):
         self.assertEqual(p.rail("drop", "1", "--by", "person")["state"], "dropped")  # a person's word is its own reason
 
     def test_writing_a_contract_nobody_accepted_yet_needs_no_reason(self):
-        p = self.fixture()
+        p = self.fixture(config=APPROVE + CONFIG)
         p.add(ticket(tier="PERSON"))
         path = p.path(".rail", "tickets", "1.md")
         changed = os.path.join(self.tmp, "1.md")

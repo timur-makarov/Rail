@@ -3,11 +3,13 @@
 
 base_branch = "main"                      # reader: claim, ship, CI, merge
 # A ticket is AUTO or PERSON. AUTO: the engine accepts its contract, the reviewer checks the change, and the engine
-# merges it. PERSON, only for a change a revert doesn't undo (rail docs kinds): a person approves the contract and
-# merges; a security seat reviews as well.
+# merges it. PERSON, only for a change a revert doesn't undo (rail docs kinds): the engine accepts its contract too,
+# a security seat reviews as well, and a person merges it. That merge is the one act a PERSON ticket takes.
 # reader: add and amend (matched against scope_paths) and ship (changed files). A ticket that touches one is PERSON
 person_paths = [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".rail/sensors/**"]   # the kind controls: Rail's own gates
 migration_paths = ["**/migrations/**"]    # the kind data-loss; tickets touching them need reversibility and rollback
+approve_contract = []                     # reader: add, next and amend. Kind ids (rail docs kinds): a PERSON ticket of one
+                                          # waits for a person to approve its contract before the build. Empty: none does
 
 [kinds]                                   # reader: add, amend and ship. A ticket whose scope or changed files match is
                                           # PERSON. Each key is a kind's id (rail docs kinds), each value its paths here

@@ -121,9 +121,10 @@ it. The advice given at the budget is in the answer of
 ## Waits
 
 A ticket waits for a person (`owner: person`) for an approval, a person's merge, a review that timed out or gave
-invalid output twice in a row, a failure of the machine's twice in a row, or an amended Done Contract; and a PERSON ticket also for the retry budget or cap,
-a finding the refuter upheld, and a ticket it comes after that was dropped. On an AUTO ticket those three are no
-wait: at the cap the ticket is dropped (above); a finding the refuter upheld stands, and disputing it again comes
+invalid output twice in a row, or a failure of the machine's twice in a row; a ticket whose kind the project
+names in `approve_contract` also for its contract and for an amended Done Contract (`rail docs kinds`); and a
+PERSON ticket also for the retry budget or cap. On an AUTO ticket the cap is no wait: the ticket is dropped
+(above). Two more are no wait on either tier: a finding the refuter upheld stands, and disputing it again comes
 back as a failed review that counts toward the cap; and when a ticket it comes after was dropped, the agent
 decides, with the contract writer's model (`[worker] contract`), whether to remove that ticket from `after`
 (`rail amend NN "why" --file FILE`) or to drop this one (`rail drop NN --reason "why"`). Both are recorded. The brief says what is
@@ -139,7 +140,7 @@ ticket that writes it into the project's part of `AGENTS.md`, or into a rule.
 Each entry of `rail next`'s `waits` list has `kind`, what the wait asks of the person:
 
 - `approval`: something a revert doesn't undo, money included (`APPROVE_CONTRACT`, `APPROVE_AMEND`,
-  `MERGE_BY_PERSON`, `BUDGET`, and on a PERSON ticket `RETRY_CAP`, `FINDING_UPHELD` and `AFTER_DROPPED`).
+  `MERGE_BY_PERSON`, `BUDGET`, and on a PERSON ticket `RETRY_CAP`).
 - `grant`: the machine lacks something a person gives once, a setting needs repair, or something outside the
   repository is a person's to do (`TOOL_MISSING`, `TOOL_DOWN`, `STUCK_REVIEW`, `MERGE_FAILED`, `SECRET_FOUND`).
   `STUCK_REVIEW` is also the wait of a triage run that gave no answer twice in a row, and `SECRET_FOUND` is

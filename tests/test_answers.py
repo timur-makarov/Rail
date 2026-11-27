@@ -8,7 +8,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import RailTest, check_shape, engine, ticket
+from railtest import APPROVE, CONFIG, RailTest, check_shape, engine, ticket
 from test_review import ADVISORY, BLOCKING, found
 
 engine()
@@ -29,7 +29,7 @@ def situations(test):
     p.fix_calc("1")
     p.queue_reviews(found(BLOCKING, ADVISORY))
     got.append(p.rail("advance", "1", expect=3))             # the review leaves a blocking finding
-    q = test.fixture("person")
+    q = test.fixture("person", config=APPROVE + CONFIG)
     q.add(ticket(tier="PERSON"))
     got.append(q.rail("next", "1"))                          # a person approves the contract
     return {a["reason"]["code"]: a for a in got}

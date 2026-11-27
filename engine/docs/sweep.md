@@ -40,6 +40,11 @@ next sweep starts. The first sweep starts where Rail was set up.
 - **Question types with one answer:** a type of the triage step (`rail docs triage`) whose last 20 answered
   questions, in every journal on the base branch, got the same answer 19 times or more. The agent opens one
   ticket that makes the answer a rule of the engine or removes the type.
+- **Kinds a person refuses at the merge:** a kind held by three or more of the last 20 PERSON tickets that
+  ended, merged or dropped, which a person closed without a merge, and which `approve_contract` does not name.
+  Read from the drop marks. The agent opens one ticket that puts the kind into `approve_contract`, so a person
+  approves such a contract before the build (`rail docs kinds`). The summary's wording for this has not been
+  tested with a model run.
 - **Output:** tickets, never edits, and a one-page summary in `.rail/journal/NN-summary.md`: the free part,
   the review's findings, the parked and open advisory findings, the proposed checks by kind, the patterns and the flaky checks. The agent opens a ticket for
   each finding that names something wrong (a finding about style gets none), and one ticket

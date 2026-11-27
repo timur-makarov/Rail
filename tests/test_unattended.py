@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import CONFIG, Fixture, RailTest, ticket
+from railtest import APPROVE, CONFIG, Fixture, RailTest, ticket
 
 
 def read(path):
@@ -141,7 +141,7 @@ class RedBase(RailTest):
 
 class Notify(RailTest):
     def test_each_new_wait_is_announced_once(self):
-        p = self.fixture()
+        p = self.fixture(config=APPROVE + CONFIG)
         p.add(ticket(tier="PERSON"))
 
         def hook(term_program):

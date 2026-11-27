@@ -27,12 +27,13 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   `TICKET_LINT` (fix the ticket), `STEP_FAILED` (a ship step failed; the output is in the brief),
   `ANSWER_FINDINGS`, `TRIAGE` (a question the engine raised about the shipped patch is answered first: run
   `rail advance`; `rail docs triage`), `REBASING` and `CONFLICT`, `SPLIT`, `RED_BASE` (the base branch fails `verify`),
-  `WAITING_AFTER` and `SCOPE_OVERLAP` (another ticket goes first), `AFTER_DROPPED` on an AUTO ticket (decide
+  `WAITING_AFTER` and `SCOPE_OVERLAP` (another ticket goes first), `AFTER_DROPPED` (decide
   whether it stands without the dropped one), `STUCK` (an AUTO ticket at the retry cap: `rail next` drops it),
   `DROP_PENDING`, `CI_WAIT`, `GITHUB_LIMIT` (GitHub's rate limit is used up: sleep as the script says, or come
-  back at the time the brief names), `NO_WORK`. A person's turn is `APPROVE_CONTRACT`, `APPROVE_AMEND`,
-  `MERGE_BY_PERSON`, and on a PERSON ticket `RETRY_CAP` (the retry budget or the cap), `FINDING_UPHELD` and
-  `AFTER_DROPPED`; `STUCK_REVIEW`, `HOLD` or `MERGE_FAILED`; `SECRET_FOUND` (a triage run judged that the
+  back at the time the brief names), `NO_WORK`. A person's turn is `MERGE_BY_PERSON`, the one
+  act a PERSON ticket takes; `APPROVE_CONTRACT` and `APPROVE_AMEND`, only for a kind the project names in
+  `approve_contract` (`rail docs kinds`); on a PERSON ticket `RETRY_CAP` (the retry budget or the cap);
+  `STUCK_REVIEW`, `HOLD` or `MERGE_FAILED`; `SECRET_FOUND` (a triage run judged that the
   branch's commits hold a real secret, and a person rotates it: `rail docs triage`); and `BUDGET` (the ticket's runs cost more than
   `[worker] ticket_usd` since a person last acted); and `TOOL_MISSING` (a declared tool's credential isn't set on
   this machine, so no ticket is claimed there: `rail docs tools`) and `TOOL_DOWN` (a step failed twice in a row for
@@ -136,7 +137,7 @@ checks a small change better. CI never offers.
 
 With no remote, a ready AUTO ticket is merged by the next
 `advance` (run it from the project's root: the merge removes the worktree), as a squash commit on the base
-branch; a PERSON ticket waits for `rail accept NN` first. With a remote, every ticket has a pull request;
+branch; a PERSON ticket waits at `MERGE_BY_PERSON` for `rail accept NN` first. With a remote, every ticket has a pull request;
 once its required checks are green, `advance` merges an AUTO ticket through GitHub's async merge, and a
 person merges a PERSON ticket. When only CI waits remain, `next` returns `gh run watch` for the run, then
 `rail next`.
@@ -151,7 +152,7 @@ lost.
 `rail work NN` runs one attempt at a ticket's agent work, the way `advance` runs the reviewer. It builds the
 brief `next` would give for the ticket, and runs only when that is a ticket's work: `TICKET_LINT`,
 `VERIFY_ASSUMPTIONS`, `IMPLEMENT`, `REVERT`, `STEP_FAILED`, `RED_CHECK`, `ANSWER_FINDINGS`, `CONFLICT`, `REBASING`,
-`SPLIT`, a sweep's `SWEEP_TICKETS` (`rail docs sweep`), or `AFTER_DROPPED` on an AUTO ticket. For any other
+`SPLIT`, a sweep's `SWEEP_TICKETS` (`rail docs sweep`), or `AFTER_DROPPED`. For any other
 answer, such as `SETUP_FAILED` or a `BUDGET` wait, it runs nothing and returns that answer, and so it does when
 `[worker] command` is empty. Over `[worker] daily_usd` it starts no worker and answers `BUDGET_DAY`.
 

@@ -53,7 +53,9 @@ kind = ""                          # "revert" on a ticket that takes another one
   Look at) never fails the scope check. That holds for the ticket's own file only. Another ticket's file on
   its branch fails the scope check: a new ticket comes in through `rail add`, on its own branch.
 - **The tier** says who accepts the contract and who merges. On `AUTO` the engine does both, after the
-  checks and the review. On `PERSON` a person approves the contract and merges. A person is asked only about
+  checks and the review. On `PERSON` the engine accepts the contract too, and a person merges: that is the one act a
+  PERSON ticket takes, unless the project names its kind in `approve_contract`, and then a person approves the
+  contract before the build as well (`rail docs kinds`). A person is asked only about
   what a revert doesn't undo: write `PERSON` when the change does something of a kind in `rail docs kinds`, and
   name it in `person_reason`: the kind's id, a colon, and where, such as `"access: auth/refresh.py"`, with
   `"; "` between several. Ticket lint fails a PERSON ticket without one, or with a part that names no kind. The engine makes a ticket PERSON by itself in three cases: its

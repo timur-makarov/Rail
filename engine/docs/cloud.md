@@ -163,7 +163,8 @@ The source only files tickets. The runner above picks them up on its own schedul
   is no brake.
   The engine sets one brake itself: on the scope of a ticket whose deploy to dev failed, until its revert has
   merged (`rail docs environments`).
-- **Merge a PERSON ticket:** the merge button.
+- **Merge a PERSON ticket:** the merge button. It is the one act a PERSON ticket takes; closing the pull
+  request instead drops the ticket (`rail docs kinds`).
 - Each pull request ends with `Claude-Session:` and a link to the session that worked the ticket.
 
 ## Session shapes

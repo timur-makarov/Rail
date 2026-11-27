@@ -8,12 +8,12 @@ new -> accepted -> implementing -> reviewing -> in-ci -> merge-ready -> merged
 
 | State | Means |
 |---|---|
-| `new` | The ticket has no `accepted` event. The engine accepts an AUTO ticket once its lint passes; a person approves a PERSON ticket: `rail accept NN` |
+| `new` | The ticket has no `accepted` event. The engine accepts a ticket once its lint passes; a person approves the contract of a PERSON ticket whose kind `approve_contract` names: `rail accept NN` (`rail docs kinds`) |
 | `accepted` | Accepted, not claimed yet |
 | `implementing` | Claimed, and the current patch hasn't passed the ship steps, or the worktree has uncommitted changes |
 | `reviewing` | Shipped, and a question the triage step raised about this patch has no answer (`rail docs triage`), or the change needs a review and no complete review is bound to this patch |
 | `in-ci` | Shipped and reviewed, with a remote: waiting for the required checks on the pull request |
-| `merge-ready` | Ready to merge. An AUTO ticket merges with `rail advance NN`; a PERSON ticket waits for a person |
+| `merge-ready` | Ready to merge. An AUTO ticket merges with `rail advance NN`; a PERSON ticket waits for a person's merge, the one act it takes |
 | `merged` | A squash commit with `Ticket: NN` is on the base branch |
 | `dropped` | `rail drop NN` ended it, the engine dropped an AUTO ticket at the retry cap (`STUCK`), or its pull request was closed without a merge. Until the drop's mark is on the counter branch, the ticket keeps its worktree, branches and pull request (`DROP_PENDING`) |
 

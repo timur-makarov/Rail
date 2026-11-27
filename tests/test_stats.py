@@ -6,7 +6,7 @@ import sys
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import ARCHITECTURE, CONFIG, RailTest, engine, ticket
+from railtest import APPROVE, ARCHITECTURE, CONFIG, RailTest, engine, ticket
 
 BLOCKING = {"severity": "blocking", "file": "src/calc.py", "line": 1, "claim": "add breaks on None."}
 ADVISORY = {"severity": "advisory", "file": "src/calc.py", "claim": "add has no docstring."}
@@ -373,7 +373,7 @@ class WhereTheTimeGoes(RailTest):
         self.assertEqual(shares, sorted(shares, reverse=True))
 
     def test_a_persons_act_records_the_wait_it_answered_and_stats_print_the_lines(self):
-        p = self.fixture()
+        p = self.fixture(config=APPROVE + CONFIG)
         p.add(ticket(title="Add a status code", tier="PERSON", scope=("api/**",), check="grep -q 201 api/handlers.py"))
         p.rail("accept", "1")
         p.rail("next")
@@ -424,6 +424,6 @@ class Responsibility(RailTest):
         b.rail("status")  # another clone, which never had the branches
         answer = b.rail("stats")
         self.assertEqual(answer["stats"]["drops"], {"total": 3, "by": {"agent": 1, "engine": 1, "person": 1},
-                                                    "stuck_steps": {"checks": 1}, "cost_usd": 0.0})
+                                                    "stuck_steps": {"checks": 1}, "person_refused": {}, "cost_usd": 0.0})
         self.assertIn("Dropped: 3. By the engine at the retry cap 1, by an agent 1, by a person 1. The engine's drops,"
                       " by the step that kept failing: checks 1.", answer["text"])

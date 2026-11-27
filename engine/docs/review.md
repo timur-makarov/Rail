@@ -71,7 +71,7 @@ the work began (the `base_checks` event, `rail docs loop`), the review run's bri
 reviewer to look at whether the change is tested.
 
 **After an amend nobody approved.** When `rail amend` changed the Done Contract or the scope after the ticket was
-first accepted, and no person approved it (an AUTO ticket), the review run's brief also holds the contract as first
+first accepted, and no person approved it (any ticket but one whose kind `approve_contract` names), the review run's brief also holds the contract as first
 accepted: its `Check:` lines and its scope. The reviewer blocks when the amend dropped or weakened a check so that a
 fault now passes, and lets an amend that corrects a wrong check go.
 
@@ -97,9 +97,9 @@ rail answer NN F3 parked "a real problem this change didn't cause"
 You can't decline or park a blocking finding: either answer disputes it, and a fresh refuter decides at the
 next `advance`. The refuter's brief has the location, the claim and the evidence, and leaves your argument out. It works in
 the ticket's worktree, so the argument is in the journal there if it looks; make the code show your point. It dismisses
-the finding, parks it (the problem is real, but this change didn't cause it), or upholds it. If it upholds
-the finding and you still can't fix it, a person decides, with `rail answer NN F1 declined "why" --owner`
-or `rail answer NN F1 parked "why" --owner`.
+the finding, parks it (the problem is real, but this change didn't cause it), or upholds it. An upheld finding stands, on a PERSON ticket too: fix it. Disputing it again is refused. A person may
+still decide one, with `rail answer NN F1 declined "why" --owner` or `rail answer NN F1 parked "why" --owner`,
+and no wait asks them to.
 
 When you fix a finding, `advance` ships the fix and reviews the whole change again. A finding marked fixed
 counts only once a later run doesn't repeat it.
@@ -107,7 +107,8 @@ counts only once a later run doesn't repeat it.
 ## PERSON tickets
 
 A PERSON ticket adds a security seat: a second run whose brief asks only about security. Each blocking
-finding it reports goes to a refuter at once. A person merges a PERSON ticket.
+finding it reports goes to a refuter at once. A person merges a PERSON ticket, and that merge is the one act
+it takes (`rail docs kinds`).
 
 **The reviewer lists what a revert doesn't undo.** A review or security run returns `kinds`: each thing in the
 change of a kind in `rail docs kinds`, as `{kind, file, line, why}`, on every ticket. The engine checks each

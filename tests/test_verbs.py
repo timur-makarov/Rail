@@ -9,7 +9,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import ARCHITECTURE, CONFIG, Fixture, RailTest, ticket  # noqa: E402
+from railtest import APPROVE, ARCHITECTURE, CONFIG, Fixture, RailTest, ticket  # noqa: E402
 
 LABELS = ["rail", "rail:go", "rail:needs-you", "rail:hold", "rail:stop", "rail:revert"]
 
@@ -51,7 +51,7 @@ class Init(RailTest):
 
 class Status(RailTest):
     def test_status_notes_what_each_waiting_ticket_waits_for(self):
-        p = self.fixture()
+        p = self.fixture(config=APPROVE + CONFIG)
         p.add(ticket(tier="PERSON", title="Change the API", scope=("api/**",), check="grep -q 201 api/handlers.py"))
         p.add(ticket())
         p.add(ticket(title="Fix add again", front=('after = ["2"]',)))

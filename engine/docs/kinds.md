@@ -4,6 +4,11 @@ A person bears responsibility for what can't be undone, and for nothing else. A 
 does something of a kind below; every other change is AUTO: the engine accepts its contract, the reviewer reviews
 it, and the engine merges it. A person may still hold any ticket with `rail:hold`.
 
+A PERSON ticket takes one act of a person: the merge. The engine accepts its contract as it accepts an AUTO
+ticket's, the worker builds it, the reviewer and a security seat review it, and it then waits at `MERGE_BY_PERSON`
+with a pull request that says in "Read these" what a person should read (`rail docs github`). The person reads
+the built change there, where there is something to read, and merges it or closes it.
+
 Each kind has an id. The engine holds the ids as one list, and `[kinds]`, `person_reason` and the journal use them.
 
 | Id | Kind | Why a revert doesn't undo it | Takes effect |
@@ -52,12 +57,31 @@ tier (`rail docs loop`).
 The `accepted` event records the ticket's kinds: its `person_reason`'s, in the order written, and those its
 scope's paths reach (`rail docs journal`).
 
+## A contract a person approves before the build
+
+`approve_contract` in `.rail/config.toml` lists kind ids. A PERSON ticket that holds one of them waits at
+`APPROVE_CONTRACT` before anything is built, and an amend of its Done Contract waits at `APPROVE_AMEND`; a person
+answers with `rail accept NN` or the `rail:go` label. The list is empty in a new project.
+
+```toml
+approve_contract = ["money", "public-release"]
+```
+
+It is for a kind whose build is itself the cost: a contract that is wrong wastes a run, and with no approval the
+person finds that out at the merge. A ticket's kinds here are those its `person_reason` names, those its scope's
+paths reach, and those a ship raised its tier for. A name that is no kind id is refused when the config is read.
+
+Two numbers say whether a kind belongs on the list. `rail stats` counts the PERSON tickets a person closed without
+a merge, by kind (`rail docs stats`). And when a person closed three or more of the last 20 PERSON tickets that
+ended, and they share a kind the list does not name, the sweep's summary names that kind, so that the sweep's
+author may propose it (`rail docs sweep`).
+
 ## `runs-with-secrets` at push
 
 Rail's CI workflow runs the ticket branch's own Rail, config and workflow file, and `.claude/**` hooks run in the
 ticket's worktree on the worker's machine. So a ticket branch controls what CI and the worker's session do with
-any secret they hold, at push, before any PERSON gate: a PERSON contract is approved before the code exists, and
-its merge comes after the push. No tier can stop that.
+any secret they hold, at push, before any PERSON gate: a person's merge comes after the push, and a contract a
+person approved (`approve_contract`) was approved before the code existed. No tier can stop that.
 
 What bounds it is which secrets are in reach at all: only the key of a tool declared `ci = true`, a test or dev
 key, with every other secret in a GitHub environment that only the base branch may deploy to. `rail doctor`

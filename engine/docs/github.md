@@ -29,13 +29,14 @@ merged ticket costs in calls.
 
 ## How tickets use pull requests
 
-- A PERSON ticket opens a contract pull request at `add`, titled `NN: [contract] ...`. Approve
+- A PERSON ticket whose kind the project names in `approve_contract` (`rail docs kinds`) opens a contract pull
+  request at `add`, titled `NN: [contract] ...`. Approve
   it with the label `rail:go`, change it by commenting, reject it by closing it. Don't merge it: it holds
   only the contract, and with the ruleset GitHub refuses, because its `rail` check is red. Without the
   ruleset a merge goes through, and Rail takes it as the approval: the work gets a new pull request. Only
   the merge of the ticket's own pull request counts. A ticket file that reaches the base branch any other
   way, such as inside another ticket's merge, approves nothing.
-- An AUTO ticket opens its pull request at claim.
+- Every other ticket, AUTO or PERSON, opens its pull request at claim.
 - No pull request is a draft. The `rail` check stays red with `not shipped yet` until the ticket ships, so
   nothing merges early by mistake.
 - At ship the engine writes the title and description: Read these (below), Why, Look at, Evidence, Risk, and the trailers
@@ -44,7 +45,9 @@ merged ticket costs in calls.
 - A red required check, or a conflict with the base, returns the ticket to the agent. A pull request that is
   behind its base, when the base requires up-to-date branches, is rebased with no agent work.
 - An AUTO ticket merges through the async merge endpoint once the required checks are green. A person
-  merges a PERSON ticket by pressing the button.
+  merges a PERSON ticket by pressing the button, and that is the one act it takes. A person who closes the pull
+  request instead drops the ticket; the drop's mark says a person did it, and for a PERSON ticket its kinds, which
+  `rail stats` counts (`rail docs stats`).
 
 ## Testing every merge on the latest base
 
@@ -56,7 +59,7 @@ turns one on adds the `merge_group` trigger to `.github/workflows/rail.yml` and 
 
 - The engine reads the 100 newest pull requests once per command. A ticket whose pull request is older than
   those is asked for by its branch, one call for each such ticket, and only when the ticket should have one:
-  it is claimed, or it is a PERSON ticket with a contract to approve.
+  it is claimed, or it is a PERSON ticket with a contract a person approves.
 - Issues labelled `rail` are read to the last page, so intake misses none.
 - When GitHub refuses a call because a rate limit is used up (a `403` or `429` with `retry-after`, or with
   nothing left until `x-ratelimit-reset`), the command stops there and answers `GITHUB_LIMIT`. Under five
@@ -78,7 +81,7 @@ frames a change as its author sees it, and this list has no author.
 | A changed file on the paths of a kind (`[kinds]`, `person_paths`, `migration_paths`) | The lines the change adds there | the tier |
 | A PERSON ticket whose `person_reason` names no changed path | The ticket | the tier |
 | An advisory finding the author declined, or a blocking finding the refuter dismissed | The finding's place | the review |
-| A Done Contract amended on an AUTO ticket, which no person approved | The ticket, with the amend's reason | an amend |
+| A Done Contract amended after the ticket was accepted, which no person approved: any amend, but that of a ticket whose kind `approve_contract` names | The ticket, with the amend's reason | an amend |
 | An added `SHORTCUT(NN)`, `SENSOR(NN)`, `TODO(NN)` or `FIXME(NN)` | Its line | a marker |
 | An added line that matches a flag rule (`rail docs rules`) | Its line | a flag rule |
 | A changed manifest, lockfile or `.gitattributes` | The file | the change |

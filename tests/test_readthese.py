@@ -139,8 +139,7 @@ class OnGitHub(RailTest):
     def test_a_person_ticket_shows_why_it_is_a_persons_before_the_merge_and_hears_an_answer_on_a_line(self):
         a, b, github = self.github_pair()
         a.add(ticket(tier="PERSON", front=('person_reason = "money: src/calc.py"',)))
-        github.label(1, "rail:go")
-        a.rail("next")
+        a.rail("next")  # no approval before the build: the person's one act is the merge
         a.write("src/calc.py", "def add(a, b):\n    return a + b  # TODO(7): floats\n", base=a.worktree("1"))
         a.queue_reviews(CLEAN, CLEAN)
         a.rail("advance", "1")

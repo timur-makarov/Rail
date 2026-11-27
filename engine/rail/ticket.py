@@ -6,7 +6,7 @@ import json
 import re
 import tomllib
 
-# AUTO: the engine accepts the contract and merges. PERSON: a person approves the contract and merges.
+# AUTO: the engine accepts the contract and merges. PERSON: the engine accepts the contract and a person merges.
 TIERS = ("AUTO", "PERSON")
 # What a revert doesn't undo (rail docs kinds). A ticket is PERSON when its change does something of one of these kinds.
 # engine/reviewer.md names all but public-release, on purpose: a release that can't be pulled back takes effect only

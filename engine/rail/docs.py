@@ -17,7 +17,10 @@ DOCS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 READERS = {
     "base_branch": "claim, ship, CI and the merge: the branch tickets start from and merge into",
     "person_paths": "add and amend (matched against scope_paths) and ship (changed files): the kind `controls`, so a"
-                    " ticket that touches one is PERSON: a person approves its contract and merges it",
+                    " ticket that touches one is PERSON: a person merges it",
+    "approve_contract": "add, next and amend: kind ids (rail docs kinds). A PERSON ticket that holds one waits for a"
+                        " person's approval of its contract before the build, and of each amend of it. Empty: the"
+                        " engine accepts every contract, and a person acts once on a PERSON ticket, at the merge",
     "migration_paths": "add, amend and ship: the kind `data-loss`, PERSON as well; tickets touching them need"
                        " reversibility and rollback",
     **{f"kinds.{kind}": f"add, amend and ship: paths that hold the kind `{kind}` (rail docs kinds); a ticket whose"
@@ -65,7 +68,7 @@ READERS = {
     "worker.person_ladder": "next, advance and work: the same ladder for a PERSON ticket, which starts higher",
     "worker.contract": "next and work: the model:effort the task that writes a ticket's contract (TICKET_LINT), the"
                        " task that files a sweep's tickets (SWEEP_TICKETS) and the task that decides on a dropped"
-                       " `after` (AFTER_DROPPED) name. An AUTO contract is accepted with nobody looking, so it gets a"
+                       " `after` (AFTER_DROPPED) name. A contract is accepted with nobody looking, so it gets a"
                        " stronger model. Empty: the ladder's",
     "worker.command": "work: the worker, run in the answer's cwd with the brief on stdin and RAIL_TICKET, RAIL_MODEL,"
                       " RAIL_EFFORT, RAIL_SESSION (a session to resume, or empty), ANTHROPIC_MODEL and RAIL_WORKER=1"

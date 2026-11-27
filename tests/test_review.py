@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import CONFIG, RailTest, ticket
+from railtest import APPROVE, CONFIG, RailTest, ticket
 
 BLOCKING = {"severity": "blocking", "file": "src/calc.py", "line": 2, "claim": "add(-1, 1) returns the wrong sign.",
             "check": "a test of add with negative numbers"}
@@ -141,13 +141,13 @@ class Review(RailTest):
         p.rail("answer", "1", "F1", "parked", "Not from this change.")
         upheld = p.rail("advance", "1", expect=3)
         self.assertEqual(upheld["steps"][-1]["detail"], "run 2: upheld F1")
-        # On AUTO no person settles a second dispute: the verdict stands, and it comes back as a failed review.
+        # No person settles a second dispute: the verdict stands, and it comes back as a failed review.
         # Two failed refuter steps in a row are the retry budget, so consult advises first.
         again = p.rail("answer", "1", "F1", "parked", "Still not mine.")
         self.assertEqual((again["owner"], again["reason"]["code"]), ("agent", "CONSULT"))
         back = p.rail("next", "--ticket", "1")
         self.assertEqual((back["owner"], back["reason"]["code"]), ("agent", "ANSWER_FINDINGS"))
-        self.assertIn("a refuter upheld it before, and on an AUTO ticket its verdict stands: fix it",
+        self.assertIn("a refuter upheld it before, and its verdict stands: fix it",
                       back["action"]["brief"])
         refuted = [e for e in events(p, "1-fix-add", "step") if e["step"] == "refuter"]
         self.assertEqual([(e["result"], e["detail"]) for e in refuted],
@@ -175,7 +175,7 @@ class Review(RailTest):
         self.assertFalse([e for e in events(p, "1-fix-add", "finding") if e.get("outcome") != "open"])
         self.assertEqual(p.rail("answer", "1", "F1", "parked", "--owner")["state"], "merge-ready")
 
-    def test_an_upheld_finding_the_agent_still_disputes_waits_for_a_person_on_a_person_ticket(self):
+    def test_an_upheld_finding_stands_on_a_person_ticket_too_and_a_person_may_still_decide_it(self):
         p = self.fixture()
         p.add(ticket(tier="PERSON"))
         p.rail("accept", "1")
@@ -186,10 +186,14 @@ class Review(RailTest):
         p.rail("answer", "1", "F1", "declined", "It is fine.")
         upheld = p.rail("advance", "1", expect=3)
         self.assertEqual((upheld["steps"][-1]["step"], upheld["steps"][-1]["detail"]), ("refuter", "run 2: upheld F1"))
-        waiting = p.rail("answer", "1", "F1", "declined", "Still fine.")
-        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("person", "FINDING_UPHELD"))
-        owner = p.rail("answer", "1", "F1", "declined", "Negative inputs never happen here.", "--owner")
-        self.assertEqual((owner["state"], owner["reason"]["code"]), ("reviewing", "REVIEW"))  # the security seat next
+        # No wait for a person: the refuter's verdict stands, as on an AUTO ticket.
+        again = p.rail("answer", "1", "F1", "declined", "Still fine.")
+        self.assertEqual((again["owner"], again["reason"]["code"]), ("agent", "CONSULT"))
+        self.assertEqual(events(p, "1-fix-add", "finding")[-1]["by"], "engine")
+        # A person who reads it may still decide it themselves.
+        p.rail("answer", "1", "F1", "declined", "Negative inputs never happen here.", "--owner")
+        last = events(p, "1-fix-add", "finding")[-1]
+        self.assertEqual((last["by"], last["outcome"]), ("owner", "declined"))
 
     def test_a_person_ticket_runs_the_security_seat_with_a_refuter_and_a_person_approves_the_merge(self):
         p = self.fixture()
@@ -344,7 +348,7 @@ class Retry(RailTest):
         self.assertEqual(p.rail("advance", "1")["state"], "merge-ready")
 
     def test_approving_an_amend_gives_a_fresh_budget(self):
-        p = self.fixture(config=CONFIG.replace("[commands]", "[commands]").replace("timeout_secs = 60", "timeout_secs = 60")
+        p = self.fixture(config=APPROVE + CONFIG.replace("[commands]", "[commands]").replace("timeout_secs = 60", "timeout_secs = 60")
                          .replace("[consult]", "[retry]\nbudget = 1\n\n[consult]"))
         p.add(ticket(tier="PERSON"))
         p.rail("accept", "1")
@@ -452,7 +456,7 @@ class Contract(RailTest):
         self.assertEqual(p.rail("amend", "1", expect=2)["reason"]["message"], "the tier can't go below the accepted PERSON")
 
     def test_a_person_tickets_done_contract_change_needs_approval_and_a_wider_scope_does_not(self):
-        p = self.fixture()
+        p = self.fixture(config=APPROVE + CONFIG)
         p.add(ticket(tier="PERSON"))
         p.rail("accept", "1")
         p.rail("next")

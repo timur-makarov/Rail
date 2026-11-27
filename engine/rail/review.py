@@ -124,11 +124,6 @@ class Ledger:
                 found.append(fid)
         return found
 
-    def disputed_again(self):
-        """Disputed after a refuter upheld them: the agent can't fix them, so a person decides."""
-        return [fid for fid in self.findings if self.outcome(fid) == "open" and self.last(fid).get("disputed")
-                and self.upheld_before(fid)]
-
     def next_id(self):
         numbers = [int(fid[1:]) for fid in self.findings if fid[1:].isdigit()]
         return f"F{max(numbers, default=0) + 1}"
@@ -156,8 +151,7 @@ class Ledger:
         return None
 
     def complete(self, patch_id, tier):
-        return not self.unanswered() and not self.disputed() and not self.disputed_again() \
-            and self.needed_run(patch_id, tier) is None
+        return not self.unanswered() and not self.disputed() and self.needed_run(patch_id, tier) is None
 
     def asked_for_person(self):
         """What review and security runs found that a revert doesn't undo, each item once, as "kind: file:line: why"."""

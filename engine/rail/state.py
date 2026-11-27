@@ -112,10 +112,16 @@ class Facts:
             self.tier = highest(author, floor(project, self.ticket.scope)[0])
         else:
             self.tier = author
-        self.auto = self.tier == "AUTO"  # the engine accepts its contract and merges it; a person does both for PERSON
+        self.auto = self.tier == "AUTO"  # the engine merges it; a person merges a PERSON ticket
+        # A person approves the contract before the build only for a kind the project names in approve_contract.
+        self.kinds = list(dict.fromkeys(
+            (ticket_kinds(project, self.ticket) if self.ticket and not self.ticket.errors else [])
+            + list((self.accepted or {}).get("kinds") or [])
+            + [k for e in t.events if e.get("event") == "tier_raised" for k in (e.get("kinds") or [e.get("kind")]) if k]))
+        self.approve_first = not self.auto and any(k in project.config["approve_contract"] for k in self.kinds)
         # A pull request is opened at the claim, or at add for a PERSON ticket's contract: only then is one that the
         # list of the newest pull requests lacks worth a call of its own.
-        self.pr = self.forge.pr(t.name, expected=bool(claims) or not self.auto) if self.forge and t.name else None
+        self.pr = self.forge.pr(t.name, expected=bool(claims) or self.approve_first) if self.forge and t.name else None
         if self.forge and not t.name and t.on_base:
             # Its branch is gone. Only a merged pull request from that branch shows the ticket reached the base
             # branch by its own pull request, and not inside another ticket's merge.

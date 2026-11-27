@@ -38,6 +38,10 @@ command = "python3 {FAKE}"
 command = "python3 {FAKE} --consult"
 """
 
+# First in a config, it makes a PERSON ticket of the kind `ticket` names wait for a person's approval of its
+# contract before the build. Without it a person acts once on a PERSON ticket, at the merge (rail docs kinds).
+APPROVE = 'approve_contract = ["data-shape"]\n'
+
 ARCHITECTURE = """\
 # Architecture
 

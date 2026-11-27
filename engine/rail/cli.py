@@ -338,8 +338,8 @@ def ensure_pr(project, f, receipts):
             f"refs/remotes/{project.remote}/{t.name}", project.root):
         return f.pr
     if f.state == "new":
-        if f.lint_errors or f.auto:
-            return None
+        if f.lint_errors or not f.approve_first:
+            return None  # only a contract a person approves before the build has a pull request of its own
         title, body = contract_pr(f)
     elif f.state in OPEN:
         title = f"{t.id}: {f.ticket.title}"
@@ -550,8 +550,12 @@ def settle(project, nn, explicit):
 def cleanup(project, tickets, facts):
     leftovers = []
     for nn, f in facts.items():
-        if f.state == "dropped" and f.pr and not f.dropped_event:
-            release_issue(project, f)  # a PR closed by hand gets the same cleanup as rail drop
+        if f.state == "dropped" and f.pr and not f.dropped_event and f.t.name:
+            # A pull request closed by hand is a person's drop: it gets the same cleanup as rail drop, and the same
+            # mark, so rail stats still counts it once the branch is gone.
+            closed = {"by": "person", "reason": "its pull request was closed without a merge"}
+            if not finish_drop(project, f, [], closed):
+                continue
         if f.drop_pending and not finish_drop(project, f, []):
             continue  # still no mark: the drop keeps everything
         if f.state in ("merged", "dropped"):
@@ -1000,14 +1004,14 @@ def cmd_answer(project, args):
         # The author can't close a blocking finding: declining or parking it disputes it, and a fresh refuter
         # decides whether it holds and whether this change caused it.
         records = [event(f.id, "finding", id=fid, outcome="open", by="author", disputed=True, reason=args.reason or "")]
-        if f.auto and f.ledger.upheld_before(fid):
-            # On AUTO no person settles a second dispute: the refuter's verdict stands. The finding comes back to
-            # the author as a failed review, which counts toward the retry cap, and at the cap the ticket is dropped.
+        if f.ledger.upheld_before(fid):
+            # No person settles a second dispute: the refuter's verdict stands. The finding comes back to the author
+            # as a failed review, which counts toward the retry cap.
             run = steps.Run(project, f.t)
             run.record("refuter", False, f.patch_id, f"{fid} upheld before: it stands",
                        output=f"refuter: {fid} was upheld before")
             records = run.events + [event(f.id, "finding", id=fid, outcome="open", by="engine", reason=(
-                "a refuter upheld it before, and on an AUTO ticket its verdict stands: fix it"))]
+                "a refuter upheld it before, and its verdict stands: fix it"))]
     else:
         records = [event(f.id, "finding", id=fid, outcome=args.outcome, by=by, reason=args.reason or "")]
     ensure_local(project, f.t)
@@ -1059,7 +1063,10 @@ def cmd_amend(project, args):
                             " it is how whoever reads this ticket later tells a contract that was wrong from one that"
                             " was weakened to pass.", code="NO_REASON")
         tier = new.tier
-        needs = "done_contract" in changed and tier != "AUTO"  # a person approved the old one, so approves the new
+        # Where a person approved the old contract, a person approves the new one. Any other amend the engine
+        # accepts, and the pull request's "Read these" names it to whoever merges.
+        kinds = set(ticket_kinds(project, new)) | set(f.kinds)
+        needs = "done_contract" in changed and tier != "AUTO" and bool(kinds & set(project.config["approve_contract"]))
         added_paths = [p for p in new.scope if p not in (last.get("scope_paths") or [])]
         events.append(event(t.id, "amended", contract=new.contract_hash(), changed=changed, added_paths=added_paths,
                             needs_approval=needs, **({"reason": args.reason} if args.reason else {})))
@@ -1084,7 +1091,7 @@ def cmd_amend(project, args):
     project.sync()
     tickets, facts = load(project)
     nf, receipts = facts[t.id], []
-    if nf.state == "new" and not nf.lint_errors and not nf.auto:
+    if nf.state == "new" and not nf.lint_errors and nf.approve_first:
         # A contract a person has yet to approve: its pull request shows the contract as it now stands. A ticket
         # from intake gets its contract pull request here, once the agent has written the contract.
         from .forge import ForgeError
@@ -1799,14 +1806,20 @@ def drop(project, f, by, reason, receipts, **record):
     return True
 
 
-def finish_drop(project, f, receipts):
+def finish_drop(project, f, receipts, closed=None):
     """Write the drop's mark; when it is written, close the pull request and release the issue. The mark keeps the
-    ticket's `requested` event, as rail stats reads it, with `dropped`: who dropped it, why, and for the engine's drop
-    at the retry cap the step and the failure's signature. False when the mark can't be written (offline, or a push
-    refused other than by a race): the ticket then keeps everything and rests as DROP_PENDING."""
+    ticket's `requested` event, as rail stats reads it, with `dropped`: who dropped it, why, for the engine's drop
+    at the retry cap the step and the failure's signature, and for a PERSON ticket its tier and kinds. `closed`
+    stands for the `dropped` event of a ticket whose pull request a person closed by hand. False when the mark can't
+    be written (offline, or a push refused other than by a race): the ticket then keeps everything and rests as
+    DROP_PENDING."""
     kept = next((e for e in f.t.events if e.get("event") == "requested"), None)
-    last = f.t.last("dropped") or {}
+    last = f.t.last("dropped") or closed or {}
     dropped = {k: last[k] for k in ("by", "reason", "step", "signature", "at") if last.get(k)}
+    if closed and not dropped.get("at"):
+        dropped["at"] = event(f.id, "dropped")["at"]
+    if not f.auto:
+        dropped.update(tier=f.tier, kinds=f.kinds)
     cost = round(sum(e.get("cost_usd") or 0 for e in f.t.events if e.get("event") in ("worked", "step")), 4)
     if cost:
         dropped["cost_usd"] = cost  # the journal goes with the branch: this is all that is left of what it cost

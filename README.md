@@ -35,11 +35,11 @@ new -> accepted -> implementing -> reviewing -> in-ci -> merge-ready -> merged
 
 - a Done Contract: commands that must pass (`Check:` lines);
 - `scope_paths`: the only paths the change may touch;
-- a tier, `AUTO` or `PERSON`: who accepts the contract and who merges.
+- a tier, `AUTO` or `PERSON`: who merges.
 
 The contract freezes when the ticket is accepted. From then on the agent can't weaken a check or widen the
-scope quietly: a change goes through `rail amend`, which is recorded, and a changed Done Contract on a
-PERSON ticket waits for a person.
+scope quietly: a change goes through `rail amend`, which is recorded and shown to the reviewer, and on a
+PERSON ticket to the person who merges.
 
 **The engine decides what "done" means.** `rail advance` commits the change and runs the ship checks in
 order: a rebase onto the base branch, ticket lint, open assumptions, scope, structure rules, the migration
@@ -62,7 +62,7 @@ author's argument. The only changes that skip the reviewer are those to paths yo
 
 | | AUTO | PERSON |
 |---|---|---|
-| Accepts the contract | The engine, once the ticket is well formed | A person |
+| Accepts the contract | The engine, once the ticket is well formed | The engine; a person, for a kind the project names in `approve_contract` |
 | Review | The reviewer, with a security checklist | The reviewer and a security seat |
 | Merges | The engine, once CI is green | A person |
 

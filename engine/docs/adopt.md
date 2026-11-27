@@ -46,8 +46,8 @@ branch through with a contract that proves nothing.
 
 When the checks hold, the engine:
 
-- files the ticket as `rail add` does. An AUTO ticket is accepted at once. A PERSON ticket waits for a person
-  to approve its contract, with the work already on its branch;
+- files the ticket as `rail add` does. A ticket is accepted at once. A PERSON ticket whose kind
+  `approve_contract` names waits for a person to approve its contract, with the work already on its branch;
 - makes the ticket's branch, `NN-slug`, from the adopted branch's head, so it holds the adopted commits with
   the ticket on top. The adopted branch itself is left as it is, and needn't be pushed: with a remote, the
   ticket's branch is pushed;

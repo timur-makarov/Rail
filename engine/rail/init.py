@@ -39,6 +39,8 @@ from rail.cli import main  # noqa: E402
 sys.exit(main())
 '''
 
+# Not tested with a model run: the clause "so a person merges it" in step 3 of both tasks below, which said before
+# that a person also approves the contract.
 INIT_TASK = """Rail is installed, and this project isn't set up for it yet: .rail/config.toml isn't on {base}.
 {profiles}Read the repository to learn its stack, then propose each of these to the person and make the changes they confirm:
 1. [commands] in .rail/config.toml: `setup`, which runs in each new ticket worktree (install dependencies), and `verify`,
@@ -54,7 +56,7 @@ INIT_TASK = """Rail is installed, and this project isn't set up for it yet: .rai
    and for each kind id list the paths that hold it in this project: schemas (data-shape), auth (access),
    infrastructure code (infrastructure), payment code (money), code that emails or pays real people
    (external-effect), and the files that set an agent's permissions, tools or spend (controls). A ticket that touches
-   one is PERSON, so a person approves its contract and merges it. Every other ticket is AUTO and gets the reviewer
+   one is PERSON, so a person merges it. Every other ticket is AUTO and gets the reviewer
    before the engine merges it. [review] skip_paths lists paths whose changes need no reviewer, such as docs; leave
    it empty when unsure.
 4. The [[rules]] in .rail/config.toml: keep, drop or add structure rules for this project.
@@ -93,7 +95,7 @@ once by reading and merging one pull request. {profiles}Read the repository to l
    and for each kind id list the paths that hold it in this project: schemas (data-shape), auth (access),
    infrastructure code (infrastructure), payment code (money), code that emails or pays real people
    (external-effect), and the files that set an agent's permissions, tools or spend (controls). A ticket that touches
-   one is PERSON, so a person approves its contract and merges it. Every other ticket is AUTO and gets the reviewer
+   one is PERSON, so a person merges it. Every other ticket is AUTO and gets the reviewer
    before the engine merges it. [review] skip_paths lists paths whose changes need no reviewer, such as docs; leave
    it empty when unsure.
 4. The [[rules]] in .rail/config.toml: keep, drop or add structure rules for this project.

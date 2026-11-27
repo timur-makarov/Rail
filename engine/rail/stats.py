@@ -174,11 +174,45 @@ def _person_reasons(t):
     return list(dict.fromkeys(reasons))
 
 
+def _refused(t, record):
+    """The kinds of a PERSON ticket a person closed without a merge, or None for any other drop. The mark keeps the
+    tier and the kinds; a drop whose mark isn't written yet still has its journal."""
+    if record.get("by") != "person":
+        return None
+    tier = record.get("tier") or highest("AUTO", *[e.get("tier") for e in t.events if e.get("event") == "accepted"],
+                                         *[e.get("to") for e in t.events if e.get("event") == "tier_raised"])
+    if tier != "PERSON":
+        return None
+    return list(record.get("kinds") or _person_reasons(t)) or ["?"]
+
+
+REFUSED_LAST, REFUSED_LEAST = 20, 3   # a kind refused this often among the last PERSON tickets is one to approve first
+
+
+def refused_kinds(project, tickets):
+    """[(kind, times)] for each kind a person closed without a merge REFUSED_LEAST times or more among the last
+    REFUSED_LAST PERSON tickets that ended, merged or dropped, and that approve_contract does not name yet. For such
+    a kind an approval of the contract before the build saves the builds a person then refuses."""
+    ended = []
+    for t in tickets.values():
+        record = t.dropped_record or (t.last("dropped") if not t.merged else None)
+        if record:
+            kinds = _refused(t, record)
+            if kinds is not None:
+                ended.append((record.get("at") or "", kinds))
+        elif t.merged and _person_reasons(t):
+            ships = [e.get("at") or "" for e in t.events if e.get("event") == "shipped"]
+            ended.append((max(ships, default=""), []))
+    times = Counter(kind for _, kinds in sorted(ended)[-REFUSED_LAST:] for kind in kinds)
+    return [(kind, n) for kind, n in sorted(times.items())
+            if n >= REFUSED_LEAST and kind not in project.config["approve_contract"]]
+
+
 def drops(tickets, start):
-    """The dropped tickets requested on or after `start`: who dropped them, and for the engine's drops at the retry
-    cap the step each stopped at. Read from the drop marks, which outlive the tickets' branches, and from the
-    journal of a drop whose mark isn't written yet."""
-    by, steps_, cost = Counter(), Counter(), 0.0
+    """The dropped tickets requested on or after `start`: who dropped them, for the engine's drops at the retry
+    cap the step each stopped at, and the PERSON tickets a person closed without a merge, by kind. Read from the
+    drop marks, which outlive the tickets' branches, and from the journal of a drop whose mark isn't written yet."""
+    by, steps_, refused, cost = Counter(), Counter(), Counter(), 0.0
     for t in tickets.values():
         record = t.dropped_record or (t.last("dropped") if not t.merged else None)
         if not record:
@@ -189,10 +223,11 @@ def drops(tickets, start):
         by[record.get("by") or "?"] += 1
         if record.get("by") == "engine":
             steps_[record.get("step") or "?"] += 1
+        refused.update(_refused(t, record) or [])
         # The mark keeps what the ticket's runs reported; a drop whose mark isn't written yet still has its journal.
         cost += record.get("cost_usd") or sum(_cost(t))
     return {"total": sum(by.values()), "by": dict(sorted(by.items())), "stuck_steps": dict(sorted(steps_.items())),
-            "cost_usd": round(cost, 4)}
+            "person_refused": dict(sorted(refused.items())), "cost_usd": round(cost, 4)}
 
 
 def _held_a_kind(tickets):
@@ -617,6 +652,9 @@ def render_drops(data):
     if found["stuck_steps"]:
         line += " The engine's drops, by the step that kept failing: " + ", ".join(
             f"{step} {n}" for step, n in found["stuck_steps"].items()) + "."
+    if found["person_refused"]:
+        line += " PERSON tickets a person closed without a merge, by kind: " + ", ".join(
+            f"{kind} {n}" for kind, n in found["person_refused"].items()) + "."
     return [line]
 
 

@@ -9,7 +9,7 @@ import json
 import re
 from collections import defaultdict
 
-from . import doclint, flakes, gitx, triage
+from . import doclint, flakes, gitx, stats, triage
 from .project import events_path, parse_events
 from .util import globmatch, match_any
 
@@ -194,7 +194,7 @@ def brief(project, commits, parked, checks):
 
 
 def summary(nn, start, commits, merged, problems, counts, entry, parked, checks, recurring=(), flaked=(), languages=(),
-            settled=()):
+            settled=(), refused=()):
     review = (entry["summary"] if entry else "(the review run failed)") if commits else \
         "(no review run: nothing merged without a review)"
     lines = [f"# Sweep {nn}", "", f"Since {start[:12]}: {len(merged)} tickets merged; {len(commits)} commits merged"
@@ -221,7 +221,14 @@ def summary(nn, start, commits, merged, problems, counts, entry, parked, checks,
               *([f"- `{name}` was answered `{answer}` in {times} of its last {triage.LAST} questions. An answer that"
                  f" does not vary is a rule the engine can apply with no run: open one ticket that makes it a rule or"
                  f" removes the type."
-                 for name, answer, times in settled] or ["(none)"])]
+                 for name, answer, times in settled] or ["(none)"]),
+              # Not tested with a model run: the wording of the line below, as above.
+              "", "## Kinds a person refuses at the merge",
+              *([f"- `{kind}`: a person closed {times} of the last {stats.REFUSED_LAST} PERSON tickets without a merge,"
+                 f" and they were of this kind. Each was built before the person saw it. Open one ticket that puts"
+                 f" `{kind}` into `approve_contract` in `.rail/config.toml`, so that a person approves such a contract"
+                 f" before the build."
+                 for kind, times in refused] or ["(none)"])]
     return "\n".join(lines) + "\n"
 
 
@@ -236,15 +243,17 @@ def run(project, f, receipt):
     parked, checks = history(project, merged)
     recurring, flaked = patterns(project, merged), flaky(project, merged)
     settled = triage.settled(project)
+    refused = stats.refused_kinds(project, project.tickets())
     entry = None
     if commits:
         entry = review.run(project, f, "sweep", receipt, prompt=brief(project, commits, parked, checks))
     else:
-        receipt.record("harvest", True, f.patch_id, NOTHING if not (problems or languages or parked or checks or recurring or flaked or settled)
+        receipt.record("harvest", True, f.patch_id, NOTHING if not (problems or languages or parked or checks or recurring or flaked or settled or refused)
                        else f"no review run: {len(parked)} parked findings, {len(checks)} proposed checks,"
                             f" {len(recurring)} patterns in the worker runs, {len(flaked)} flaky checks"
                             + (", a language with no profile" if languages else "")
-                            + (f", {len(settled)} question types with one answer" if settled else ""))
+                            + (f", {len(settled)} question types with one answer" if settled else "")
+                            + (f", {len(refused)} kinds a person refuses at the merge" if refused else ""))
     receipt.files[f".rail/journal/{f.id}-summary.md"] = summary(f.id, start, commits, merged, problems, counts, entry,
-                                                               parked, checks, recurring, flaked, languages, settled)
+                                                               parked, checks, recurring, flaked, languages, settled, refused)
     return entry

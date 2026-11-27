@@ -398,7 +398,7 @@
   },
   "codes": {
     "ACCEPT_AUTO": {
-      "says": "An AUTO ticket that passes lint: next accepts it.",
+      "says": "A ticket that passes lint, of a kind approve_contract does not name: next accepts it.",
       "owners": [
         "agent"
       ],
@@ -443,14 +443,12 @@
       ]
     },
     "AFTER_DROPPED": {
-      "says": "A ticket this one comes after was dropped: on AUTO an agent decides whether it still stands, on PERSON a person does.",
+      "says": "A ticket this one comes after was dropped: an agent decides whether it still stands.",
       "owners": [
-        "agent",
-        "person"
+        "agent"
       ],
       "kinds": [
-        "agent_task",
-        "person_wait"
+        "agent_task"
       ],
       "facts": {
         "type": "object",
@@ -468,9 +466,6 @@
             "items": {
               "type": "string"
             }
-          },
-          "wait": {
-            "$ref": "#/$defs/wait"
           }
         }
       }
@@ -528,7 +523,7 @@
       }
     },
     "APPROVE_CONTRACT": {
-      "says": "A PERSON ticket's contract waits for a person's approval.",
+      "says": "The contract of a PERSON ticket whose kind approve_contract names waits for a person's approval.",
       "owners": [
         "person"
       ],
@@ -764,35 +759,6 @@
       "kinds": [
         "rest"
       ]
-    },
-    "FINDING_UPHELD": {
-      "says": "The refuter upheld a finding and the agent still disputes it.",
-      "owners": [
-        "person"
-      ],
-      "kinds": [
-        "person_wait"
-      ],
-      "facts": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "disputed",
-          "wait"
-        ],
-        "properties": {
-          "disputed": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "The findings' ids."
-          },
-          "wait": {
-            "$ref": "#/$defs/wait"
-          }
-        }
-      }
     },
     "FORGE_UNAVAILABLE": {
       "says": "The ticket shipped and GitHub can't be reached.",

@@ -187,7 +187,7 @@ class Adopted(RailTest):
         self.assertIn("204", p.git("show", "main:api/handlers.py"))
 
     def test_a_person_adoption_waits_for_the_contract_approval_with_the_work_attached(self):
-        p = self.fixture(config='person_paths = ["api/**"]\n' + CONFIG)
+        p = self.fixture(config='approve_contract = ["controls"]\nperson_paths = ["api/**"]\n' + CONFIG)
         prototype(p, {"src/calc.py": FIXED, "api/handlers.py": "def handle():\n    return 201\n"})
         draft = fill(p.rail("adopt", "proto")["draft"], checks=(CHECK_ADD, "grep -q 201 api/handlers.py"))
         adopted = p.rail("adopt", "proto", draft)

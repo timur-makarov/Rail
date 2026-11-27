@@ -7,7 +7,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import CONFIG, RailTest, ticket
+from railtest import APPROVE, CONFIG, RailTest, ticket
 
 
 def events(fx, nn="1", branch="origin/1-fix-add"):
@@ -104,7 +104,7 @@ class Lifecycle(RailTest):
 class Approvals(RailTest):
     def test_a_backlog_merges_auto_tickets_while_a_person_ticket_waits_on_its_pull_request(self):
         """One session runs an AUTO ticket inside skip_paths, an AUTO ticket the reviewer checks, and a PERSON ticket."""
-        a, b, github = self.github_pair(config=CONFIG.replace("[review]", '[review]\nskip_paths = ["src/calc.py"]'))
+        a, b, github = self.github_pair(config=APPROVE + CONFIG.replace("[review]", '[review]\nskip_paths = ["src/calc.py"]'))
         a.add(ticket(title="Fix add"))
         a.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
         a.add(ticket(title="Change the config", tier="PERSON", scope=("src/config/**",), check="test -f src/config/app.toml"))
@@ -384,7 +384,7 @@ class Merges(RailTest):
 
     def test_next_reads_an_approval_on_a_ticket_it_does_not_go_on_with(self):
         # The run goes on with its own ticket 1; ticket 2's rail:go must not read as "waits for approval" meanwhile.
-        a, b, github = self.github_pair()
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
         a.add(ticket())
         a.add(ticket(title="Add subtract", tier="PERSON", scope=("docs/**",)))
         self.assertEqual(a.rail("next")["ticket"], "1")
@@ -493,7 +493,7 @@ class Resume(RailTest):
 class Desk(RailTest):
     def test_a_wait_is_labelled_at_once_and_its_brief_says_what_to_do_on_github(self):
         # The contract's wait gets rail:needs-you even while the agent has other work.
-        a, b, github = self.github_pair()
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
         a.add(ticket(title="Change the config", tier="PERSON", scope=("src/config/**",), check="test -f src/config/app.toml"))
         a.add(ticket(title="Fix add"))
         working = a.rail("next")
@@ -509,7 +509,7 @@ class Desk(RailTest):
         self.assertIn("pull/1", waiting["waits"][0]["brief"])
 
     def test_a_contract_changed_before_approval_shows_on_its_pull_request(self):
-        a, b, github = self.github_pair()
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
         a.add(ticket(title="Change the config", tier="PERSON", scope=("src/config/**",), check="test -f src/config/app.toml"))
         self.assertIn("test -f src/config/app.toml", github.pr(1)["body"])
         self.assertIn("Don't merge it", github.pr(1)["body"])  # the page has a merge button; the label approves
@@ -522,7 +522,7 @@ class Desk(RailTest):
         self.assertIn("test -f docs/config.md", github.pr(1)["body"])
 
     def test_a_person_ticket_from_an_issue_gets_its_contract_pull_request_once_the_contract_is_written(self):
-        a, b, github = self.github_pair()
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
         github.update(lambda s: s["issues"].append({"number": 12, "title": "Rework the config", "body": "It is a mess.",
                                                     "labels": ["rail"], "state": "open"}))
         self.assertEqual(a.rail("next")["reason"]["code"], "TICKET_LINT")
@@ -578,7 +578,7 @@ class Scale(RailTest):
         self.assertFalse([h for h in asked if h and h.startswith("acme:2-")], asked)
 
     def test_a_contract_pull_request_older_than_the_100_newest_still_reads_its_rail_go(self):
-        a, b, github = self.github_pair()
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
         a.add(ticket(tier="PERSON"))
         self.assertEqual(a.rail("next")["reason"]["code"], "WAITING_PERSON")
         self.dummies(github, 120)
@@ -644,7 +644,7 @@ class Scale(RailTest):
         self.assertNotEqual(offline["reason"]["code"], "GITHUB_LIMIT")
 
     def test_two_writes_in_one_command_are_a_second_apart(self):
-        a, b, github = self.github_pair()
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
         a.add(ticket(tier="PERSON"))
         a.rail("next")  # opens the contract pull request, then labels it for the person
         writes = [c["at"] for c in github.read()["log"] if c["method"] != "GET"]

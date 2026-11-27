@@ -26,7 +26,7 @@ OPEN = ("implementing", "reviewing", "in-ci", "merge-ready")
 # machine lacks something a person gives once: a tool, a key, a setting to repair), or a hold (the person's own brake).
 WAIT_KINDS = {
     "APPROVE_CONTRACT": "approval", "APPROVE_AMEND": "approval", "MERGE_BY_PERSON": "approval", "RETRY_CAP": "approval",
-    "FINDING_UPHELD": "approval", "AFTER_DROPPED": "approval", "BUDGET": "approval",
+    "BUDGET": "approval",
     "TOOL_MISSING": "grant", "TOOL_DOWN": "grant", "STUCK_REVIEW": "grant", "MERGE_FAILED": "grant",
     "SECRET_FOUND": "grant",
     "HOLD": "hold", "STOPPED": "hold",
@@ -183,11 +183,7 @@ def _facts_approve_contract(f):
 
 
 def _facts_after_dropped(f):
-    found = {**_shared(f), "tier": f.tier, "after_dropped": f.after_dropped}
-    if not f.auto:
-        found["wait"] = _wait("AFTER_DROPPED", f, accept=False, amend=f'rail amend {f.id} "why" --file FILE',
-                              drop=f"rail drop {f.id}")
-    return found
+    return {**_shared(f), "tier": f.tier, "after_dropped": f.after_dropped}
 
 
 def _facts_tool_missing(f):
@@ -236,11 +232,6 @@ def _restarted(f):
         return None
     e = f.t.events[last]
     return {key: e[key] for key in ("branch", "rule", "file") if e.get(key)}
-
-
-def _facts_upheld(f):
-    return {**_shared(f), "disputed": f.ledger.disputed_again(),
-            "wait": _wait("FINDING_UPHELD", f, answer=f'rail answer {f.id} F1 declined "why" --owner')}
 
 
 def _facts_stuck(f):
@@ -447,15 +438,12 @@ def _render_approve_contract(x):
 
 def _render_after_dropped(x):
     nn, gone = x["ticket"], _join(x["after_dropped"])
-    if x["tier"] == "AUTO":
-        # On AUTO no person is asked: whether the ticket stands without the dropped one is the contract writer's
-        # call, and either answer is recorded and can be undone.
-        return (f"Ticket {nn} comes after ticket {gone}, which was dropped. Read both tickets and"
-                f" decide whether ticket {nn} still stands without it. If it does, remove {gone}"
-                f" from `after`: write the whole ticket to a file and run rail amend {nn} \"why it stands without"
-                f" it\" --file FILE. If it doesn't, drop it: rail drop {nn} --reason \"why\".")
-    return (f"Ticket {nn} comes after ticket {gone}, which was dropped. A person decides:"
-            f" remove it from `after` ({x['wait']['amend']}), or drop ticket {nn}.")
+    # No person is asked: whether the ticket stands without the dropped one is the contract writer's call, and
+    # either answer is recorded and can be undone.
+    return (f"Ticket {nn} comes after ticket {gone}, which was dropped. Read both tickets and"
+            f" decide whether ticket {nn} still stands without it. If it does, remove {gone}"
+            f" from `after`: write the whole ticket to a file and run rail amend {nn} \"why it stands without"
+            f" it\" --file FILE. If it doesn't, drop it: rail drop {nn} --reason \"why\".")
 
 
 def _render_tool_missing(x):
@@ -515,13 +503,6 @@ def _render_secret(x):
             f" continues: {x['wait']['accept']}. The engine then starts the ticket's branch again from the base branch"
             f" under a new name and closes the old one, because the secret scan fails on the old commits for good; the"
             f" work is done again there." + _go(x))
-
-
-def _render_upheld(x):
-    nn = x["ticket"]
-    return (f"The refuter upheld {_join(x['disputed'])} on ticket {nn}, and the agent still disputes it."
-            f" A person decides: {x['wait']['answer']}, rail answer {nn} F1 parked"
-            f" \"why\" --owner when this change didn't cause it, or {x['wait']['accept']} \"how to fix it\".")
 
 
 def _render_merge_failed(x):
@@ -732,7 +713,6 @@ RENDER = {
     "APPROVE_CONTRACT": _render_approve_contract, "AFTER_DROPPED": _render_after_dropped,
     "TOOL_MISSING": _render_tool_missing, "APPROVE_AMEND": _render_approve_amend, "RETRY_CAP": _render_capped,
     "TOOL_DOWN": _render_tool_down, "STUCK_REVIEW": _render_stuck_review, "SECRET_FOUND": _render_secret,
-    "FINDING_UPHELD": _render_upheld,
     "MERGE_FAILED": _render_merge_failed, "HOLD": _render_hold, "STUCK": _next_ticket,
     "SWEEP_TICKETS": _render_sweep_tickets, "SETUP_FAILED": _render_setup_failed,
     "VERIFY_ASSUMPTIONS": _render_assumptions, "CONFLICT": _render_conflict, "RED_CHECK": _render_red_check,
@@ -827,15 +807,15 @@ ROWS = [
      lambda f: f"rail next --ticket {f.id}"),
     ("CONTRACT_MERGED",    "agent", "script",      lambda f: f.state == "new" and f.contract_merged,
      lambda f: f"rail next --ticket {f.id}"),
-    ("ACCEPT_AUTO",        "agent", "script",      lambda f: f.state == "new" and f.auto,
+    # The engine accepts a contract that passes lint, on either tier, unless the project asks for a person's approval
+    # of this kind of ticket before the build (approve_contract).
+    ("ACCEPT_AUTO",        "agent", "script",      lambda f: f.state == "new" and not f.approve_first,
      lambda f: f"rail next --ticket {f.id}"),
     ("APPROVE_CONTRACT",   "person", "person_wait",  lambda f: f.state == "new",
      _facts_approve_contract),
-    # On AUTO no person is asked: whether the ticket stands without the dropped one is the contract writer's call,
-    # and either answer is recorded and can be undone.
-    ("AFTER_DROPPED",      "agent", "agent_task",  lambda f: f.state == "accepted" and f.after_dropped and f.auto,
-     _facts_after_dropped),
-    ("AFTER_DROPPED",      "person", "person_wait",  lambda f: f.state == "accepted" and f.after_dropped,
+    # No person is asked: whether the ticket stands without the dropped one is the contract writer's call, and
+    # either answer is recorded and can be undone.
+    ("AFTER_DROPPED",      "agent", "agent_task",  lambda f: f.state == "accepted" and f.after_dropped,
      _facts_after_dropped),
     ("WAITING_AFTER",      "none",  "rest",        lambda f: f.state == "accepted" and f.after_open,
      lambda f: f"Ticket {f.id} waits for ticket {_join(f.after_open)} to merge."),
@@ -856,8 +836,6 @@ ROWS = [
     # A triage run judged a line of .gitleaksignore to cover a real secret: a person rotates it.
     ("SECRET_FOUND",       "person", "person_wait",  lambda f: f.state in OPEN and f.triage_wait,
      _facts_secret),
-    ("FINDING_UPHELD",     "person", "person_wait",  lambda f: f.ledger.disputed_again(),
-     _facts_upheld),
     ("MERGE_FAILED",       "person", "person_wait",  lambda f: f.state == "merge-ready" and _merge_stale(f),
      _facts_person("MERGE_FAILED")),
     ("HOLD",               "person", "person_wait",  lambda f: "rail:hold" in f.labels,

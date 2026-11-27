@@ -87,51 +87,22 @@ that `old-test` covers driving checks too.
 
 ### 5. A PERSON ticket takes one act
 
-Size: M.
+Built (`rail docs kinds`): the engine accepts a PERSON ticket's contract, and a person acts once, at the merge.
+`approve_contract` names the kinds whose contract a person approves before the build. The reason: a kind takes
+effect at the merge, at a release or at a push, never when a contract is accepted, so an approval before the
+build only saves a build the person would refuse, and that is a matter of cost. The owner decided this on
+2026-11-27.
 
-**What it does.** A person acts once on a PERSON ticket: at the merge, after reading the lines `## Read these`
-lists. The approval of the contract before the build is no longer asked for unless the project turns it on for a
-kind. The owner decided this on 2026-11-27.
+Left:
 
-The reason follows from what a person is responsible for, which is what can't be undone. A kind takes effect at
-the merge, at a release or at a push (`rail docs kinds`, "Takes effect"), never when a contract is accepted: a
-contract is text, and nothing has been built. The lines a person has to read exist only once the change does.
-What an approval before the build buys is that no build is spent on a change the person would refuse. That is a
-matter of cost, so it is a setting.
-
-**How.**
-
-- **A new key**, `approve_contract`, beside `person_paths` in `.rail/config.toml`: a list of kind ids, empty in
-  the seed. A ticket with one of those kinds waits at `APPROVE_CONTRACT` before it is built, and at
-  `APPROVE_AMEND` when its contract is amended, as every PERSON ticket does today. A PERSON ticket with none of
-  them is accepted by the engine, as an AUTO ticket is.
-- **An amended contract** on any ticket is a row of `## Read these`, as it is on an AUTO ticket today.
-- **The other waits of a PERSON ticket go the way of an AUTO ticket.** A finding the refuter upheld stands. A
-  ticket that comes after a dropped one is decided by the contract writer's model (`AFTER_DROPPED`). A ticket at
-  its retry cap goes to **A diagnosis before a stuck ticket is dropped or waits**.
-- **What stays a person's.** The merge (`MERGE_BY_PERSON`). The grants: a tool that is missing or down, a merge
-  that failed, the budget. `rail:hold` on any ticket.
 - **A release ticket** keeps its own act, the approval of the release, because the release is where its kinds
-  take effect (**Release tickets**).
-- A PERSON ticket still starts on `person_ladder`, and the security seat still reviews it.
-- **Numbers.** `rail stats` counts the PERSON tickets a person closed without a merge, by kind. The sweep's
-  summary names a kind with three or more among the last 20 PERSON tickets as one to put in `approve_contract`.
-- Files that change: `engine/rail/table.py`, `engine/rail/config.py`, `engine/rail/readthese.py`,
-  `engine/rail/stats.py`, `engine/rail/sweep.py`, `seed/config.toml`, `engine/docs/kinds.md` (also its paragraph
-  on `runs-with-secrets` at push, which speaks of the approved contract), `engine/docs/loop.md`,
-  `engine/docs/retries.md`, `engine/docs/tickets.md`, `engine/docs/github.md`, `engine/docs/cloud.md`,
-  `CHANGELOG.md`.
+  take effect (**Release tickets**). It is built with release tickets.
+- **A PERSON ticket at its retry cap** still waits for a person (`RETRY_CAP`) until **A diagnosis before a stuck
+  ticket is dropped or waits** is built.
+- **The sweep's line** that names a kind for `approve_contract` is a first wording, marked as not tested where
+  it is written. It waits for the owner to restart the model tests.
 
-**Kept when.** Gate cases, no model: with the seed config, a ticket whose scope reaches `person_paths` is built
-with no wait and stops at `MERGE_BY_PERSON`; its amended contract is a "Read these" row and no wait; an upheld
-finding and a dropped `after` raise no wait; with `approve_contract = ["money"]`, a ticket of that kind waits
-before the build and one of another kind does not. Kept when every case behaves as written.
-
-**Waits for.** Nothing. Built before the diagnosis, which relies on a PERSON contract that no person approved.
-
-**Open decision.** None.
-
-**Assumed, not verified.**
+Assumed, not verified:
 
 - That a person refuses few PERSON tickets at the merge. The count in `rail stats` shows it, and
   `approve_contract` is the answer for a kind where it is not so.

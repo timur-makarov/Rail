@@ -10,7 +10,7 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import CONFIG, FAKE_WORKER, RAIL, RailTest, ticket
+from railtest import APPROVE, CONFIG, FAKE_WORKER, RAIL, RailTest, ticket
 
 WORK = CONFIG + f'\n[worker]\ncommand = "python3 {FAKE_WORKER}"\n'
 FIXED = "def add(a, b):\n    return a + b\n"
@@ -66,7 +66,7 @@ class Work(RailTest):
         self.assertNotEqual(shipped["state"], "implementing", shipped)
 
     def test_it_runs_only_for_a_tickets_agent_work(self):
-        p = self.fixture(config=WORK.replace("timeout_secs = 60", 'setup = "exit 1"\ntimeout_secs = 60'))
+        p = self.fixture(config=APPROVE + WORK.replace("timeout_secs = 60", 'setup = "exit 1"\ntimeout_secs = 60'))
         p.add(ticket())
         failed = p.rail("next", expect=3)
         self.assertEqual(failed["reason"]["code"], "SETUP_FAILED")

@@ -8,7 +8,7 @@ import threading
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import ARCHITECTURE, CHECK_ADD, CONFIG, FAKE, RailTest, ticket
+from railtest import APPROVE, ARCHITECTURE, CHECK_ADD, CONFIG, FAKE, RailTest, ticket
 
 CHECK_ADD_PIPED = CHECK_ADD + " 2>&1 | tail -5"
 
@@ -208,8 +208,7 @@ class Ship(RailTest):
         p = self.fixture(files={"db/migrations/001.sql": "create table t (id int);\n",
                                 "ARCHITECTURE.md": ARCHITECTURE + "| db | db/** | schema and migrations |\n"})
         added = p.add(ticket(title="Add a column", scope=("db/**", "src/**")))
-        self.assertEqual((added["tier"], added["state"], added["owner"]), ("PERSON", "new", "person"))
-        p.rail("accept", "1")
+        self.assertEqual((added["tier"], added["state"], added["owner"]), ("PERSON", "new", "agent"))
         p.rail("next")
         p.fix_calc("1")
         p.write("db/migrations/002.sql", "alter table t add column c int;\n", base=p.worktree("1"))
@@ -398,8 +397,8 @@ class TicketLint(RailTest):
 
 
 class Approval(RailTest):
-    def test_a_person_tickets_contract_waits_for_a_person_then_runs(self):
-        p = self.fixture()
+    def test_where_the_project_asks_a_person_tickets_contract_waits_for_a_person_then_runs(self):
+        p = self.fixture(config=APPROVE + CONFIG)
         added = p.add(ticket(tier="PERSON"))
         self.assertEqual((added["state"], added["owner"], added["action"]["kind"]), ("new", "person", "person_wait"))
         self.assertIn("rail accept 1", added["action"]["brief"])
@@ -417,7 +416,7 @@ class Approval(RailTest):
     def test_a_scope_that_reaches_a_person_path_makes_the_ticket_person_at_add(self):
         p = self.fixture()
         added = p.add(ticket(scope=(".github/workflows/**",)))
-        self.assertEqual((added["tier"], added["state"], added["reason"]["code"]), ("PERSON", "new", "APPROVE_CONTRACT"))
+        self.assertEqual((added["tier"], added["state"], added["reason"]["code"]), ("PERSON", "new", "ACCEPT_AUTO"))
         self.assertIn('tier = "PERSON"', p.git("show", "1-fix-add:.rail/tickets/1.md"))  # the ticket says so
 
 
@@ -447,14 +446,14 @@ class Parallel(RailTest):
         self.assertIn("201", read(os.path.join(p.worktree("2"), "api", "handlers.py")))
         self.assertEqual(p.git("merge-base", "--is-ancestor", "main", "2-fix-add"), "")
 
-    def test_a_dropped_dependency_waits_for_a_person(self):
+    def test_a_dropped_dependency_is_the_agents_to_decide_on_a_person_ticket_too(self):
         p = self.fixture()
         p.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
         p.add(ticket(tier="PERSON", front=('after = ["1"]',)))
-        p.rail("accept", "2")  # PERSON: a person decides; on AUTO the agent does (test_stuck.py)
         p.rail("drop", "1", "--reason", "not needed")
-        waiting = p.rail("next")
-        self.assertEqual((waiting["owner"], waiting["waits"][0]["needs"]), ("person", "AFTER_DROPPED"))
+        decide = p.rail("next")  # no person is asked, on either tier (test_stuck.py has the AUTO case)
+        self.assertEqual((decide["ticket"], decide["owner"], decide["reason"]["code"]), ("2", "agent", "AFTER_DROPPED"))
+        self.assertNotIn("wait", decide["action"]["facts"])
 
     def test_overlapping_scope_is_not_claimed_and_claims_belong_to_sessions(self):
         p = self.fixture()

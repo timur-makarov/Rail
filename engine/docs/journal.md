@@ -27,7 +27,7 @@ stores state. Never edit it by hand: the guard denies it.
 | Event | Written when | Fields | Read by |
 |---|---|---|---|
 | `requested` | The ticket is made: `rail add`, intake, a sweep, `rail adopt` | `via` (`add`, `intake`, `sweep`, `adopt`, `revert`), `channel` (`session`, `github`, `tracker`, `engine`, or the `## Grilling` record's channel), `grilled`, `assumed` (open ASSUMED rows at the start), `filed_by` (the issue's author), `not_taken` (why an issue's whole ticket became a request), `hidden_removed` (how many HTML comments intake took out of the request, when any), `external_id` (the ticket's, when it has one), and after a failed deploy to dev `opened` (when the smoke check's issue was opened) on the revert and the fix, with `smoke: true` on the fix. When grilled: `agent`, `person`, `started`, `confirmed`, `drafts`, and `questions` with each one's `id`, `topic`, `recommended` and `taken` | `rail stats`. A drop mark on the counter branch keeps a copy, since the journal goes with the branch |
-| `accepted` | Ticket lint first passes on an AUTO ticket; a person approves; an amend takes effect | `by` (`engine`, `person`), `via` (`lint`, `label`, `accept`, `amend`, `merge`), `tier`, `contract`, `done`, `scope_paths`, `kinds` (the ids of what the ticket holds that a revert doesn't undo: those its `person_reason` names, in the order written, and those its scope's paths reach; `rail docs kinds`), `wait` (the code of the wait a person's approval answered, such as `APPROVE_CONTRACT`), `note` | The `accepted` state. Ship and CI compare `contract` and `tier` with the ticket: that is the freeze. `via: merge` is a contract pull request that a person merged |
+| `accepted` | Ticket lint first passes; a person approves; an amend takes effect | `by` (`engine`, `person`), `via` (`lint`, `label`, `accept`, `amend`, `merge`), `tier`, `contract`, `done`, `scope_paths`, `kinds` (the ids of what the ticket holds that a revert doesn't undo: those its `person_reason` names, in the order written, and those its scope's paths reach; `rail docs kinds`), `wait` (the code of the wait a person's approval answered, such as `APPROVE_CONTRACT`), `note` | The `accepted` state. Ship and CI compare `contract` and `tier` with the ticket: that is the freeze. `via: merge` is a contract pull request that a person merged |
 | `amended` | `rail amend NN` | `contract` (the new hash), `changed` (any of `done_contract`, `scope`, `tier`, `after`), `added_paths`, `needs_approval`, `reason` | When `needs_approval` is true, the ticket waits until a later `accepted` |
 | `adopted` | `rail adopt BRANCH FILE` filed the ticket with a branch's work on it | `branch` (the adopted branch), `head` (its head commit, 12 characters) | `rail stats` |
 | `drafting` | `next`, when it hands a session the brief to write an unfinished ticket's contract | `session` | Other sessions leave that contract alone for `[claim] stale_minutes`; `rail next --ticket NN` takes it over |
@@ -48,7 +48,7 @@ stores state. Never edit it by hand: the guard denies it.
 | `flake` | Ship: `verify` or a `Check:` line failed, the engine ran that one command once more on the same code, and it passed | `step` (`verify`, `checks`), `command`, `patch_id`, `codes` (the two exit codes, `timeout` for a run that timed out) | The worker's brief, the reviewer's brief, the sweep and `rail stats` (`rail docs retries`). The step's own event still says `fail` |
 | `consulted` | Consult ran | `trigger` (`retry_cap`, `request`), `step`, `verdict` (`proceed`, `change`, `stop`), `same_model` | The retry rule below, and the limit of three per ticket |
 | `continued` | A person continued a wait with `rail:go` or `rail accept` | `via` (`label`, `accept`), `wait` (the code of the wait it continued, such as `MERGE_BY_PERSON`), `note` | A fresh retry budget, and the agent's next brief |
-| `dropped` | `rail drop`, or the engine at the retry cap of an AUTO ticket (`STUCK`) | `by` (`agent`, `person`, `engine`), `reason`; from the engine also `step` and `signature`, the step it stopped at and its last failure's | The `dropped` state. Written before the drop's mark, which is written before anything is removed |
+| `dropped` | `rail drop`, or the engine at the retry cap of an AUTO ticket (`STUCK`). A pull request closed by hand writes no event, only the drop's mark (below) | `by` (`agent`, `person`, `engine`), `reason`; from the engine also `step` and `signature`, the step it stopped at and its last failure's | The `dropped` state. Written before the drop's mark, which is written before anything is removed |
 
 `contract` is the first 12 hex characters of the SHA-256 of the Done Contract section and the sorted
 `scope_paths`, with whitespace normalised. The tier is not in the hash: it is compared by rank, so it may
@@ -213,8 +213,9 @@ ended (`rail docs stats`).
 - **A dropped ticket's journal** goes with its branch. Its ID, the title it was added with and the drop
   itself stay in the counter branch, so a dropped ticket stays dropped when its branch is deleted. The drop's
   mark is a `rail drop NN` commit whose message keeps the `requested` event with one more key, `dropped`: `by`,
-  `reason`, `at`, `cost_usd` (what the ticket's worker and review runs reported, when they reported any), and
-  from the engine `step` and `signature`. The mark is written before the worktree and branches
+  `reason`, `at`, `cost_usd` (what the ticket's worker and review runs reported, when they reported any),
+  from the engine `step` and `signature`, and for a PERSON ticket `tier` and `kinds`. A pull request closed
+  without a merge gets the same mark, `by` a person. The mark is written before the worktree and branches
   are removed and before the pull request is closed. When it can't be (offline, or a push refused other than by
   another clone's push), nothing is removed and the ticket rests as `DROP_PENDING` until a later `rail next`
   writes it and finishes the drop.

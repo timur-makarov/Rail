@@ -44,8 +44,9 @@ A ticket belongs to a source when its `external_id` starts with `NAME#` and `.ra
 `rail add` refuses such a ticket when one with the same `external_id` is open, and when the source has
 `max_open` tickets open. Any other ticket is taken as before, a repeated `external_id` included.
 
-Otherwise a source's ticket is an ordinary ticket. An AUTO ticket that passes lint is accepted by the
-engine at `rail add`; a PERSON ticket waits for a person to approve its contract. The sweep's tickets follow
+Otherwise a source's ticket is an ordinary ticket. A ticket that passes lint is accepted by the
+engine at `rail add`; a PERSON ticket whose kind `approve_contract` names waits for a person to approve its
+contract. The sweep's tickets follow
 the same rule. Tier, review and merge don't change.
 
 `rail stats` counts each source's tickets: filed, merged, reverted, dropped and open, for the tickets

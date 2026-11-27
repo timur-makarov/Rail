@@ -154,7 +154,7 @@ class Waits(BenchTest):
                                                    "check": "python3 -m unittest tests.test_ops",
                                                    "person_reason": "data-shape: calc/ops.py"}))
         res = r.result
-        self.assertEqual(res["person_acts"], ["APPROVE_CONTRACT", "MERGE_BY_PERSON"])
+        self.assertEqual(res["person_acts"], ["MERGE_BY_PERSON"])
         self.assertEqual((res["end"], res["right_merged"]), ("MERGED", True))
 
     def test_another_wait_ends_the_run_with_its_code_and_the_stop_is_graded(self):
