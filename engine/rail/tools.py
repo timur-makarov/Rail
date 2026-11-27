@@ -75,36 +75,48 @@ def missing(project):
     return found
 
 
-def where():
-    """Where a person sets a name, for the machine this runs on."""
-    if cloud():
+def machine():
+    """The kind of machine this runs on, for where a person sets a name: `cloud` (a Claude Code cloud session), `ci`
+    (a GitHub Actions job) or `own` (a person's own)."""
+    return "cloud" if cloud() else "ci" if os.environ.get("GITHUB_ACTIONS") == "true" else "own"
+
+
+def where(kind=None):
+    """Where a person sets a name, on a machine of `kind`: this one's when none is given."""
+    kind = kind or machine()
+    if kind == "cloud":
         return ("Set it in this cloud environment's settings, as an environment variable; a session started after"
                 " that has it. A key the environment's network proxy adds to requests never shows up as a variable:"
                 " a tool reached that way declares no env and relies on its probe.")
-    if os.environ.get("GITHUB_ACTIONS") == "true":
+    if kind == "ci":
         return ("Set it as an Actions secret and pass it by name in the env of the job that runs Rail. A run that a"
                 " pull request starts is given only the keys of tools declared ci = true.")
     return ("Set it in the shell that starts the agent, or in the project's .env (which .worktreeinclude copies into"
             " each ticket's worktree).")
 
 
-def lines(project, review=False):
-    """The tools as the lines of a brief: every tool for the worker; only `review = true` ones for the reviewer,
-    the refuter and consult."""
-    tools = {n: t for n, t in project.config["tools"].items() if t.get("review") or not review}
+def declared(project, review=False):
+    """The declared tools a brief lists, each as {name, use, env}: every tool for the worker; only `review = true`
+    ones for the reviewer, the refuter and consult."""
+    return [{"name": name, "use": tool["use"].strip(), "env": list(tool.get("env") or [])}
+            for name, tool in project.config["tools"].items() if tool.get("review") or not review]
+
+
+def lines(tools, review=False):
+    """The tools (as `declared` gives them) as the lines of a brief."""
     if not tools:
         return []
     head = ("Tools this project declares for a reviewer, to read with and never to change anything:" if review else
             "Tools this project declares, for what the work reaches outside the repository:")
-    return [head, *[f"- {name}: {tool['use'].strip()}"
-                    + (f" (reads {', '.join(tool['env'])})" if tool.get("env") else "") for name, tool in tools.items()]]
+    return [head, *[f"- {tool['name']}: {tool['use']}"
+                    + (f" (reads {', '.join(tool['env'])})" if tool.get("env") else "") for tool in tools]]
 
 
-def wait_brief(nn, gone):
-    """The brief of TOOL_MISSING, for one ticket or for several ("1, 2")."""
+def wait_brief(nn, gone, kind=None):
+    """The brief of TOOL_MISSING, for one ticket or for several ("1, 2"), on a machine of `kind`."""
     listed = "; ".join(f"{name} needs {', '.join(names)}" for name, names in gone.items())
     return (f"Ticket{'s' if ',' in nn else ''} {nn} can't be claimed on this machine: a tool the project declares has no credential here"
-            f" ({listed}). {where()} Nothing was tried, so no attempt is counted. Then run: rail next")
+            f" ({listed}). {where(kind)} Nothing was tried, so no attempt is counted. Then run: rail next")
 
 
 def probe(project, name):

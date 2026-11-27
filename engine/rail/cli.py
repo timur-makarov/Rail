@@ -13,7 +13,8 @@ import sys
 from . import areas, gitx, guard, hooks, history, rules, steps, tools
 from .project import Project, event, events_path, ticket_path
 from .state import OPEN, derive, floor, ticket_kinds
-from .table import TRANSITIONS, WAIT_KINDS, first_match
+from .table import TRANSITIONS, WAIT_KINDS, adopted_line, end_with, first_match
+from .table import render as render_brief
 from .ticket import TIERS, Ticket, branch_name, highest, lint, rank, with_field, with_id, with_tier
 from .forge import ENGINE_MARK, TRUSTED, ForgeError, RateLimited
 from .hidden import strip_hidden
@@ -122,7 +123,7 @@ def guide(project, code, action, f=None):
     text = docs.read_part(path, f.t.worktree if f and f.t.worktree else project.root)
     if not text:
         return None
-    action["brief"] += "\n\n" + text
+    end_with(code, action, "guide", text)
     if f and situation not in given and not f.rebasing:  # mid-rebase the engine writes nothing to the ticket
         ensure_local(project, f.t)
         project.append_events(f.t, [event(f.id, "guided", situation=situation, path=path)], f"guide: {situation}")
@@ -675,13 +676,19 @@ def cmd_adopt(project, args):
     if ensure_pr(project, facts[nn], receipts):
         tickets, facts = load(project)
     f = facts[nn]
-    said = f"Ticket {nn} holds the work of branch {branch} ({head[:12]}), on its own branch {name}."
+    was = {"branch": branch, "head": head[:12]}
+    said = adopted_line(nn, name, was)
     if first_match(f)[0] == "IMPLEMENT":
         command = f"rail advance {nn}"
         return answer(nn, f.state, "agent", {"kind": "script", "brief": f"{said} Next: {command}", "command": command},
                       "ADOPTED", receipts, f.cwd, tier=f.tier, branch=name, adopted=branch, checks=checks)
     result = from_facts(f, receipts, branch=name, adopted=branch, checks=checks)
-    result["action"]["brief"] = f"{said}\n\n{result['action']['brief']}"
+    action = result["action"]
+    if "facts" in action:
+        action["facts"]["adopted"] = was
+        action["brief"] = render_brief(result["reason"]["code"], action["facts"])
+    else:
+        action["brief"] = f"{said}\n\n{action['brief']}"
     return result
 
 
@@ -1247,9 +1254,9 @@ def cmd_next(project, args):
     stop = next((s for s in project.forge.stops() if not s["paths"]), None)
     stopped = None
     if stop:
-        from .table import stop_brief
+        found = {"stop": stop, "wait": {"kind": WAIT_KINDS["STOPPED"], "issue": stop["url"]}}
         stopped = answer(owner="person", code="STOPPED", steps=took_in, leftovers=leftovers,
-                         action={"kind": "person_wait", "brief": stop_brief(stop, "any ticket")})
+                         action={"kind": "person_wait", "brief": render_brief("STOPPED", found), "facts": found})
     # The whole repository is stopped: no ticket is looked at, but a revert, which a brake never stops. With
     # --ticket NN the ticket's own row says so.
     reverting = any(f.revert and f.state not in ("merged", "dropped") for f in facts.values())
@@ -1322,7 +1329,7 @@ def cmd_next(project, args):
             resting.append(f"- {f.id}: {action['brief']}")  # so a runner offered none of them knows why
         if owner == "person":
             waits.append({"ticket": f.id, "needs": code, "kind": WAIT_KINDS[code], "brief": action["brief"],
-                          **({"pr": f.pr["html_url"]} if f.pr else {})})
+                          **({"pr": f.pr["html_url"]} if f.pr else {}), "wait": action["facts"]["wait"]})
         elif f.held:  # also with a rail:go on it that answers no wait: the session at work reads it
             held.append({"ticket": f.id, "quiet_minutes": f.quiet_minutes,
                          **({"session": f.claimed["session_url"]} if f.claimed.get("session_url") else {})})
@@ -1345,13 +1352,16 @@ def cmd_next(project, args):
     others = ("\nNothing for an agent on these now:\n" + "\n".join(resting)) if resting else ""
     if waits and all(w["needs"] == "TOOL_MISSING" for w in waits):
         # One thing is missing, however many tickets wait for it: say it once.
-        brief = tools.wait_brief(", ".join(w["ticket"] for w in waits), project.tools_missing()) + others
-        return answer(owner="person", code="TOOL_MISSING", action={"kind": "person_wait", "brief": brief},
-                      steps_=took_in, **extra)
+        gone = project.tools_missing()
+        found = {"tickets": [w["ticket"] for w in waits], "tools_missing": gone, "machine": tools.machine(),
+                 "resting": resting, "wait": {"kind": WAIT_KINDS["TOOL_MISSING"],
+                                              "set": sorted({name for names in gone.values() for name in names})}}
+        return answer(owner="person", code="TOOL_MISSING", steps_=took_in, **extra,
+                      action={"kind": "person_wait", "brief": render_brief("TOOL_MISSING", found), "facts": found})
     if waits:
-        brief = "Tickets wait for a person:\n" + "\n".join(f"- {w['ticket']}: {w['brief']}" for w in waits) + others
-        return answer(owner="person", code="WAITING_PERSON", action={"kind": "person_wait", "brief": brief},
-                      steps_=took_in, **extra)
+        found = {"waits": waits, "resting": resting}
+        return answer(owner="person", code="WAITING_PERSON", steps_=took_in, **extra,
+                      action={"kind": "person_wait", "brief": render_brief("WAITING_PERSON", found), "facts": found})
     from . import sweep
     is_due, _, commits, merged = sweep.due(project)
     if is_due and not held:
@@ -1634,7 +1644,7 @@ def cmd_advance(project, args):
             update_pr(project, nf, receipts)
             result = from_facts(nf, receipts)
             if advice:
-                result["action"]["brief"] += f"\n\n{advice}"
+                end_with(result["reason"]["code"], result["action"], "consult", advice)
             return result
         tickets, facts = load(project)
         if first_match(facts[nn])[0] not in ("REVIEW",):
@@ -1815,11 +1825,10 @@ def init_task(project):
     """The first `rail next` returns the init task until the project's config is on the base branch."""
     if gitx.read_blobs([f"{project.base_ref}:.rail/config.toml"], project.root).get(f"{project.base_ref}:.rail/config.toml"):
         return None
-    from .init import INIT_TASK, INIT_TASK_CLOUD, found_line
-    brief = (INIT_TASK_CLOUD if cloud() else INIT_TASK).format(base=project.base, depth=project.config["map"]["depth"],
-                                                               tools=tools.found_line(project.root),
-                                                               profiles=found_line(project.config))
-    action = {"kind": "agent_task", "brief": brief}
+    from .init import found_line
+    found = {"cloud": cloud(), "base": project.base, "depth": project.config["map"]["depth"],
+             "tools": tools.found_line(project.root), "profiles": found_line(project.config)}
+    action = {"kind": "agent_task", "brief": render_brief("INIT_TASK", found), "facts": found}
     named = guide(project, "INIT_TASK", action)  # no ticket, so no event
     return answer(owner="agent", code="INIT_TASK", action=action, cwd=".", **({"guide": named} if named else {}))
 

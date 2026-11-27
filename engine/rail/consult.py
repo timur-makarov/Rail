@@ -33,7 +33,7 @@ def ask(project, f, trigger, step, question, output, receipt):
     from . import tools
     request = {"ticket": t.id, "trigger": trigger, "step": step, "question": question,
                "ticket_text": text, "diff": diff, "output": tail(output, 120, 12000),
-               "tools": "\n".join(tools.lines(project, review=True))}
+               "tools": "\n".join(tools.lines(tools.declared(project, review=True), review=True))}
     code, out, _ = run_shell(f'"{pack(project)}"', t.worktree or project.root,
                              {"RAIL_TICKET": t.id, "RAIL_ROOT": project.root,
                               **model_env(project.config["consult"].get("model", ""))},

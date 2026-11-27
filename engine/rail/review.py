@@ -166,19 +166,34 @@ class Ledger:
             found += [kind_line(k) for k in r.get("kinds") or [] if isinstance(k, dict)]
         return list(dict.fromkeys(found))
 
-    def describe(self, fid, with_answer=True, scripts=False):
+    def fact(self, fid):
+        """One finding as plain values: what the reviewer wrote (id, severity, file, line, claim, check, evidence),
+        the role that reported it, and its last answer once it has one."""
         f = self.findings[fid]
-        where = f"{f.get('file')}:{f['line']}" if f.get("line") else f.get("file")
-        text = f"{fid} ({f.get('severity')}, {f.get('role')}) {where}: {f.get('claim')}"
-        if f.get("evidence"):
-            text += f"\n    evidence: $ {f['evidence'].get('command')}\n    {tail(f['evidence'].get('output', ''), 8, 600)}"
-            for path, script in (f["evidence"].get("scripts") or {}).items() if scripts else ():
-                text += f"\n    {path}, the reviewer's scratch file (gone from the worktree):\n" + \
-                        "\n".join("      " + line for line in script.splitlines())
-        if with_answer and f["history"]:
+        found = {key: f[key] for key in ("id", "severity", "role", "file", "line", "claim", "check", "evidence")
+                 if f.get(key) is not None}
+        if f["history"]:
             last = self.last(fid)
-            text += f"\n    now {last.get('outcome')} (by {last.get('by')})" + (f": {last.get('reason')}" if last.get("reason") else "")
-        return text
+            found["answer"] = {key: last[key] for key in ("outcome", "by", "reason") if last.get(key)}
+        return found
+
+    def describe(self, fid, with_answer=True, scripts=False):
+        return describe_finding(dict(self.fact(fid), id=fid), with_answer, scripts)
+
+
+def describe_finding(f, with_answer=True, scripts=False):
+    """A finding's lines in a brief, from its plain values (Ledger.fact)."""
+    where = f"{f.get('file')}:{f['line']}" if f.get("line") else f.get("file")
+    text = f"{f.get('id')} ({f.get('severity')}, {f.get('role')}) {where}: {f.get('claim')}"
+    if f.get("evidence"):
+        text += f"\n    evidence: $ {f['evidence'].get('command')}\n    {tail(f['evidence'].get('output', ''), 8, 600)}"
+        for path, script in (f["evidence"].get("scripts") or {}).items() if scripts else ():
+            text += f"\n    {path}, the reviewer's scratch file (gone from the worktree):\n" + \
+                    "\n".join("      " + line for line in script.splitlines())
+    if with_answer and f.get("answer"):
+        last = f["answer"]
+        text += f"\n    now {last.get('outcome')} (by {last.get('by')})" + (f": {last.get('reason')}" if last.get("reason") else "")
+    return text
 
 
 # --- the brief -----------------------------------------------------------------------------
@@ -276,7 +291,7 @@ def brief(project, f, role, ledger, disputed=None):
     from . import sensors
     marked = sensors.markers(project, ref)
     from . import tools
-    reviewer_tools = tools.lines(project, review=True)
+    reviewer_tools = tools.lines(tools.declared(project, review=True), review=True)
     parts = [
         f"# Review brief: ticket {t.id}, {f.tier}", "", f"This run's job: {job}", "",
         "## The ticket", ticket_text.strip(), "",

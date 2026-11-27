@@ -40,67 +40,23 @@ for either.
 
 ### 3. Answer facts, renderers and the answer schema
 
-Size: M.
+Built, but for a layout and two questions. An agent's task and a person's wait carry `action.facts`, each brief
+is written from its facts alone in the words it had, and `engine/answer-v1.json` names every code, kind, wait
+and fact (`rail docs loop`). A later feature that adds to a brief adds a fact key and its entry in that file.
 
-**What it does.** Every `agent_task` and `person_wait` answer of `rail next --json` carries `action.facts`:
-the values its brief was built from. One renderer per reason code writes the brief from those facts alone, and
-`engine/answer-v1.json` says what every answer may hold. Tests, `rail work` and any host that drives Rail
-through its CLI can then read a fact instead of parsing a sentence. The worker still gets the brief as prose.
-The first version renders today's text byte for byte, so no worker sees a change.
+**Left out.** A new layout for the brief, such as labelled blocks in place of sentences. It changes what every
+worker reads, so it needs real runs first (four per arm, as for every prompt change), and nothing shows yet
+that today's sentences are misread. `rail stats` can show where to start: a step that fails often right
+after a brief. A renderer that is allowed to change its text is built with its wording marked untested.
+Whether `facts` lowers misreadings has no model test until a layout change is proposed.
 
-**How.**
-- Shared keys on every answer with facts: `ticket`, `title`, `branch`, `ticket_file`. Keys by reason code:
-  - `IMPLEMENT`: `done_contract` (each `Check:` command), `scope_paths`, `out_of_scope`, `size` (`count`,
-    `cap`), `migration`, `base_green`, `findings`, `person_note`, `save_note`, and what the brief now also
-    holds: the ticket's `## Why` and decided rows, and `## Tried`.
-  - `STEP_FAILED`: `failed` (`step`, `status`, `detail`, `signature`), `advice`, `findings`, `person_note`.
-  - `ANSWER_FINDINGS`: `findings`, each with id, severity, file, line, claim, check and evidence, as the
-    ledger describes them.
-  - `VERIFY_ASSUMPTIONS`: `open_assumptions`.
-  - `TICKET_LINT`: `lint_errors`, `not_taken`.
-  - `SPLIT`: `size`, `cap`, `rest_branch`.
-  - `REBASING`, `CONFLICT`: `cwd`, `branch`, the conflicted files.
-  - each `person_wait`: `wait`, which says what is needed and how a person answers (`rail accept`, `rail:go`,
-    `rail drop`).
-  - The rows `TOOL_MISSING`, `TOOL_DOWN`, `STUCK` and the revert rows get facts the same way: the values their
-    brief is built from. A later feature that adds to a brief also adds a fact key.
-- Renderers: the lambdas in the first-match table (`engine/rail/table.py`) stop reading the facts object `f`
-  directly. Each row builds `facts`, and a renderer per code writes the brief from `facts` alone.
-  `engine/rail/cli.py` `answer()` passes `facts` into the answer.
-- Schema: `engine/answer-v1.json` (new), as `engine/review-v1.json` is for the reviewer. It holds `facts` per
-  code and every `reason.code`, action kind and `wait.kind` the engine writes. Every answer the test suite
-  produces is checked against it (the suite already runs every verb through the real launcher). After it
-  lands, a pull request that adds a code adds its schema entry too. Codes that other features add go in on
-  their own pull requests; the schema takes every code present when it lands.
-- Docs: `engine/docs/loop.md` describes `action.facts`. `engine/docs/cloud.md` changes the runner prompt only
-  if it names a fact. `CHANGELOG.md`.
-- Left out: a new layout for the brief, such as labelled blocks in place of sentences. It changes what every
-  worker reads, so it needs real runs first (four per arm, as for every prompt change), and nothing shows yet
-  that today's sentences are misread. `rail stats` can show where to start: a step that fails often right
-  after a brief. A renderer that is allowed to change its text is built with its wording marked untested.
-
-**Kept when.** Gate cases, no model, all behaving as written:
-- Every answer the suite produces validates against `answer-v1.json`. An answer with a fact key the schema
-  does not name fails the test.
-- For every row code in a fixture, the renderer given `facts` produces the brief today's code produces, byte
-  for byte. A fact removed from `facts` changes the brief (the check can fail).
-- The suite fails when an answer carries a code `answer-v1.json` does not name (a planted code).
-
-Not covered: whether `facts` lowers misreadings (no model test until a layout change is proposed).
-
-**Waits for.** Nothing.
-
-**Open decision.**
+**Open decision.** Nothing was changed for either.
 1. Whether squash commits get an `Assisted-by: AGENT:MODEL` trailer, as the Linux kernel's convention has it
    (reported, from secondary summaries). It would be one line beside `Review:`, with the models from the
    `worked` events. Proposed: no, until an outside reader asks; `rail stats` already reads the models from the
    journal.
 2. Whether a person's `rail accept` note should be required too. Proposed: no, because approving is itself the
    reason.
-
-**Assumed, not verified.**
-- That the string literals in `table.py` hold all of the briefs' wording. The review brief (`review.py`) and
-  the consult brief (`consult.py`) are built elsewhere; the renderers cover them only if they hold literals.
 
 ### 4. A triage step for the questions the engine raises
 

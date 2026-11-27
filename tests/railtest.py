@@ -172,7 +172,7 @@ class Fixture:
         if raw:
             return result
         answer = json.loads(result.stdout)
-        check_shape(answer)
+        check_shape(answer, args[0] if args else None)
         return answer
 
     def add(self, text, **kw):
@@ -191,8 +191,12 @@ class Fixture:
         self.write("src/calc.py", "def add(a, b):\n    return a + b\n", base=self.worktree(nn))
 
 
-def check_shape(answer):
-    """Every verb answers in the same shape."""
+def check_shape(answer, verb=None):
+    """Every verb answers in the same shape, and in the one engine/answer-v1.json describes."""
+    engine()
+    from rail import answers
+    broken = answers.check(answer, verb)
+    assert not broken, "\n".join(["the answer breaks engine/answer-v1.json:", *broken, json.dumps(answer, indent=1)[:3000]])
     assert answer["schema_version"] == 2, answer
     if not answer["ok"]:
         assert answer["reason"]["code"] and answer["reason"]["message"], answer

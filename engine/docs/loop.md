@@ -43,6 +43,27 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   failure that repeats; the brief then ends with that page's text, or the sections the key names (`rail docs
   guides`). It is a hint, and part of the brief, so a subagent that gets the brief word for word gets the
   guide too.
+- `action.facts` holds the values the brief is made of, so a host or a test reads a fact where it would have
+  parsed a sentence. Every `agent_task` and `person_wait` that `rail next` answers has it, and so has the same
+  answer when `rail advance` gives it; an answer a verb writes about its own failure, such as the output of
+  the step that just failed, has the brief alone. An answer about one ticket has `ticket`, `title`, `branch`
+  and `ticket_file`. The other keys go by code: `IMPLEMENT` has `why`, `decided`, `done_contract` (its `text`
+  and the command of each `Check:` line), `scope_paths`, `out_of_scope`, `size` (`count`, `cap`),
+  `migration`, `base_green`, `tools`, `tried`, `history`, `save_note`, `findings` and `person_note`;
+  `STEP_FAILED` has `failed` (`step`, `status`, `detail`, `signature`), `output`, `advice` and `findings`;
+  `ANSWER_FINDINGS` has `findings`, each with its id, severity, file, line, claim, check and evidence as the
+  journal holds them; `REBASING` and `CONFLICT` have `conflicted`, the files git names. A person's wait has
+  `wait`: its `kind` (`approval` of something a revert doesn't undo or of money, `grant` of something the
+  machine lacks, `hold` for a person's own brake) and each way to answer it that works here, by name:
+  `accept` (the command), `label` (`rail:go`, when the pull request is open), `drop`, `answer`, `amend`,
+  `merge`, `issue`, or `set` (the names to set on the machine). `guide` and `consult` hold the text a brief
+  ends with, and `adopted` the branch a brief of `rail adopt` opens with. The brief is written from the facts
+  alone, in the same words as before, so a worker reads what it read.
+- `.rail/engine/answer-v1.json` says what an answer may hold: the shape every answer has, the shape of a
+  refusal with every code of one, and under `codes` every `reason.code` with the owners and kinds of action it
+  may have and the keys of its `facts`. The parts that describe values are JSON Schema. A change that adds a
+  code, a kind of wait or a fact adds it to this file: the test suite checks every answer it reads against
+  the file, and fails on a code or a fact key the file does not name.
 - `steps` lists what the command ran: `ran` with `pass` or `fail`, `could_not_run` with `fail` (the shell
   couldn't start the command: it isn't on the machine, or isn't executable), `not_run`, or `unavailable`. A
   skipped step never looks like a pass, and a step that couldn't start never looks like a check that ran.
