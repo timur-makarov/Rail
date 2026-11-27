@@ -90,6 +90,10 @@ model = "claude-opus-5-5"                 # the model the reviewer, refuter and 
 skip_paths = []                           # an AUTO change gets no reviewer when every file it changes matches one of
                                           # these, such as ["docs/**"]. The paths decide, not the ticket's author
 
+[triage]                                  # reader: advance; the run that answers a question the engine raises about a
+command = ""                              # shipped patch, before any review (rail docs triage). It runs as a review
+model = ""                                # does, with the same two variables. Empty: [review]'s command and model
+
 [claim]
 stale_minutes = 30                        # reader: next; another session's work with no journal event for this long is
                                           # resumed. Keep it above your longest command's limit plus save_minutes;

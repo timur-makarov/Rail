@@ -1643,6 +1643,52 @@
             ],
             "description": "Consult's latest advice, while the attempt it was given for is still to come."
           },
+          "triage": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "question",
+                  "type",
+                  "answer"
+                ],
+                "properties": {
+                  "question": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "ask": {
+                    "type": "string"
+                  },
+                  "fact": {
+                    "type": "string"
+                  },
+                  "answer": {
+                    "type": "string"
+                  },
+                  "means": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "evidence": {
+                    "type": "string"
+                  },
+                  "told": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the step is triage: the question, the fact that raised it, the answer that stopped the change with what it means, the run's reason, and what the worker is told to do."
+          },
           "findings": {
             "$ref": "#/$defs/findings"
           },
@@ -1699,7 +1745,7 @@
       }
     },
     "STUCK_REVIEW": {
-      "says": "The review failed twice in a row with no verdict.",
+      "says": "A review run, or a triage run, failed twice in a row with no verdict.",
       "owners": [
         "person"
       ],
@@ -1710,10 +1756,21 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "run",
           "pr",
           "wait"
         ],
         "properties": {
+          "run": {
+            "type": "string",
+            "enum": [
+              "review",
+              "security",
+              "refuter",
+              "triage"
+            ],
+            "description": "The step of the run that last failed."
+          },
           "pr": {
             "$ref": "#/$defs/pr"
           },
@@ -1898,6 +1955,15 @@
           }
         }
       }
+    },
+    "TRIAGE": {
+      "says": "A question the engine raised about the shipped patch has no answer: rail advance starts the triage run, before any review.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
     },
     "VERIFY_ASSUMPTIONS": {
       "says": "The ticket has open ASSUMED rows to verify before the work.",

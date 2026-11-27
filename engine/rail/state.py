@@ -87,6 +87,7 @@ class Facts:
         self.after_dropped = []
         self.overlaps = []
         self.open_assumptions = []
+        self.open_questions = []
         from .review import Ledger, load_doc
         self.ledger = Ledger(t.events, load_doc(t.review_text, t.id))
         self._budgets(project, t.events)
@@ -250,9 +251,12 @@ class Facts:
         self.advised = [s for s, n in consulted.items() if n == 0]  # consult advised, and no attempt followed yet
         self.consult_due = next((s for s, n in same.items() if n >= budget and s not in consulted and can_consult
                                  and s not in self.capped_why), None)
-        runs = [e for e in events[since:] if e.get("event") == "step" and e.get("step") in ("review", "security", "refuter")]
-        # Two review runs in a row with no verdict, timed out or with invalid output: neither counts against the author.
+        runs = [e for e in events[since:] if e.get("event") == "step"
+                and e.get("step") in ("review", "security", "refuter", "triage")]
+        # Two review or triage runs in a row with no verdict, timed out or with invalid output: neither counts
+        # against the author. `stuck_run` names the step of the last one.
         self.stuck_review = len(runs) >= 2 and all(e.get("counted") is False for e in runs[-2:])
+        self.stuck_run = runs[-1].get("step") if self.stuck_review else None
         self.spent_by = {what: round(usd, 4) for what, usd in spent.items()}
         self.spent = round(sum(spent.values()), 4)
         limit = project.config["worker"]["ticket_usd"]
@@ -365,10 +369,11 @@ class Facts:
         setups = [e for e in steps if e.get("step") == "setup"]
         if setups and setups[-1].get("result") == "fail":
             self.setup_failed = setups[-1]
-        # The last word on the current patch: a shipped event, a split offered, or a ship step that failed.
+        # The last word on the current patch: a shipped event, a split offered, a ship step that failed, or a triage
+        # answer that stops the change (a triage run with no answer is not the change's failure).
         verdicts = [e for e in t.events if e.get("patch_id") == self.patch_id and (
             e.get("event") in ("shipped", "split_offered") or (e.get("event") == "step" and e.get("result") == "fail"
-                                                              and e.get("step") in SHIP_STEPS))]
+                                                              and (e.get("step") in SHIP_STEPS or _stops(e))))]
         if verdicts and verdicts[-1].get("event") == "shipped":
             self.shipped = verdicts[-1]
         elif verdicts and verdicts[-1].get("event") == "split_offered":
@@ -395,11 +400,21 @@ class Facts:
                 self.ci, self.ci_failing = self.forge.checks(tip)
             if self.conflict or self.ci == "red":
                 return "implementing"  # a red required check or a conflict with base returns the ticket
+        # A question the engine raised about this patch comes before any review of it.
+        from .triage import open_questions
+        self.open_questions = open_questions(t.events, self.patch_id)
+        if self.open_questions:
+            return "reviewing"
         if self.needs_review and not self.ledger.complete(self.patch_id, self.tier):
             return "reviewing"
         if project.remote and (self.behind or not (self.pr_open and self.pushed and self.ci == "green")):
             return "in-ci"  # also green and behind its base: GitHub refuses that merge, so it is rebased first
         return "merge-ready"
+
+
+def _stops(e):
+    """A `triage` step that failed because the answer stops the change."""
+    return e.get("step") == "triage" and e.get("status") == "ran" and e.get("counted", True)
 
 
 def derive(project, tickets):

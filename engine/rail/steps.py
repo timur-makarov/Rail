@@ -50,7 +50,9 @@ class Run:
         self.size = None
 
     def record(self, step, passed, patch_id=None, detail=None, duration_ms=None, output="", status="ran",
-               counted=True, cost_usd=None):
+               counted=True, cost_usd=None, signed=None, **more):
+        """`signed`: the text a failure's signature is made of, where the output holds words that change from run to
+        run. `more`: other fields of the step's event."""
         receipt = {"step": step, "status": status}
         if status in TRIED:
             receipt["result"] = "pass" if passed else "fail"
@@ -66,8 +68,8 @@ class Run:
             if cost_usd is not None:
                 fields["cost_usd"] = cost_usd
             if not passed:
-                fields["signature"] = signature(step, output or detail or "")
-            self.events.append(event(self.t.id, "step", **fields))
+                fields["signature"] = signature(step, signed or output or detail or "")
+            self.events.append(event(self.t.id, "step", **fields, **more))
         if detail:
             receipt["detail"] = detail
         self.steps.append(receipt)
@@ -377,6 +379,11 @@ def ship(project, f, run):
                    output=f"Ticket {t.id} changes no file, so there is nothing to ship. If the work is already on the"
                           f" base branch, say so and close the ticket: rail drop {t.id} --reason \"already done:"
                           f" where\". If it is not, make the change, then run: rail advance {t.id}")
+        return run
+    # Every check passed: the facts of this patch that raise a question for the triage step. An answer that stopped
+    # this same patch still stands, and fails the step again.
+    from . import triage
+    if not triage.raise_at_ship(project, f, run, ref, patch_id):
         return run
     head = gitx.rev(ref, project.root)
     run.events.append(event(t.id, "shipped", patch_id=patch_id, head=head[:12], tier=tier, size=run.size))

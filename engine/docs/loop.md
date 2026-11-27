@@ -25,7 +25,8 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   agent meets most: `IMPLEMENT` (do the ticket's work), `REVERT_SHIP` and `REVERT` (a revert ticket: the reverse is
   in the worktree and only the ship is left, or it has to be undone by hand; `rail docs tickets`), `VERIFY_ASSUMPTIONS` (open `ASSUMED:` rows),
   `TICKET_LINT` (fix the ticket), `STEP_FAILED` (a ship step failed; the output is in the brief),
-  `ANSWER_FINDINGS`, `REBASING` and `CONFLICT`, `SPLIT`, `RED_BASE` (the base branch fails `verify`),
+  `ANSWER_FINDINGS`, `TRIAGE` (a question the engine raised about the shipped patch is answered first: run
+  `rail advance`; `rail docs triage`), `REBASING` and `CONFLICT`, `SPLIT`, `RED_BASE` (the base branch fails `verify`),
   `WAITING_AFTER` and `SCOPE_OVERLAP` (another ticket goes first), `AFTER_DROPPED` on an AUTO ticket (decide
   whether it stands without the dropped one), `STUCK` (an AUTO ticket at the retry cap: `rail next` drops it),
   `DROP_PENDING`, `CI_WAIT`, `GITHUB_LIMIT` (GitHub's rate limit is used up: sleep as the script says, or come
@@ -50,7 +51,8 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   and `ticket_file`. The other keys go by code: `IMPLEMENT` has `why`, `decided`, `done_contract` (its `text`
   and the command of each `Check:` line), `scope_paths`, `out_of_scope`, `size` (`count`, `cap`),
   `migration`, `base_green`, `tools`, `tried`, `history`, `save_note`, `findings` and `person_note`;
-  `STEP_FAILED` has `failed` (`step`, `status`, `detail`, `signature`), `output`, `advice` and `findings`;
+  `STEP_FAILED` has `failed` (`step`, `status`, `detail`, `signature`), `output`, `advice` and `findings`,
+  and `triage` when a triage answer stopped the change;
   `ANSWER_FINDINGS` has `findings`, each with its id, severity, file, line, claim, check and evidence as the
   journal holds them; `REBASING` and `CONFLICT` have `conflicted`, the files git names. A person's wait has
   `wait`: its `kind` (`approval` of something a revert doesn't undo or of money, `grant` of something the

@@ -89,7 +89,7 @@ class Operations(RailTest):
         self.assertIn("A person is asked only about what a revert doesn't undo", p.rail("docs", "environments")["text"])
         journal = p.rail("docs", "journal")["text"]
         for name in ("requested", "accepted", "amended", "claimed", "saved", "worked", "step", "shipped", "tier_raised",
-                     "finding",
+                     "finding", "question", "answered",
                      "consulted", "continued", "dropped"):
             self.assertIn(f"| `{name}` |", journal)  # every event the engine writes has its row
         for text in ("NN-review.json", "review/v1", "A review is complete for a patch", "rail/ids"):

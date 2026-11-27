@@ -88,6 +88,11 @@ READERS = {
                        " held (not reverted, and named in no later ticket's caused_by)",
     "map.depth": "doc-lint: the directory depth ## Areas must cover",
     "map.ignore": "doc-lint: directories that need no ## Areas row",
+    "triage.command": "advance: the command of a triage run, started in the ticket's worktree with the question's"
+                      " brief on stdin, RAIL_REVIEW_PROMPT (the path of the triage prompt), RAIL_REVIEW_SCHEMA (the"
+                      " path of the schema its JSON answer must match) and RAIL_TRIAGE (the question's type) set."
+                      " Empty: review.command (rail docs triage)",
+    "triage.model": "advance: the model a triage run is on. Empty: review.model",
     "tests.paths": "nothing yet: globs of the files that hold tests and their runner's settings, which rail init"
                    " writes from the language profiles it finds (rail docs languages)",
     "rules": "ship and CI: structure rules on added lines and files (rail docs rules)",

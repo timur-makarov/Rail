@@ -9,7 +9,7 @@ import json
 import re
 from collections import defaultdict
 
-from . import doclint, flakes, gitx
+from . import doclint, flakes, gitx, triage
 from .project import events_path, parse_events
 from .util import globmatch, match_any
 
@@ -193,7 +193,8 @@ def brief(project, commits, parked, checks):
     return "\n".join(parts) + "\n"
 
 
-def summary(nn, start, commits, merged, problems, counts, entry, parked, checks, recurring=(), flaked=(), languages=()):
+def summary(nn, start, commits, merged, problems, counts, entry, parked, checks, recurring=(), flaked=(), languages=(),
+            settled=()):
     review = (entry["summary"] if entry else "(the review run failed)") if commits else \
         "(no review run: nothing merged without a review)"
     lines = [f"# Sweep {nn}", "", f"Since {start[:12]}: {len(merged)} tickets merged; {len(commits)} commits merged"
@@ -213,7 +214,14 @@ def summary(nn, start, commits, merged, problems, counts, entry, parked, checks,
               "", "## Flaky checks",
               *([f"- `{command}` both failed and passed on the same code, in {len(where)} tickets"
                  f" ({', '.join(where)}). Check: `for i in $(seq {FLAKE_RUNS}); do {command} || exit 1; done`"
-                 for command, where in flaked] or ["(none)"])]
+                 for command, where in flaked] or ["(none)"]),
+              # Not tested with a model run: the wording of the line below, which the agent that files the sweep's
+              # tickets reads.
+              "", "## Question types with one answer",
+              *([f"- `{name}` was answered `{answer}` in {times} of its last {triage.LAST} questions. An answer that"
+                 f" does not vary is a rule the engine can apply with no run: open one ticket that makes it a rule or"
+                 f" removes the type."
+                 for name, answer, times in settled] or ["(none)"])]
     return "\n".join(lines) + "\n"
 
 
@@ -227,14 +235,16 @@ def run(project, f, receipt):
     problems, counts, languages = free_part(project)
     parked, checks = history(project, merged)
     recurring, flaked = patterns(project, merged), flaky(project, merged)
+    settled = triage.settled(project)
     entry = None
     if commits:
         entry = review.run(project, f, "sweep", receipt, prompt=brief(project, commits, parked, checks))
     else:
-        receipt.record("harvest", True, f.patch_id, NOTHING if not (problems or languages or parked or checks or recurring or flaked)
+        receipt.record("harvest", True, f.patch_id, NOTHING if not (problems or languages or parked or checks or recurring or flaked or settled)
                        else f"no review run: {len(parked)} parked findings, {len(checks)} proposed checks,"
                             f" {len(recurring)} patterns in the worker runs, {len(flaked)} flaky checks"
-                            + (", a language with no profile" if languages else ""))
+                            + (", a language with no profile" if languages else "")
+                            + (f", {len(settled)} question types with one answer" if settled else ""))
     receipt.files[f".rail/journal/{f.id}-summary.md"] = summary(f.id, start, commits, merged, problems, counts, entry,
-                                                               parked, checks, recurring, flaked, languages)
+                                                               parked, checks, recurring, flaked, languages, settled)
     return entry

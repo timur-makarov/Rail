@@ -10,7 +10,7 @@ import statistics
 import time
 from collections import Counter
 
-from . import flakes, gitx, timing
+from . import flakes, gitx, timing, triage
 from .project import events_path, parse_events, review_path
 from .review import Ledger, load_doc
 from .state import SHIP_STEPS
@@ -19,7 +19,7 @@ from .util import RailError, globs_overlap, parse_iso
 
 REVIEW_STEPS = ("review", "security", "refuter", "sweep")
 STEP_ORDER = ("setup", "rebase", "ticket-lint", "assumptions", "scope", "change", "rules", "migration", "size", "doc-lint",
-              "verify", "checks", "sensors", *REVIEW_STEPS, "merge")
+              "verify", "checks", "sensors", "triage", *REVIEW_STEPS, "merge")
 NO_MODEL = "(not reported)"
 NO_RUNS = {"runs": 0, "cost_usd": 0.0, "blocking": 0, "fixed": 0}
 
@@ -109,7 +109,8 @@ def _acts(t):
 
 def _cost(t):
     """(what the review commands reported, what the worker runs reported), in dollars."""
-    return (sum(e.get("cost_usd") or 0 for e in t.events if e.get("event") == "step" and e.get("step") in REVIEW_STEPS),
+    return (sum(e.get("cost_usd") or 0 for e in t.events if e.get("event") == "step"
+                and e.get("step") in (*REVIEW_STEPS, "triage")),
             sum(e.get("cost_usd") or 0 for e in t.events if e.get("event") == "worked"))
 
 
@@ -334,6 +335,7 @@ def collect(project, tickets, since=None, states=None, now=None):
     workers, acted = {}, {"tickets": 0, "cost_usd": 0.0}  # worker runs by model and effort; tickets a person acted on
     flaky = {}  # command -> the merged tickets it was flaky on, its flakes and its runs at ship
     gh_calls, tools = 0, {}  # GitHub REST calls on the merged tickets' events; declared tools the worker runs used
+    questions = {}           # the triage step's questions on the merged tickets, by type
     for nn, t in tickets.items():
         ships = [e for e in t.events if e.get("event") == "shipped"]
         tier = (ships[-1] if ships else t.last("accepted") or {}).get("tier")
@@ -380,6 +382,7 @@ def collect(project, tickets, since=None, states=None, now=None):
             acted["tickets"] += 1
             acted["cost_usd"] += review_usd + worker_usd
         gh_calls += sum(e.get("gh_calls") or 0 for e in t.events)
+        triage.count(t.events, questions)
         for name in {name for e in t.events if e.get("event") == "worked" for name in e.get("tools") or []}:
             _tool_row(tools, name)["tickets"] += 1
         for e in t.events:
@@ -494,6 +497,9 @@ def collect(project, tickets, since=None, states=None, now=None):
         # What the engine asked of GitHub for the merged tickets, and the declared tools their work reached.
         "github": {"calls": gh_calls, "calls_per_ticket": round(gh_calls / merged, 1) if merged else None},
         "tools": dict(sorted(tools.items())),
+        # What the triage step asked about the merged tickets' patches: for each type its questions, the answers
+        # they ended with, the runs, those that gave no answer, and what the runs reported they cost.
+        "triage": {name: dict(row, cost_usd=round(row["cost_usd"], 4)) for name, row in sorted(questions.items())},
         "tiers": tiers, "raised": dict(raised), "drops": drops(tickets, start),
         # AUTO tickets a later PERSON ticket names as its cause, by that ticket's kinds: nobody was asked.
         "auto_held_a_kind": {"tickets": under["tickets"], "kinds": dict(sorted(under["kinds"].items()))},
@@ -651,6 +657,21 @@ def render_tools(data):
         [name, r["tickets"], r["runs"], r["probe_failed"]] for name, r in rows.items()])]
 
 
+def render_triage(data):
+    """The questions the triage step asked about the merged tickets' patches, by type, with each answer's share."""
+    rows = data["triage"]
+    if not rows:
+        return []
+
+    def answers(row):
+        total = sum(row["answers"].values())
+        return ", ".join(f"{name} {n} ({n / total:.0%})" for name, n in sorted(row["answers"].items(), key=lambda x: -x[1]))
+
+    return ["", *_table(["TRIAGE", "questions", "runs", "no answer", "cost"], [
+        [name, r["questions"], r["runs"], r["no_answer"], f"${r['cost_usd']:.2f}"] for name, r in rows.items()]),
+        *[f"{name}: {answers(r)}." for name, r in rows.items() if r["answers"]]]
+
+
 def render_github(data):
     found = data["github"]
     if not found["calls"]:
@@ -764,6 +785,7 @@ def render(data):
     lines += render_flakes(data)
     lines += render_worker(data)
     lines += render_tools(data)
+    lines += render_triage(data)
     if not review["roles"]:
         return "\n".join(lines + ["", "No review ran.", *render_sources(data), *render_grilling(data)])
     roles = review["roles"]

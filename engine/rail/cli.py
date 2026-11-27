@@ -1585,6 +1585,10 @@ def cmd_advance(project, args):
                 tickets, facts = load(project)
                 f = facts[nn]
                 steps.ship(project, f, run)
+        elif code == "TRIAGE" and mine:
+            stage = "triage"
+            from . import triage
+            triage.run(project, f, run)
         elif code == "REVIEW" and mine:
             stage = "review"
             review_stage(project, f, run)
@@ -1610,7 +1614,7 @@ def cmd_advance(project, args):
             break
         first = False
         # A review run that timed out or gave invalid output: the reviewer's fault, so not counted.
-        no_verdict = bool(run.failure) and run.failure[0] in steps.REVIEW_STEPS and any(
+        no_verdict = bool(run.failure) and run.failure[0] in (*steps.REVIEW_STEPS, "triage") and any(
             e.get("event") == "step" and e.get("counted") is False for e in run.events)
         if stage == "ship" and run.failure:
             # The answer below shows the failure's output, and the journal keeps only its detail: the next brief for
@@ -1647,7 +1651,7 @@ def cmd_advance(project, args):
                 end_with(result["reason"]["code"], result["action"], "consult", advice)
             return result
         tickets, facts = load(project)
-        if first_match(facts[nn])[0] not in ("REVIEW",):
+        if first_match(facts[nn])[0] not in ("TRIAGE", "REVIEW"):
             break
     tickets, facts = load(project)
     update_pr(project, facts[nn], receipts)
@@ -2248,6 +2252,16 @@ def cmd_ci(project, args):
                              accepted=accepted[-1] if accepted else None)
         if needed is not None and rank(needed) > rank(tier):
             run.record("tier", False, patch_id, f"the change needs {needed}, and it shipped as {tier}")
+    if run.ok:
+        # A question the engine raised about this patch: open, or answered with what stops the change.
+        from . import triage
+        waiting = [q["id"] for q in triage.open_questions(events, patch_id)]
+        stops = [q["id"] for q in triage.stopped(events, patch_id)]
+        if waiting or stops:
+            run.record("triage", False, patch_id, f"open: {', '.join(waiting)}" if waiting else f"stopped: {', '.join(stops)}",
+                       output="A question the engine raised about this patch has no answer yet: run rail advance in the"
+                              " ticket's worktree." if waiting else
+                              "A triage answer stopped this patch; the ticket's next brief says what to do.")
     from .review import Ledger, load_doc, needs_review
     if run.ok and needs_review(project, tier, changed):
         from .project import review_path

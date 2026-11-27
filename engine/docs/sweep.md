@@ -37,6 +37,9 @@ next sweep starts. The first sweep starts where Rail was set up.
 - **Flaky checks:** a command that both failed and passed on the same code (`rail docs retries`) in two or more
   tickets merged since the last sweep. Commands are matched as failure signatures are, with numbers, hashes and
   paths left out. The summary gives each with a `Check:` line that runs it 20 times in a row.
+- **Question types with one answer:** a type of the triage step (`rail docs triage`) whose last 20 answered
+  questions, in every journal on the base branch, got the same answer 19 times or more. The agent opens one
+  ticket that makes the answer a rule of the engine or removes the type.
 - **Output:** tickets, never edits, and a one-page summary in `.rail/journal/NN-summary.md`: the free part,
   the review's findings, the parked and open advisory findings, the proposed checks by kind, the patterns and the flaky checks. The agent opens a ticket for
   each finding that names something wrong (a finding about style gets none), and one ticket
@@ -48,7 +51,7 @@ next sweep starts. The first sweep starts where Rail was set up.
   drives Rail with `rail next`, `rail work` and `rail advance` goes through a sweep with no step of its own.
 
 When the sweep finds nothing (no unreviewed change, no parked or open advisory finding, no proposed check, no
-pattern, no flaky check, no language without a profile, and doc-lint is clean), the agent gets no task: `rail next` answers `SWEEP_EMPTY` with `rail advance NN`, and the sweep's
+pattern, no flaky check, no question type with one answer, no language without a profile, and doc-lint is clean), the agent gets no task: `rail next` answers `SWEEP_EMPTY` with `rail advance NN`, and the sweep's
 ticket merges, which moves the marker.
 
 A sweep never blocks a merge. To turn other signals into tickets, such as failed CI runs or an error

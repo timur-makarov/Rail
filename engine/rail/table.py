@@ -214,6 +214,10 @@ def _facts_person(code):
     return lambda f: {**_shared(f), "pr": _pr_fact(f), "wait": _wait(code, f)}
 
 
+def _facts_stuck_review(f):
+    return {**_shared(f), "run": f.stuck_run, "pr": _pr_fact(f), "wait": _wait("STUCK_REVIEW", f)}
+
+
 def _facts_upheld(f):
     return {**_shared(f), "disputed": f.ledger.disputed_again(),
             "wait": _wait("FINDING_UPHELD", f, answer=f'rail answer {f.id} F1 declined "why" --owner')}
@@ -262,6 +266,10 @@ def _facts_step_failed(f):
              "findings": _finding_facts(f), "person_note": f.person_note}
     if e.get("status") != "could_not_run" and not e.get("tools_down"):  # an attempt at the work itself
         found.update(tried=_ticket_now(f).tried(), advice=_advice(f, e.get("step")))
+    if e.get("step") == "triage":
+        # The answer that stopped the change is in the journal, so every clone's brief has it.
+        from . import triage
+        found["triage"] = triage.stop_facts(f.t.events, e.get("question"))
     return found
 
 
@@ -468,6 +476,11 @@ def _render_tool_down(x):
 
 
 def _render_stuck_review(x):
+    if x["run"] == "triage":
+        return (f"The triage run of ticket {x['ticket']} failed twice in a row with no answer: it timed out"
+                f" (timeout_secs), its output was invalid, or the evidence it named was not where it said. A person"
+                f" looks at why, for example a command that waits for input or a question the run can't answer from"
+                f" what it is shown, then continues it: {x['wait']['accept']}." + _go(x))
     return (f"The review of ticket {x['ticket']} failed twice in a row with no verdict: it timed out (timeout_secs) or its"
             f" output was invalid. A person looks at why, for example a command that waits for input or a reviewer"
             f" that can't return review/v1, then continues it: {x['wait']['accept']}." + _go(x))
@@ -569,6 +582,13 @@ def _render_step_failed(x):
                 f" rail advance {nn}") + _findings(x, "Open review findings:") + _note(x)
     tried = "".join(f"\n{line}" for line in _tried_lines(x))
     advice = (f"\n\nConsult advised on this failure:\n## {x['advice'].removeprefix('## ')}" if x.get("advice") else "")
+    if x.get("triage"):
+        # Not tested with a model run: this wording. The answer is the journal's, so the cache's output is not shown.
+        from . import triage
+        return (f"Ticket {nn} shipped, and a triage answer stopped it ({e.get('detail', '')}).\n"
+                f"{triage.stop_said(x['triage'])}\n\nNothing has changed since. Do that in {x['cwd']}, then run:"
+                f" rail advance {nn}\n{tried_help(e.get('step'), x['ticket_file'])}{tried}".rstrip()) + advice \
+            + _findings(x, "Open review findings:") + _note(x)
     return (f"The last ship of ticket {nn} failed at '{e.get('step')}': {e.get('detail', '')}{end}Nothing has changed"
             f" since. Fix the cause in {x['cwd']}, then run: rail advance {nn}\n"
             f"{tried_help(e.get('step'), x['ticket_file'])}{tried}".rstrip()) + advice \
@@ -793,7 +813,7 @@ ROWS = [
     ("TOOL_DOWN",          "person", "person_wait",  lambda f: f.state in OPEN and f.machine_stuck,
      _facts_tool_down),
     ("STUCK_REVIEW",       "person", "person_wait",  lambda f: f.state == "reviewing" and f.stuck_review,
-     _facts_person("STUCK_REVIEW")),
+     _facts_stuck_review),
     ("FINDING_UPHELD",     "person", "person_wait",  lambda f: f.ledger.disputed_again(),
      _facts_upheld),
     ("MERGE_FAILED",       "person", "person_wait",  lambda f: f.state == "merge-ready" and _merge_stale(f),
@@ -844,6 +864,10 @@ ROWS = [
      _facts_revert),
     ("IMPLEMENT",          "agent", "agent_task",  lambda f: f.state == "implementing",
      _facts_implement),
+    # A question the engine raised about the shipped patch is answered before any review, so that no review is
+    # spent on a patch that is about to change: rail advance starts the triage run.
+    ("TRIAGE",             "agent", "script",      lambda f: f.state == "reviewing" and f.open_questions,
+     lambda f: f"rail advance {f.id}"),
     ("ANSWER_FINDINGS",    "agent", "agent_task",  lambda f: f.state == "reviewing" and f.ledger.unanswered(),
      _facts_answer),
     ("REVIEW",             "agent", "script",      lambda f: f.state == "reviewing",

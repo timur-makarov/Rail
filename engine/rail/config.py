@@ -33,6 +33,7 @@ DEFAULTS = {
                  "verify_timeout_secs": 0, "base_checks": True},
     "size": {"cap": 600, "exclude": []},
     "review": {"command": REVIEW_COMMAND, "model": "", "skip_paths": []},
+    "triage": {"command": "", "model": ""},
     "retry": {"budget": 2, "cap": 5},
     "consult": {"command": "claude -p --safe-mode --effort high --autocompact 400000 --tools Read,Grep,Glob", "model": ""},
     "claim": {"stale_minutes": 30, "save_minutes": 10},
