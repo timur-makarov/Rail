@@ -30,7 +30,9 @@ of the two it is on.
    - Settings > General > Pull Requests: turn on "Automatically delete head branches". A cloud session
      can't delete branches, so merged tickets would pile up.
 4. **Approve the environment's setup script.** `rail doctor` prints three lines; the agent proposes them for
-   the session's cloud environment and you approve once. They run `rail provision` when the environment's
+   the session's cloud environment and you approve once. The same lines are the file
+   `.rail/engine/environment-setup.sh`, which you can paste yourself; they are the same for every project,
+   because what a project needs is in its own `[commands] provision`. They run `rail provision` when the environment's
    machine is built: it links `rail` onto `PATH`, writes Rail's hooks into the machine's own Claude Code
    settings, and runs the project's `provision` command. The result is kept as a snapshot, so later sessions
    start with everything in place. Without the script, `rail next` asks the agent to run `rail provision` when

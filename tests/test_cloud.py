@@ -75,6 +75,26 @@ class Provision(RailTest):
         self.assertEqual((ci["reason"]["code"], ci["steps"][0]["step"]), ("CI_FAIL", "provision"))
 
 
+class EnvironmentScript(RailTest):
+    def test_the_script_provisions_each_repository_with_rail_and_never_fails_the_machine(self):
+        # The machine's folder of repositories: one whose provision passes, one whose provision fails, one without
+        # Rail. Each rail here is a stand-in that records where it ran and with what.
+        home = os.path.join(self.tmp, "repositories")
+        log = os.path.join(self.tmp, "calls.log")
+        for name, code in (("passes", 0), ("fails", 1)):
+            os.makedirs(os.path.join(home, name, ".rail", "bin"))
+            launcher = os.path.join(home, name, ".rail", "bin", "rail")
+            with open(launcher, "w") as f:
+                f.write(f'#!/bin/sh\necho "$(basename "$PWD") $1 cloud=$RAIL_CLOUD" >> {log}\nexit {code}\n')
+            os.chmod(launcher, 0o755)
+        os.makedirs(os.path.join(home, "no-rail"))
+        framework = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        done = subprocess.run(["bash", os.path.join(framework, "engine", "environment-setup.sh")], cwd=home,
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(sorted(read(log).splitlines()), ["fails provision cloud=1", "passes provision cloud=1"])
+
+
 class Doctor(RailTest):
     def test_in_a_cloud_session_doctor_says_what_the_environment_still_needs(self):
         p = self.fixture(config=CONFIG.replace("[commands]", '[commands]\nprovision = "true"'))
@@ -87,6 +107,10 @@ class Doctor(RailTest):
         self.assertIn("rail provision", found["provision"]["detail"])
         self.assertEqual(found["environment"]["result"], "fail")
         self.assertIn("RAIL_CLOUD=1 .rail/bin/rail provision", found["environment"]["detail"])
+        # The lines doctor prints are the project's copy of the one file, without its comments.
+        script = [line for line in read(p.path(".rail", "engine", "environment-setup.sh")).splitlines()
+                  if not line.startswith("#")]
+        self.assertTrue(found["environment"]["detail"].endswith("\n".join(script)))
         # No hook ran for this session id: a session with several repositories, or a project thread.
         self.assertEqual(found["session hooks"]["status"], "unavailable")
 

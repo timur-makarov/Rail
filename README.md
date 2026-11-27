@@ -128,7 +128,9 @@ the checks need, and opens one pull request. Then three things are yours:
    message, and delete merged branches. The ruleset is one file,
    [`seed/ruleset.json`](seed/ruleset.json) here and `.rail/ruleset.json` in your project: download it and
    choose it under Settings > Rules > Rulesets > New ruleset > Import a ruleset. `rail doctor` links each page.
-3. Approve the environment's setup script when Claude proposes it, so later sessions start ready.
+3. Approve the environment's setup script when Claude proposes it, so later sessions start ready. Or paste it
+   yourself: it is one file, [`engine/environment-setup.sh`](engine/environment-setup.sh), the same for every
+   project.
 
 After that, hand work over: say what you want in a session, or label a GitHub issue `rail`. Claude runs
 `rail next`, does what the brief says, and runs `rail advance`, until a ticket needs you. Tickets that need

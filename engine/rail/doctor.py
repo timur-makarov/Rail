@@ -11,10 +11,14 @@ from .util import cloud
 
 # The cloud environment's setup script: it runs as root before each new machine's first session, from the folder
 # that holds the repositories, and its result is kept as the environment's snapshot. `rail provision` links rail
-# onto PATH, writes the machine's hooks, and runs the project's own provision command.
-ENVIRONMENT_SCRIPT = """for d in */; do
-  [ -x "$d.rail/bin/rail" ] && (cd "$d" && RAIL_CLOUD=1 .rail/bin/rail provision) || true
-done"""
+# onto PATH, writes the machine's hooks, and runs the project's own provision command. The lines live in one file,
+# engine/environment-setup.sh, which a person can also paste whole; doctor prints them without its comments.
+ENVIRONMENT_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "environment-setup.sh")
+
+
+def environment_script():
+    with open(ENVIRONMENT_FILE) as f:
+        return "".join(line for line in f if not line.startswith("#")).strip()
 
 
 def _run(args, cwd):
@@ -168,7 +172,7 @@ def cloud_checks(project):
     found.append(("environment", ready, "rail is on PATH and the machine's hooks are in place" if ready else
                   "add these lines to the cloud environment's setup script (your agent can propose them with its"
                   " environment tool; you approve once). They provision each new machine before its first session,"
-                  " so every session starts with rail, its hooks and the tools:\n" + ENVIRONMENT_SCRIPT))
+                  " so every session starts with rail, its hooks and the tools:\n" + environment_script()))
     session = os.environ.get("CLAUDE_CODE_SESSION_ID")
     if session:
         loaded = bool(project.cache_read("hooks", session))
