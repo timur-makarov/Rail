@@ -28,6 +28,7 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   `TICKET_LINT` (fix the ticket), `STEP_FAILED` (a ship step failed; the output is in the brief),
   `ANSWER_FINDINGS`, `TRIAGE` (a question the engine raised about the shipped patch is answered first: run
   `rail advance`; `rail docs triage`), `REBASING` and `CONFLICT`, `SPLIT`, `RED_BASE` (the base branch fails `verify`),
+  `ASK_COVERAGE` (a ticket the engine filed to ask about folders inside no project: run `rail advance NN`; `rail docs languages`),
   `WAITING_AFTER` and `SCOPE_OVERLAP` (another ticket goes first), `AFTER_DROPPED` (decide
   whether it stands without the dropped one), `DIAGNOSE` (a ticket at the retry cap gets one diagnosis first: run `rail next --ticket NN`),
   `STUCK_CONTRACT` and `STUCK_SPLIT` (the diagnosis asks the contract writer to amend the contract, or to split
@@ -82,7 +83,9 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
 ## What next does
 
 `next` makes some moves itself: it accepts an AUTO ticket, claims a ticket, makes
-its worktree in `.claude/worktrees/NN`, copies the files `.worktreeinclude` lists, and runs `setup` there.
+its worktree in `.claude/worktrees/NN`, copies the files `.worktreeinclude` lists, and runs `setup` there:
+each project's that the ticket's scope reaches, as a step `setup:NAME`, then `[commands] setup` (`rail docs
+languages`).
 It prefers this session's own tickets; then tickets no session holds (a shipped ticket, which any session
 may move through CI and the merge, and work an ended session left); then new work in ID order. A ticket
 another session is implementing or reviewing is left alone while it keeps moving. After
@@ -123,7 +126,8 @@ also takes in issues labelled `rail`, and every command that meets a wait labels
 
 In the ticket's worktree, `advance` commits your in-scope changes and ships: it rebases onto a moved base,
 then runs ticket lint, the ASSUMED rows, scope, structure rules, the migration fields, size, doc-lint,
-`verify`, each `Check:` line, and the sensors the change touches (`rail docs sensors`). When all pass and the
+`verify` (each project's that the change reaches, as a step `verify:NAME`, then `[commands] verify`; `rail docs
+languages`), each `Check:` line, and the sensors the change touches (`rail docs sensors`). When all pass and the
 change edits test files the base branch has, it runs `verify` and the `Check:` lines once more with the base's
 version of those files, and then has a fresh run answer each question that or another fact of the patch raises
 (`rail docs triage`). Then it runs the review, unless every changed file is in

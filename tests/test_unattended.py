@@ -285,18 +285,33 @@ class Sweep(RailTest):
         self.assertIn("Sweep: since", p.git("log", "-1", "--format=%b", "main"))
         self.assertEqual(p.rail("next")["reason"]["code"], "NO_WORK")
 
-    def test_a_sweep_names_a_language_no_profile_covers(self):
-        # A service in another language arrived after rail init, so the config has no [[profiles]] entry for it.
-        p = self.fixture(config=CONFIG + "\n[sweep]\nevery = 1\n", files={"api/go.mod": "module api\n"})
+    def test_a_sweep_names_a_file_a_reviewer_named_a_kind_on_that_no_kind_path_matches(self):
+        p = self.fixture(config=CONFIG + "\n[sweep]\nevery = 1\n")
         p.add(ticket())
         p.rail("next")
         p.fix_calc("1")
-        p.rail("advance", "1")
-        p.rail("advance", "1")
+        shape = {"kind": "data-shape", "file": "src/calc.py", "line": 2, "why": "It changes what add returns to callers."}
+        clean = {"summary": "Read it.", "findings": []}
+        p.queue_reviews(clean | {"kinds": [shape]}, clean, clean)
+        self.assertEqual(p.rail("advance", "1")["reason"]["code"], "MERGE_BY_PERSON")
+        p.rail("accept", "1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
         swept = p.rail("sweep")
         self.assertEqual(swept["reason"]["code"], "SWEEP_TICKETS")  # something to file, so the agent gets the task
         summary = read(os.path.join(p.worktree("2"), ".rail", "journal", "2-summary.md"))
-        self.assertIn("- languages: api/go.mod marks go: no [[profiles]] entry covers it", summary)
+        self.assertIn("## Kind paths reviewers found\n- `data-shape`: a reviewer named this kind on `src/calc.py` (ticket 1),"
+                      " and no path of that kind in `.rail/config.toml` matches the file", summary)
+
+        # With the path under its kind, the next sweep has nothing to say about it.
+        q = self.fixture("listed", config=CONFIG + '\n[sweep]\nevery = 1\n\n[kinds]\ndata-shape = ["src/**"]\n')
+        q.add(ticket(tier="PERSON"))
+        q.rail("next")
+        q.fix_calc("1")
+        q.queue_reviews(clean | {"kinds": [shape]}, clean, clean)
+        q.rail("advance", "1")
+        q.rail("accept", "1")
+        self.assertEqual(q.rail("advance", "1")["state"], "merged")
+        self.assertEqual(q.rail("sweep")["reason"]["code"], "SWEEP_EMPTY")
 
     def test_a_sweep_that_finds_nothing_merges_with_no_task(self):
         p = self.fixture(config=CONFIG + "\n[sweep]\nevery = 1\n")

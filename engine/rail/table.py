@@ -260,7 +260,8 @@ def _facts_sweep_tickets(f):
 
 
 def _facts_setup_failed(f):
-    return {**_shared(f), "cwd": f.cwd, "failed": {"step": "setup", "detail": f.setup_failed.get("detail", "")}}
+    return {**_shared(f), "cwd": f.cwd, "failed": {"step": f.setup_failed.get("step") or "setup",
+                                                   "detail": f.setup_failed.get("detail", "")}}
 
 
 def _facts_assumptions(f):
@@ -774,7 +775,7 @@ def _render_init(x):
     """The init task: the project's commands, areas, kinds and rules, set up by the agent and confirmed by a person."""
     from .init import INIT_TASK, INIT_TASK_CLOUD
     return (INIT_TASK_CLOUD if x["cloud"] else INIT_TASK).format(base=x["base"], depth=x["depth"], tools=x["tools"],
-                                                                 profiles=x["profiles"])
+                                                                 projects=x["projects"])
 
 
 def _next_ticket(x):
@@ -952,12 +953,17 @@ ROWS = [
     ("SWEEP_TICKETS",      "agent", "agent_task",  lambda f: f.state == "implementing" and f.sweep and not f.dirty
                                                    and not f.last_fail,
      _facts_sweep_tickets),
+    # The ticket that asks about the folders inside no project has no task for the agent either: its ship raises
+    # the questions, and the triage step answers them.
+    ("ASK_COVERAGE",       "agent", "script",      lambda f: f.state == "implementing" and f.asks_coverage
+                                                   and not f.dirty and not f.last_fail,
+     lambda f: f"rail advance {f.id}"),
     ("SETUP_FAILED",       "agent", "agent_task",  lambda f: f.state == "implementing" and f.setup_failed,
      _facts_setup_failed),
     ("VERIFY_ASSUMPTIONS", "agent", "agent_task",  lambda f: f.state == "implementing" and f.open_assumptions,
      _facts_assumptions),
     ("RED_BASE",           "none",  "rest",        lambda f: f.state == "implementing" and f.red_base and f.last_fail
-                                                   and f.last_fail.get("step") == "verify" and not f.dirty,
+                                                   and (f.last_fail.get("step") or "").split(":")[0] == "verify" and not f.dirty,
      lambda f: f"verify fails on the base branch too, so ticket {f.id} waits: a fix ticket for the base comes first."),
     ("CONFLICT",           "agent", "agent_task",  lambda f: f.state == "implementing" and f.conflict and not f.dirty,
      _facts_conflict),

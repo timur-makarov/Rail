@@ -22,6 +22,11 @@ env = { PYTHONDONTWRITEBYTECODE = "1" }
 verify = "python3 -m unittest tests.test_ops"
 timeout_secs = 120
 
+# The calculator has no manifest, so no project is found from it: one is declared, and no folder is left to ask about.
+[[rail.config.projects]]
+name = "calc"
+paths = ["**"]
+
 [[situation]]
 id = "calc-01"
 request = """add() gives the wrong answer

@@ -82,26 +82,51 @@ def ticket_text(start, unreviewed, merged):
 
 
 def free_part(project):
-    """What needs no model: doc-lint on base, each structure rule counted over the whole tree, and the manifests on
-    base that no [[profiles]] entry covers (rail docs languages), as one sentence in a list."""
-    from . import init
-
+    """What needs no model: doc-lint on base, and each structure rule counted over the whole tree."""
     problems = doclint.lint(project, project.base_ref)
     files = [f for f in gitx.git(["ls-tree", "-r", "-z", "--name-only", project.base_ref], project.root)
              .stdout.split("\0") if f]
-    bare = init.unprofiled(files, project.config)
-    languages = [init.uncovered(bare)] if bare else []
     counts = {}
     for rule in project.config["rules"]:
         hits = 0
-        paths = [f for f in files if globmatch(rule.get("files", "**"), f) and not match_any(rule.get("allow", []), f)]
+        paths = [f for f in files if globmatch(rule.get("files", "**"), f) and not match_any(rule.get("allow", []), f)
+                 and (not rule.get("within") or match_any(rule["within"], f))]
         blobs = gitx.read_blobs([f"{project.base_ref}:{p}" for p in paths], project.root)
         for text in blobs.values():
             for line in (text or "").splitlines():
                 if any(word in line for word in rule.get("forbid", [])):
                     hits += 1
         counts[rule["id"]] = hits
-    return problems, counts, languages
+    return problems, counts
+
+
+def kind_paths(project, merged):
+    """[(kind, file, ticket id)]: each file a reviewer named a kind on, in a ticket merged since the last sweep, that
+    the base still has and that no path of that kind in the config matches. A file under a folder whose coverage
+    ticket is open is left out: that ticket adds the path (rail docs languages)."""
+    from .project import review_path
+    from .review import load_doc
+    from .state import kind_paths as config_paths
+
+    ids = sorted(set(merged), key=int)
+    blobs = gitx.read_blobs([f"{project.base_ref}:{review_path(nn)}" for nn in ids], project.root)
+    globs = {}
+    for kind, paths, _ in config_paths(project.config):
+        globs.setdefault(kind, []).extend(paths)
+    held = project.layout(project.base_ref).tree.names
+    covering = [(t.ticket.get("external_id") or "")[len("coverage:"):] for t in project.tickets().values()
+                if t.ticket and (t.ticket.get("external_id") or "").startswith("coverage:") and not t.merged
+                and not t.last("dropped") and not t.dropped_mark]
+    found = []
+    for nn in ids:
+        for run in load_doc(blobs.get(f"{project.base_ref}:{review_path(nn)}"), nn)["runs"]:
+            for k in run.get("kinds") or []:
+                kind, path = k.get("kind"), k.get("file")
+                if (path in held and not match_any(globs.get(kind) or [], path)
+                        and not any(path.startswith(folder + "/") for folder in covering)
+                        and (kind, path) not in [(a, b) for a, b, _ in found]):
+                    found.append((kind, path, nn))
+    return found
 
 
 def history(project, merged):
@@ -168,8 +193,9 @@ def flaky(project, merged):
         for key in dict.fromkeys(flakes.name(x) for x in flakes.of(parse_events(blobs.get(f"{project.base_ref}:{events_path(nn)}")))):
             seen[normalise(key)].append(nn)
             shown.setdefault(normalise(key), key)
-    verify = project.config["commands"]["verify"]
-    return [(verify if shown[key] == "verify" and verify else shown[key], where)
+    commands = {"verify": project.config["commands"]["verify"],
+                **{f"verify:{p['name']}": p["verify"] for p in project.layout(project.base_ref).projects}}
+    return [(commands.get(shown[key]) or shown[key], where)
             for key, where in sorted(seen.items(), key=lambda x: (-len(x[1]), x[0])) if len(where) >= FLAKE_TICKETS]
 
 
@@ -193,15 +219,14 @@ def brief(project, commits, parked, checks):
     return "\n".join(parts) + "\n"
 
 
-def summary(nn, start, commits, merged, problems, counts, entry, parked, checks, recurring=(), flaked=(), languages=(),
-            settled=(), refused=()):
+def summary(nn, start, commits, merged, problems, counts, entry, parked, checks, recurring=(), flaked=(),
+            settled=(), refused=(), kinds=()):
     review = (entry["summary"] if entry else "(the review run failed)") if commits else \
         "(no review run: nothing merged without a review)"
     lines = [f"# Sweep {nn}", "", f"Since {start[:12]}: {len(merged)} tickets merged; {len(commits)} commits merged"
                                   " without a review.", "",
              "## Free part", *([f"- doc-lint: {p}" for p in problems] or ["- doc-lint: clean"]),
-             *[f"- rule {rid}: {n} lines in the tree" for rid, n in counts.items()],
-             *[f"- languages: {line}" for line in languages], "",
+             *[f"- rule {rid}: {n} lines in the tree" for rid, n in counts.items()], "",
              "## Review", review, ""]
     for f in (entry or {}).get("findings", []):
         where = f"{f['file']}:{f['line']}" if f.get("line") else f["file"]
@@ -228,7 +253,13 @@ def summary(nn, start, commits, merged, problems, counts, entry, parked, checks,
                  f" and they were of this kind. Each was built before the person saw it. Open one ticket that puts"
                  f" `{kind}` into `approve_contract` in `.rail/config.toml`, so that a person approves such a contract"
                  f" before the build."
-                 for kind, times in refused] or ["(none)"])]
+                 for kind, times in refused] or ["(none)"]),
+              # Not tested with a model run: the wording of the line below, as above.
+              "", "## Kind paths reviewers found",
+              *([f"- `{kind}`: a reviewer named this kind on `{path}` (ticket {where}), and no path of that kind in"
+                 f" `.rail/config.toml` matches the file, so a later change to it is `{kind}` only if a reviewer says"
+                 f" so again. Open one ticket that adds its path under `[kinds]` `{kind}`."
+                 for kind, path, where in kinds] or ["(none)"])]
     return "\n".join(lines) + "\n"
 
 
@@ -239,7 +270,8 @@ def run(project, f, receipt):
     from . import review
 
     start, commits, merged = since_last(project)
-    problems, counts, languages = free_part(project)
+    problems, counts = free_part(project)
+    kinds = kind_paths(project, merged)
     parked, checks = history(project, merged)
     recurring, flaked = patterns(project, merged), flaky(project, merged)
     settled = triage.settled(project)
@@ -248,12 +280,12 @@ def run(project, f, receipt):
     if commits:
         entry = review.run(project, f, "sweep", receipt, prompt=brief(project, commits, parked, checks))
     else:
-        receipt.record("harvest", True, f.patch_id, NOTHING if not (problems or languages or parked or checks or recurring or flaked or settled or refused)
+        receipt.record("harvest", True, f.patch_id, NOTHING if not (problems or parked or checks or recurring or flaked or settled or refused or kinds)
                        else f"no review run: {len(parked)} parked findings, {len(checks)} proposed checks,"
                             f" {len(recurring)} patterns in the worker runs, {len(flaked)} flaky checks"
-                            + (", a language with no profile" if languages else "")
                             + (f", {len(settled)} question types with one answer" if settled else "")
-                            + (f", {len(refused)} kinds a person refuses at the merge" if refused else ""))
+                            + (f", {len(refused)} kinds a person refuses at the merge" if refused else "")
+                            + (f", {len(kinds)} kind paths reviewers found" if kinds else ""))
     receipt.files[f".rail/journal/{f.id}-summary.md"] = summary(f.id, start, commits, merged, problems, counts, entry,
-                                                               parked, checks, recurring, flaked, languages, settled, refused)
+                                                               parked, checks, recurring, flaked, settled, refused, kinds)
     return entry

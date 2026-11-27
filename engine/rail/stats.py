@@ -15,7 +15,7 @@ from .project import events_path, parse_events, review_path
 from .review import Ledger, load_doc
 from .state import SHIP_STEPS
 from .ticket import TIERS, highest
-from .util import RailError, globs_overlap, parse_iso
+from .util import RailError, family, globs_overlap, parse_iso
 
 REVIEW_STEPS = ("review", "security", "refuter", "sweep")
 STEP_ORDER = ("setup", "rebase", "ticket-lint", "assumptions", "scope", "change", "rules", "migration", "size", "doc-lint",
@@ -86,7 +86,7 @@ def _first_try(t, ships):
     """No counted ship step failed before the ticket first shipped."""
     before = t.events[:t.events.index(ships[0])] if ships else t.events
     return not any(e.get("event") == "step" and e.get("result") == "fail" and e.get("counted", True)
-                   and e.get("step") in SHIP_STEPS for e in before)
+                   and family(e.get("step")) in SHIP_STEPS for e in before)
 
 
 def _amended_after_acceptance(t):
@@ -154,12 +154,12 @@ def _worker_of(t):
     return ":".join(part for part in (last.get("model"), last.get("effort")) if part) or NO_MODEL
 
 
-def _profiles_of(project, t):
-    """The language profiles ([[profiles]] in the config) whose paths the ticket's scope reaches."""
+def _projects_of(project, t):
+    """The projects whose paths the ticket's scope reaches, as the base branch has them now (rail docs languages)."""
     accepted = next((e for e in t.events if e.get("event") == "accepted"), {})
     scope = accepted.get("scope_paths") or (sorted(t.ticket.scope) if t.ticket else [])
-    return [p["name"] for p in project.config["profiles"]
-            if any(globs_overlap(p.get("paths") or "**", path) for path in scope)]
+    return [p for p in project.layout(project.base_ref).projects
+            if any(globs_overlap(glob, path) for glob in p["paths"] for path in scope)]
 
 
 def _person_reasons(t):
@@ -385,7 +385,7 @@ def collect(project, tickets, since=None, states=None, now=None):
     held_days = project.config["stats"]["held_days"]
     old = (now if now is not None else time.time()) - held_days * 86400
     outcomes = {tier: _outcome_row() for tier in TIERS}
-    by_worker, by_profile, names_cause, counted = {}, {}, 0, []
+    by_worker, by_profile, by_project, names_cause, counted = {}, {}, {}, 0, []
     fixed_by_person, under = _held_a_kind(tickets), {"tickets": 0, "kinds": Counter()}
     workers, acted = {}, {"tickets": 0, "cost_usd": 0.0}  # worker runs by model and effort; tickets a person acted on
     flaky = {}  # command -> the merged tickets it was flaky on, its flakes and its runs at ship
@@ -460,8 +460,11 @@ def collect(project, tickets, since=None, states=None, now=None):
                 w["resumed"] += bool(e.get("resumed"))
                 w["resume_failed"] += bool(e.get("resume_failed"))
         names_cause += bool(t.ticket and t.ticket.get("caused_by"))
+        mine = _projects_of(project, t)
         for out in (outcomes[tier], by_worker.setdefault(_worker_of(t), _outcome_row()),
-                    *[by_profile.setdefault(name, _outcome_row()) for name in _profiles_of(project, t)]):
+                    *[by_profile.setdefault(name, _outcome_row())
+                      for name in dict.fromkeys(p["profile"] for p in mine if p["profile"])],
+                    *[by_project.setdefault(p["name"], _outcome_row()) for p in mine]):
             out["merged"] += 1
             out["reverted"] += nn in reverted
             out["caused_fix"] += nn in caused
@@ -539,7 +542,8 @@ def collect(project, tickets, since=None, states=None, now=None):
     return {
         "since": since, "merged": merged, "left_out": len(tickets) - merged,
         "outcomes": {"held_days": held_days, "tiers": {tier: _outcome_done(row) for tier, row in outcomes.items()},
-                     "names_cause": names_cause, "by_worker": _split(by_worker), "by_profile": _split(by_profile)},
+                     "names_cause": names_cause, "by_worker": _split(by_worker), "by_profile": _split(by_profile),
+                     "by_project": _split(by_project)},
         "time": timing.collect(tickets, merged_at, counted),
         "dev_broken": dev_broken(tickets, merged_at, start),
         # Commands that both failed and passed on the same code, in the merged tickets: flakes of the runs counted.
@@ -591,7 +595,8 @@ def _tool_row(tools, name):
 
 
 def _step_rank(name):
-    return STEP_ORDER.index(name) if name in STEP_ORDER else len(STEP_ORDER)
+    kind = family(name)  # a project's own verify:NAME stands where verify does
+    return STEP_ORDER.index(kind) if kind in STEP_ORDER else len(STEP_ORDER)
 
 
 def _rounded(row):
@@ -785,7 +790,8 @@ def render_outcomes(data):
         lines.append(f"Failed dev deploys reverted: {broken['reverts']}, a median of {broken['median_minutes']:g} minutes"
                      f" from the smoke check's issue to the revert's merge.")
     head = ["merged", "reverted", "caused a fix", "first try", "cost each"]
-    for title, split in (("BY WORKER", out["by_worker"]), ("BY LANGUAGE", out["by_profile"])):
+    for title, split in (("BY WORKER", out["by_worker"]), ("BY LANGUAGE", out["by_profile"]),
+                         ("BY PROJECT", out.get("by_project") or {})):
         if split:
             lines += ["", *_table([title, *head], [
                 [name, r["merged"], r["reverted"], r["caused_fix"], r["first_try"], _money(r["cost_per_ticket"])]

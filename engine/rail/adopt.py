@@ -143,21 +143,27 @@ def write_draft(branch, text):
 
 
 def gate(project, commands, base_tip, head, run):
-    """Run every check on the base and on the branch, each in a throwaway worktree after setup. Returns
-    (base results, branch results), or None when setup failed in one of them (run says where)."""
+    """Run every check on the base and on the branch, each in a throwaway worktree after setup: the setup of each
+    project the branch's change reaches, as that commit has the project, then [commands] setup. Returns (base
+    results, branch results), or None when a setup failed in one of them (run says where)."""
     found = []
+    mine = steps.reached(project, head, project.changed_files(head))
     for name, commit in (("base", base_tip), ("branch", head)):
         with steps.scratch(project, commit) as path:
-            command = project.config["commands"]["setup"]
-            if command:
-                code, output, ms = run_shell(command, path, {"RAIL_TICKET": "", "RAIL_BASE": project.base_ref},
+            here = project.layout(commit).by_name
+            setups = [(f"setup:{p['name']}", here[p["name"]]["setup"], steps.folder_of(path, here[p["name"]]))
+                      for p in mine if p["name"] in here and here[p["name"]]["setup"]]
+            if project.config["commands"]["setup"]:
+                setups.append(("setup", project.config["commands"]["setup"], path))
+            for step, command, where in setups:
+                code, output, ms = run_shell(command, where, {"RAIL_TICKET": "", "RAIL_BASE": project.base_ref},
                                              configmod.timeout(project.config, "setup"))
                 if code != 0:
                     detail = "timeout" if code is None else f"exit {code}"
-                    run.steps.append({"step": "setup", "status": "ran", "result": "fail",
+                    run.steps.append({"step": step, "status": "ran", "result": "fail",
                                       "detail": f"on the {name}: {detail}"})
-                    run.failure = ("setup", f"setup failed on the {name} ({commit[:12]}), so the checks couldn't"
-                                            f" run there:\n$ {command}\n{tail(output)}")
+                    run.failure = (step, f"{step} failed on the {name} ({commit[:12]}), so the checks couldn't"
+                                         f" run there:\n$ {command}\n{tail(output)}")
                     return None
             found.append(steps.run_checks(project, commands, path, ""))
     return found

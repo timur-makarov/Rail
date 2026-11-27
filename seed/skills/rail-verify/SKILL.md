@@ -7,8 +7,9 @@ description: Write or improve a project's verify command and a check that drives
 
 - **Assumes:** you are setting a project up for Rail (the init task), or a ticket asks you to improve how
   the project is verified.
-- **Produces:** the `[commands] verify` line in `.rail/config.toml`, and, where the product can be run, one
-  check that drives it the way a user would.
+- **Produces:** the checks in `.rail/config.toml` (a `[[projects]]` entry where a project's own commands belong
+  in the default's place or where no manifest marks the project, and `[commands] verify` for the whole
+  repository), and, where the product can be run, one check that drives it the way a user would.
 - **Done means:** you ran each part and saw it pass, and you saw each part fail on a mistake you planted
   and then removed.
 
@@ -18,14 +19,22 @@ this is where a project gains or loses the most.
 ## 1. Ask the repository, not the person
 
 Read the manifests, the CI workflows, the Makefile or task runner and the README. Use the commands the
-project already declares for tests, lint, types, a secret scan and a dependency scan. Where `rail init`
-wrote a default into `[commands]` for a part the project has no command for, keep the default and say so in
-the pull request. Beyond that, don't invent a command the project doesn't have: say it is missing, and
+project already declares for tests, lint, types, a secret scan and a dependency scan.
+
+<!-- Not tested with a model run: the next two paragraphs. -->
+Rail finds the repository's projects from its tracked manifests and gives each its language's default `setup`
+and `verify`, run in the project's folder: `rail doctor` prints them. Where a project declares its own command
+for a part, write a `[[projects]]` entry with that project's name and the `verify` or `setup` to run instead.
+Where it declares none, keep the default and say so in the pull request. Beyond that, don't invent a command the project doesn't have: say it is missing, and
 propose a ticket for it.
+
+A folder no manifest marks, such as infrastructure code, gets an entry with a new name: its `paths`, and the
+checks its kind of file has (a formatter, a validator, a linter, tests). `[commands] verify` holds only what
+belongs to the whole repository, such as the secret scan.
 
 ## 2. Show that each part bites
 
-For each part of `verify`, plant one mistake it should catch, run it, see it fail, and remove the mistake.
+For each part of each `verify`, plant one mistake it should catch, run it, see it fail, and remove the mistake.
 A check you have only seen pass may be unable to fail.
 
 ## 3. Drive the real product

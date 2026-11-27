@@ -39,6 +39,10 @@ def question(id, raised, ask, answers, find, show, once=False, at="ship", model=
     change. `once`: the fact is a line the author wrote, not what the patch does, so an answer that lets it through
     stands for the ticket's later patches too, until the contract is amended.
 
+    An answer may carry `after(project, f, q, answer, receipt)`: what the engine does once the answer stands, such as
+    a record it writes; `answer` is the fields of the `answered` event, and what it adds to `receipt` (events, journal
+    files, steps) is committed with that event. `effect` is then what the brief says the engine does.
+
     `at`: "ship" for a question about a shipped patch, which `find` raises; "cap" for the one question about a ticket
     at its retry cap, which the table raises (`find` is not called). An answer of such a type has `then` ACT, with
     `does`, the name the table reads, and `effect`, what the brief says the engine then does. `model(project)`: the
@@ -340,6 +344,8 @@ def run(project, f, receipt, q=None):
             wrong = None if a.get("optional") else "the answer names no evidence"
         fields["evidence_ok"] = not wrong
     receipt.events.append(event(t.id, "answered", **fields))
+    if not wrong and a.get("after"):
+        a["after"](project, f, q, fields, receipt)
     detail = f"{q['id']} {q['type']}: {data['answer']}"
     if wrong:
         # An answer whose evidence is not where it says is no answer: the run is started once more, as after any
@@ -641,6 +647,125 @@ question(
                         " the person has acted, the engine starts the ticket's branch again from the base branch,"
                         " because the scan fails on this branch's commits for good."}},
     _find_secret, _show_secret, once=True)
+
+
+# --- a folder inside no project -------------------------------------------------------------------
+#
+# The projects are derived from the tree, and what no project holds is checked by nothing. Each such folder is asked
+# about once: the answer is recorded in the asking ticket's coverage file, and the folder is asked about again only
+# when it gets a file of a type no answer saw (rail docs languages).
+
+SHOWN_FILES, SHOWN_HEADS, SHOWN_LINES = 60, 5, 20   # file names, files whose first lines are shown, and lines of each
+
+
+def covering(project):
+    """{folder: ticket id} for each ticket filed to cover a folder (`coverage:FOLDER`) that is not dropped."""
+    return {t.ticket.get("external_id")[len("coverage:"):]: t.id for t in project.tickets().values()
+            if t.ticket and (t.ticket.get("external_id") or "").startswith("coverage:")
+            and not t.last("dropped") and not t.dropped_mark}
+
+
+def _find_uncovered(project, f, ref, patch_id, run):
+    here = project.layout(ref)
+    loose = here.unanswered()
+    open_ = covering(project) if loose else {}
+    found = []
+    for folder, types in loose.items():
+        if folder in open_:
+            continue  # a ticket already writes its checks
+        files = here.loose(folder)
+        found.append({"key": f"{folder}: {' '.join(types)}", "folder": folder, "types": types, "files": len(files),
+                      "said": f"{len(files)} tracked file{'' if len(files) == 1 else 's'} under {folder}/"
+                              f" ({', '.join(types)}) {'is' if len(files) == 1 else 'are'} inside no project, so no"
+                              f" check reads {'it' if len(files) == 1 else 'them'}."})
+    return found
+
+
+def _show_uncovered(project, f, fact):
+    here = project.layout(f.t.ref)
+    files = here.loose(fact["folder"])
+    lines = [f"## The files under {fact['folder']}/", *[f"- {path}" for path in files[:SHOWN_FILES]]]
+    if len(files) > SHOWN_FILES:
+        lines.append(f"(and {len(files) - SHOWN_FILES} more)")
+    from .layout import file_type
+    heads = list({file_type(path): path for path in reversed(files)}.values())[:SHOWN_HEADS]  # one of each type
+    held = gitx.read_blobs([f"{f.t.ref}:{path}" for path in heads], project.root)
+    for path in sorted(heads):
+        text = held.get(f"{f.t.ref}:{path}") or ""
+        lines += ["", f"## The first lines of {path}", "```", *text.splitlines()[:SHOWN_LINES], "```"]
+    lines += ["", "## The projects the repository has",
+              *([f"- {p['name']}: {', '.join(p['paths'])}" for p in here.projects] or ["(none)"])]
+    return lines
+
+
+def _record_coverage(project, f, q, answer, receipt):
+    """Once an `uncovered` question is answered: the folder's line in the ticket's coverage file, and for
+    `needs-checks` the ticket that writes the folder's checks."""
+    from . import layout
+    fact = q.get("fact") or {}
+    folder = fact.get("folder")
+    path = layout.coverage_file(f.id)
+    text = receipt.files.get(path)
+    if text is None:
+        spec = f"{f.t.ref}:{path}"
+        text = gitx.read_blobs([spec], project.root).get(spec)
+    held = layout.read_coverage(text)
+    held[folder] = {"types": list(fact.get("types") or []), "answer": answer["answer"],
+                    "holds": answer.get("evidence") or ""}
+    if answer["answer"] == layout.NEEDS:
+        from . import cli
+        nn = cli.cover_ticket(project, folder, cover_request(folder, fact.get("types") or [], answer.get("evidence") or ""))
+        if nn:
+            held[folder]["covered_by"] = nn
+            receipt.steps.append({"step": "intake", "status": "ran", "result": "pass",
+                                  "detail": f"ticket {nn} covers {folder}"})
+    receipt.files[path] = layout.write_coverage(held)
+
+
+# Not tested with a model run: this request is what the contract writer reads when it writes the ticket.
+def cover_request(folder, types, holds):
+    """The request of the ticket that covers a folder, for the contract writer."""
+    return "\n".join([
+        f"The files under {folder}/ ({', '.join(types)}) are inside no project, so no check reads them. A run that"
+        f" looked at them judged that they need checks: {holds}".rstrip(),
+        "",
+        "Cover the folder:",
+        "- Look up the checks this kind of file has: a formatter, a validator, a linter, tests. Use the ones the"
+        " files' own tool brings before any other.",
+        f"- Write a [[projects]] entry for the folder in .rail/config.toml: `name`, `paths` (\"{folder}/**\"), `setup`"
+        " for what the checks need installed in a worktree, and `verify`, the checks. Each command runs at the"
+        " repository's root. Every tool it names has to be on the machine that runs it: [commands] provision installs"
+        " it on a cloud machine and on a CI runner.",
+        "- When the files are of a kind a revert does not undo, add the folder's path under that kind in [kinds]:"
+        " infrastructure code is `infrastructure`, a schema is `data-shape`, and so on for the kinds the config lists.",
+        "- `uses` names the projects the folder depends on, where it depends on one.",
+        "The ticket changes .rail/config.toml, so it is PERSON under `controls`: a person merges the checks for a new"
+        " kind of thing once.",
+    ])
+
+
+def _says_something(project, f, fact, evidence):
+    return None if len(evidence.strip()) >= 8 else "the answer does not say what the folder holds"
+
+
+# Not tested with a model run: the wording of this question and of its answers.
+question(
+    "uncovered",
+    "A folder holds tracked files that are inside no project, and nothing has been answered about it, or it holds a"
+    " file type the answer did not see.",
+    "These files are inside no project, so no check reads them. Does anything need checking here?",
+    {"nothing-to-check": {
+        "means": "docs, assets, data or examples: no tool checks files like these, and they take effect nowhere.",
+        "then": GO, "evidence": "what the folder holds, in a sentence.", "check": _says_something,
+        "after": _record_coverage,
+        "effect": "The engine records it, and asks about the folder again only when it gets a file of a new type."},
+     "needs-checks": {
+        "means": "code or configuration that a tool can check, or that takes effect somewhere when it is applied,"
+                 " deployed or run.",
+        "then": GO, "evidence": "what kind of thing it is, in a sentence: the language or tool, and what it does.",
+        "check": _says_something, "after": _record_coverage,
+        "effect": "The engine files a ticket that writes the folder's checks. This change is not held for it."}},
+    _find_uncovered, _show_uncovered)
 
 
 # --- a ticket at its retry cap --------------------------------------------------------------------

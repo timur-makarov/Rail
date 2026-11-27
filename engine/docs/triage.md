@@ -61,6 +61,7 @@ name and the engine's check of it.
 | `sensor-exempt` | The change adds a `SENSOR(NN): why` comment that excuses a sensor's violation | `holds` | `does-not-hold` |
 | `decided` | The ticket gains a `VERIFIED: decided, not checked:` row | `choice` | `checkable`, `contract` |
 | `secret` | The change adds a line to `.gitleaksignore` | `not-a-secret` | `secret`, which waits for a person |
+| `uncovered` | A folder holds tracked files inside no project, and nothing has been answered about it, or it has a file of a type the answer did not see | `nothing-to-check`, `needs-checks` | none |
 
 ### `old-test`: old tests run against the new code
 
@@ -78,9 +79,10 @@ the base's version of those files:
    or `timed_out` (`rail docs journal`).
 
 It runs once for a patch, so a clean rebase does not run it again, and it fails no step by itself. It runs at
-ship only, not in `rail ci`: CI repeats what can fail a ship. An empty `[tests] paths` switches it off. `rail
-init` fills the list from the language profiles (`rail docs languages`); add the files that hold the runner's
-settings, such as `vitest.config.*` or `conftest.py`, when a profile lacks them.
+ship only, not in `rail ci`: CI repeats what can fail a ship. An empty `[tests] paths` switches it off where no
+project's profile names test files either: each project of a language Rail knows brings its profile's test
+paths with it (`rail docs languages`). Add the files that hold the runner's settings, such as
+`vitest.config.*` or `conftest.py`, when a profile lacks them.
 
 A command that was green with the change's tests and is `red` with the base's raises one `old-test` question
 for the patch. The run is shown the diff of those test files, where to read the old version whole, each such
@@ -167,6 +169,22 @@ credential in any file. Another clone that still has a worktree on the old branc
 
 Checked with gitleaks 8.24.2: a line in `.gitleaksignore` takes its finding out of `gitleaks git`. Assumed, not
 verified: that a redacted finding with the lines around it is enough to tell an example from a secret.
+
+## A folder inside no project
+
+The type `uncovered` is about a folder, not about the change: a tracked file inside no project is read by no
+check (`rail docs languages`, "What no project holds"). The brief shows the folder's file names, the first
+lines of a few files and the repository's projects. Both answers let the change through, and each names what
+the folder holds:
+
+- `nothing-to-check`: docs, assets, data or examples. The engine records the answer in the ticket's
+  `.rail/journal/NN-coverage.json`, and asks about the folder again only when it gets a file of a new type.
+- `needs-checks`: code or configuration that a tool can check, or that takes effect somewhere. The engine
+  records the answer and files the ticket `coverage:FOLDER`, which is PERSON. The change is not held for it.
+
+An answer may do more than let a change through or stop it: an entry of `QUESTIONS` can name what the engine
+does once the answer is taken, as this one records the folder and files the ticket. The wording of this
+question and of the ticket's request is not tested with a model run.
 
 ## A ticket at its retry cap
 

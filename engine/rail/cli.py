@@ -120,6 +120,8 @@ def guide(project, code, action, f=None):
     from . import docs
 
     situation = GUIDED.get(code)
+    if code == "TICKET_LINT" and f and f.ticket and (f.ticket.get("external_id") or "").startswith("coverage:"):
+        situation = "setup"  # the contract of a ticket that covers a folder is a set of checks to choose
     path = project.config["guides"][situation] if situation else ""
     given = {e.get("situation") for e in f.t.events if e.get("event") == "guided"} if f else set()
     if not path or (situation == "start" and "start" in given) or (
@@ -826,6 +828,57 @@ def intake_one(project, facts, title, request, external_id, channel, trusted=Fal
     return nn
 
 
+def cover_ticket(project, folder, request):
+    """The ticket that covers a folder inside no project (rail docs languages), unless one that is not dropped is
+    there already. It is PERSON from the start: its work is in .rail/config.toml, which is the kind `controls`. Its
+    contract is the contract writer's to write. Returns its id, or None."""
+    key = f"coverage:{folder}"
+    _, facts = load(project)
+    if any(f.ticket and f.ticket.get("external_id") == key and f.state != "dropped" for f in facts.values()):
+        return None
+    quoted = "\n".join(("> " + line).rstrip() for line in request.strip().splitlines())
+    text = "\n".join(["+++", f"title = {json.dumps(f'Cover {folder} with checks')}", 'tier = "PERSON"',
+                      'scope_paths = [".rail/config.toml"]',
+                      'person_reason = "controls: .rail/config.toml holds the checks every ticket runs"',
+                      f"external_id = {json.dumps(key)}", "+++", "", "## Request", quoted, "", "## Why", "",
+                      "## Done Contract", ""])
+    nn, _, _ = create_ticket(project, text, via="intake", channel="engine", key=key)
+    return nn
+
+
+def ask_coverage(project, facts):
+    """When the base branch has moved by a commit no ticket made, and it holds a folder inside no project that
+    nothing was answered about: one ticket whose ship asks (rail docs languages). A ticket's own ship asks about
+    what that ticket adds; this is for what arrived with no ticket. Returns its id, or None."""
+    from . import triage
+    base = gitx.rev(project.base_ref, project.root)
+    seen = project.cache_read("coverage", "base")
+    if not base or seen == base:
+        return None
+    project.cache_write("coverage", "base", base)
+    span = f"{seen}..{base}" if seen and gitx.rev(seen, project.root) else base
+    bodies = gitx.out(["log", "--first-parent", "--format=%B%x1e", span], project.root).split("\x1e")
+    if seen and all(re.search(r"^Ticket: \d+", body, re.M) for body in bodies if body.strip()):
+        return None  # only tickets merged: each asked at its own ship
+    loose = project.layout(base).unanswered()
+    covered = triage.covering(project)
+    folders = [folder for folder in loose if folder not in covered]
+    asking = any(f.asks_coverage and f.state not in ("merged", "dropped") for f in facts.values())
+    if not folders or asking:
+        return None
+    text = "\n".join([
+        "+++", 'title = "Ask what the folders inside no project hold"', 'tier = "AUTO"',
+        'scope_paths = [".rail/journal/**"]', f'external_id = "coverage#{base[:12]}"', "+++", "",
+        "## Why", f"The base branch holds tracked files inside no project, under {', '.join(folders)}, and nothing has"
+                  " been answered about them, so no check reads them. They arrived with no ticket. This ticket"
+                  " changes no file of the project's: its ship asks what each folder holds, records the answers, and"
+                  " files a ticket for each folder that needs checks.", "",
+        "## Done Contract",
+        "- Check: `test -z \"$(git diff --name-only \"$RAIL_BASE\"...HEAD -- . ':(exclude).rail')\"`", ""])
+    nn, _, _ = create_ticket(project, text, via="coverage", channel="engine", key=f"coverage#{base[:12]}")
+    return nn
+
+
 SMOKE_MARK = "<!-- rail-smoke: {number} -->"   # on the brake the engine sets after a failed dev deploy
 CHAIN_MARK = "<!-- rail-smoke-chain -->"       # on the comment that says the engine files no second fix
 
@@ -1235,8 +1288,9 @@ def red_base_ticket(project, facts):
     if not red or red != gitx.rev(project.base_ref, project.root):
         return None
     output = project.cache_read("red-base", "output") or ""
-    request = f"verify fails on {project.base} at {red[:12]}:\n\n```\n{output}\n```"
-    return intake_one(project, facts, f"Make verify pass on {project.base} again", request, f"red-base#{red[:12]}",
+    step = project.cache_read("red-base", "step") or "verify"  # a project's own verify:NAME, or the repository's
+    request = f"{step} fails on {project.base} at {red[:12]}:\n\n```\n{output}\n```"
+    return intake_one(project, facts, f"Make {step} pass on {project.base} again", request, f"red-base#{red[:12]}",
                       "engine")
 
 
@@ -1328,7 +1382,7 @@ def cmd_next(project, args):
     if took_in:
         tickets, facts = load(project)
     # The engine's own brake lifts once its revert has merged; a ticket it held may go on in this same run.
-    if close_smoke_stops(project, facts) or red_base_ticket(project, facts):
+    if close_smoke_stops(project, facts) or red_base_ticket(project, facts) or ask_coverage(project, facts):
         tickets, facts = load(project)
     leftovers = cleanup(project, tickets, facts)
     explicit = requested(project, args)
@@ -1797,7 +1851,10 @@ def cmd_context(project, args):
         t = project.find(key, tickets)
         scope = t.ticket.scope if t.ticket else []
         found = areas.context(project, t.ref or project.base_ref, scope)
-        return answer(t.id, code="CONTEXT", history=history.of(project, scope, skip=t.id), **found)
+        # The projects the ticket's scope reaches, each with the commands its ship runs (rail docs languages).
+        mine = [{"name": p["name"], "paths": p["paths"], "uses": p["uses"], "setup": p["setup"], "verify": p["verify"]}
+                for p in steps.in_scope(project, t.ref or project.base_ref, scope)] if scope else []
+        return answer(t.id, code="CONTEXT", history=history.of(project, scope, skip=t.id), projects=mine, **found)
     return answer(code="CONTEXT", **areas.context(project, project.base_ref))
 
 
@@ -1952,7 +2009,7 @@ def init_task(project):
         return None
     from .init import found_line
     found = {"cloud": cloud(), "base": project.base, "depth": project.config["map"]["depth"],
-             "tools": tools.found_line(project.root), "profiles": found_line(project.config)}
+             "tools": tools.found_line(project.root), "projects": found_line(project.layout().projects)}
     action = {"kind": "agent_task", "brief": render_brief("INIT_TASK", found), "facts": found}
     named = guide(project, "INIT_TASK", action)  # no ticket, so no event
     return answer(owner="agent", code="INIT_TASK", action=action, cwd=".", **({"guide": named} if named else {}))
@@ -2326,6 +2383,17 @@ def cmd_doctor(project, args):
                   owner="none" if not missing else "person", steps_=doctor.as_steps(found))
 
 
+def ci_setup(project, nn, head, changed, run):
+    """On a CI runner: setup for the projects the pull request's diff reaches, then [commands] setup. The set is
+    worked out from the diff against the base, as a ship works it out, so the one check `rail` runs what the ship
+    ran. False when a setup failed."""
+    project.use_trees(head)
+    if not steps.setup_projects(project, nn, project.root, steps.reached(project, head, changed), run):
+        return False
+    command = project.config["commands"]["setup"]
+    return not command or steps.run_command(project, project.root, nn, "setup", command, run)
+
+
 def cmd_ci(project, args):
     """The `rail` check: the ship checks again, on the PR head. It writes nothing."""
     from .state import raised_tier
@@ -2345,13 +2413,8 @@ def cmd_ci(project, args):
     if text is None:
         # A PR with no ticket: the rail init PR, Dependabot, a person's own PR.
         tier, _ = raised_tier(project, changed)
-        verify = project.config["commands"]["verify"]
-        if project.config["commands"]["setup"]:
-            steps.run_command(project, project.root, "", "setup", project.config["commands"]["setup"], run)
-        if run.ok and verify:
-            steps.run_command(project, project.root, "", "verify", verify, run)
-        elif not verify:
-            run.not_run("verify")
+        if ci_setup(project, "", head, changed, run):
+            steps.verify(project, "", head, project.root, changed, run)
         brief = f"No ticket on branch {branch}. Its paths would make it {tier}."
         if not run.ok:  # the run's log is all a person has of this failure: no ticket's journal records it
             brief += f"\nFailed at '{run.failure[0]}':\n{run.failure[1]}{tools.ci_note(project)}"
@@ -2364,8 +2427,7 @@ def cmd_ci(project, args):
     if not run.record("shipped", bool(shipped), patch_id, None if shipped else "not shipped yet",
                       output="The ticket hasn't shipped this patch: run rail advance in its worktree."):
         return answer(nn, code="CI_FAIL", action={"kind": "rest", "brief": "not shipped yet"}, steps_=run.steps)
-    if project.config["commands"]["setup"]:
-        steps.run_command(project, project.root, nn, "setup", project.config["commands"]["setup"], run)
+    ci_setup(project, nn, head, changed, run)
     # A reviewer may have raised the tier after this ship.
     tier = highest(shipped[-1].get("tier", "AUTO"), *[e.get("to") for e in events if e.get("event") == "tier_raised"])
     accepted = [e for e in events if e.get("event") == "accepted"]

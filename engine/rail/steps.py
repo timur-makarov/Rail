@@ -13,7 +13,8 @@ from .project import PRODUCT_SPEC, event, events_path, ticket_path
 from .state import raised_tier
 from .util import cloud
 from .ticket import Ticket, lint, rank
-from .util import MISSING_HELP, NOT_COUNTED, could_not_run, match_any, minutes_since, run_shell, tail, tried_help
+from .util import (MISSING_HELP, NOT_COUNTED, could_not_run, family, match_any, minutes_since, run_shell, tail,
+                   tried_help)
 
 # A step's status: it ran and passed or failed, or the shell could not start its command (could_not_run, a failure
 # that checked nothing). A ship step that could not run counts as no attempt: twice in a row it waits for a person.
@@ -147,12 +148,66 @@ def copy_includes(project, path):
                     shutil.copy2(src, dest)
 
 
+def reached(project, ref, files):
+    """The projects of the branch a change of these files reaches, a project before the projects that use it (rail
+    docs languages). They are derived now, from the base branch's tree and from the branch's."""
+    from . import layout
+    branch = project.layout(ref)
+    base = project.layout(project.base_ref) if gitx.rev(project.base_ref, project.root) else branch
+    return [branch.by_name[name] for name in layout.reach(branch, base, files)]
+
+
+def in_scope(project, ref, scope):
+    """The projects a ticket's scope_paths reach: those the files of the branch that the scope names reach."""
+    return reached(project, ref, [p for p in project.layout(ref).tree.files if match_any(scope, p)])
+
+
+def folder_of(cwd, p):
+    """Where a project's commands run: its folder, or the repository's root for one an entry declares."""
+    return os.path.join(cwd, p["folder"]) if p["folder"] else cwd
+
+
+def _set_up(cwd):
+    """(the file that says which projects were set up in this checkout, what it holds): {project: its setup
+    command}. It is in the checkout's own git folder, so it goes when the worktree does."""
+    import json
+    path = os.path.join(gitx.out(["rev-parse", "--absolute-git-dir"], cwd), "rail-setup.json")
+    try:
+        with open(path) as f:
+            return path, json.load(f)
+    except (OSError, ValueError):
+        return path, {}
+
+
+def setup_projects(project, nn, cwd, projects, run):
+    """`setup` for each of these projects that this checkout has not set up yet, each its own step `setup:NAME` in
+    the project's folder. False when one failed."""
+    import json
+    path, done = _set_up(cwd)
+    for p in projects:
+        if not p["setup"] or done.get(p["name"]) == p["setup"]:
+            continue
+        if not run_command(project, folder_of(cwd, p), nn, f"setup:{p['name']}", p["setup"], run):
+            return False
+        done[p["name"]] = p["setup"]
+        with open(path, "w") as f:
+            json.dump(done, f)
+    return True
+
+
 def setup(project, t, run, cwd=None):
+    """At a claim: setup for the projects the ticket's scope reaches, then [commands] setup, which holds what
+    belongs to the whole repository. A project the change first reaches at ship is set up then."""
+    wt = cwd or t.worktree
+    scope = t.ticket.scope if getattr(t, "ticket", None) else []
+    if not setup_projects(project, t.id, wt, in_scope(project, t.ref, scope) if scope else [], run):
+        return False
     command = project.config["commands"]["setup"]
     if not command:
-        run.not_run("setup")
+        if not any(family(s["step"]) == "setup" for s in run.steps):
+            run.not_run("setup")
         return True
-    return run_command(project, cwd or t.worktree, t.id, "setup", command, run)
+    return run_command(project, wt, t.id, "setup", command, run)
 
 
 def base_checks(project, t):
@@ -227,13 +282,16 @@ def base_tests(project, t, ticket, ref, patch_id):
     wt, env = t.worktree, {"RAIL_TICKET": t.id, "RAIL_BASE": project.base_ref}
     head, base = gitx.rev(ref, project.root), gitx.rev(project.base_ref, project.root)
     verify = project.config["commands"]["verify"]
-    commands = ([("verify", verify, configmod.timeout(project.config, "verify"))] if verify else []) \
-        + [("checks", command, project.config["commands"]["timeout_secs"]) for command in ticket.checks()]
+    limit = configmod.timeout(project.config, "verify")
+    commands = [(f"verify:{p['name']}", p["verify"], limit, folder_of(wt, p))
+                for p in reached(project, ref, project.changed_files(ref)) if p["verify"]] \
+        + ([("verify", verify, limit, wt)] if verify else []) \
+        + [("checks", command, project.config["commands"]["timeout_secs"], wt) for command in ticket.checks()]
     try:
         gitx.git(["checkout", "--quiet", base, "--", *files], wt)
         results = []
-        for step, command, timeout in commands:
-            code, output, _ = run_shell(command, wt, env, timeout)
+        for step, command, timeout, where in commands:
+            code, output, _ = run_shell(command, where, env, timeout)
             result = "timed_out" if code is None else "could_not_run" if could_not_run(code) else \
                 "green" if code == 0 else "red"
             results.append({"step": step, "command": command, "result": result,
@@ -344,12 +402,8 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
                           output="ARCHITECTURE.md:\n" + "\n".join(f"- {p}" for p in problems)):
             return _stop(run, "doc-lint")
 
-    verify = project.config["commands"]["verify"]
-    if verify:
-        if not run_command(project, cwd, nn, "verify", verify, run, patch_id, again=again):
-            return _stop(run, "verify")
-    else:
-        run.not_run("verify")
+    if not verify(project, nn, ref, cwd, changed, run, patch_id, again):
+        return _stop(run, "verify")
 
     if ticket.get("kind") == "revert":
         # No Check: lines: the change is compared with the reverse of the reverted ticket's change.
@@ -367,14 +421,44 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
     return tier
 
 
-def base_fails_verify(project):
-    """Run verify once more on the base branch, in a scratch worktree. Returns its output when it fails there too."""
+def verify(project, nn, ref, cwd, changed, run, patch_id=None, again=False):
+    """Each project the change reaches runs its own verify, in its folder, as a step of its own (`verify:NAME`),
+    after its setup where this checkout has not set it up. Then [commands] verify, which holds what belongs to the
+    whole repository. False at the first that fails; what was left is recorded as not run."""
+    whole = project.config["commands"]["verify"]
+    mine = reached(project, ref, changed)
+    for n, p in enumerate(mine):
+        rest = [f"verify:{q['name']}" for q in mine[n + 1:] if q["verify"]] + (["verify"] if whole else [])
+        if not setup_projects(project, nn, cwd, [p], run):
+            run.not_run(*([f"verify:{p['name']}"] if p["verify"] else []), *rest)
+            return False
+        if p["verify"] and not run_command(project, folder_of(cwd, p), nn, f"verify:{p['name']}", p["verify"], run,
+                                           patch_id, again=again):
+            run.not_run(*rest)
+            return False
+    if whole:
+        return run_command(project, cwd, nn, "verify", whole, run, patch_id, again=again)
+    if not any(p["verify"] for p in mine):
+        run.not_run("verify")
+    return True
+
+
+def base_fails_verify(project, step="verify"):
+    """Run the verify that failed once more on the base branch, in a scratch worktree: [commands] verify, or the
+    verify of the project a step `verify:NAME` names, as the base has that project. Returns its output when it
+    fails there too. A project the base does not have cannot fail there."""
+    setup, verify, folder = project.config["commands"]["setup"], project.config["commands"]["verify"], ""
+    if step != "verify":
+        p = project.layout(project.base_ref).by_name.get(step.split(":", 1)[1])
+        if not p or not p["verify"]:
+            return None
+        setup, verify, folder = p["setup"], p["verify"], p["folder"] or ""
     with scratch(project, gitx.rev(project.base_ref, project.root)) as path:
-        if project.config["commands"]["setup"]:
-            run_shell(project.config["commands"]["setup"], path, {"RAIL_TICKET": ""},
-                      configmod.timeout(project.config, "setup"))
-        code, output, _ = run_shell(project.config["commands"]["verify"], path, {"RAIL_TICKET": ""},
-                                    configmod.timeout(project.config, "verify"))
+        where = os.path.join(path, folder) if folder else path
+        env = {"RAIL_TICKET": "", "RAIL_BASE": project.base_ref}
+        if setup:
+            run_shell(setup, where, env, configmod.timeout(project.config, "setup"))
+        code, output, _ = run_shell(verify, where, env, configmod.timeout(project.config, "verify"))
         # verify that can't start on the base proves nothing about the base: the ticket's own failure stands
         if code is None or code == 0 or could_not_run(code):  # None: it timed out, which proves nothing either
             return None
@@ -406,6 +490,7 @@ def ship(project, f, run):
         run.rebased = True
         run.record("rebase", True, project.patch_id(ref), f"onto {project.base}")
 
+    project.use_trees(ref)  # a manifest the change adds is a project in its own ship, with its profile's rules and paths
     patch_id = project.patch_id(ref)
     text = gitx.read_blobs([f"{ref}:{ticket_path(t.id)}"], project.root)[f"{ref}:{ticket_path(t.id)}"]
     tier = check(project, t.id, Ticket(text or ""), ref, wt, f.tier, run, patch_id, accepted=f.accepted,
@@ -415,30 +500,34 @@ def ship(project, f, run):
         # A failure that may be the machine's costs no attempt; the second in a row waits for a person (TOOL_DOWN).
         if last.get("status") == "could_not_run":
             last["counted"] = False  # the shell could not start the command: nothing was checked
-        elif run.failure[0] in ("verify", "checks", "sensors"):
+        elif family(run.failure[0]) in ("verify", "checks", "sensors"):
             down = tools.down(project)
             if down:  # a declared tool is out of reach: the check may have failed for that alone
                 last["counted"], last["tools_down"] = False, down
                 run.failure = (run.failure[0], f"{run.failure[1]}\n\nA tool the project declares is out of reach"
                                                f" ({tools.down_said(down)}). {tools.DOWN_HELP}")
-    if (tier is None and run.failure and run.failure[0] == "verify" and last.get("status") != "could_not_run"
+    if (tier is None and run.failure and family(run.failure[0]) == "verify" and last.get("status") != "could_not_run"
             and not last.get("tools_down")):
         # A red base spends no budget: two tickets that each pass can break main together. A verify that could
         # not start is the machine's lack, not the base's: it is never taken for a red base.
-        red = base_fails_verify(project)
+        failed = run.failure[0]
+        red = base_fails_verify(project, failed)
         if red:
             run.events[-1]["counted"] = False
             run.events[-1]["detail"] = "red base"
-            [s for s in run.steps if s["step"] == "verify"][-1]["detail"] = "red base"
+            [s for s in run.steps if s["step"] == failed][-1]["detail"] = "red base"
             project.cache_write("red-base", "base", gitx.rev(project.base_ref, project.root))
             project.cache_write("red-base", "output", red)
-            run.failure = ("verify", "verify fails on the base branch too, so this attempt doesn't count. rail next"
-                                     " opens one ticket that fixes the base; this ticket's ship waits until it merges.")
+            project.cache_write("red-base", "step", failed)
+            run.failure = (failed, f"{failed} fails on the base branch too, so this attempt doesn't count. rail next"
+                                   " opens one ticket that fixes the base; this ticket's ship waits until it merges.")
     if tier is None:
         return run
     # Every check passed and no file changed: the checks passed before the ticket too, so there is nothing to ship
-    # or merge. A sweep ticket is the one exception: it merges to move the sweep's marker.
-    if not project.changed_files(ref) and not (f.ticket.get("external_id") or "").startswith("sweep#"):
+    # or merge.
+    # A sweep ticket is the one exception: it merges to move the sweep's marker. So is the ticket that asks about
+    # the folders inside no project, whose ship is the asking.
+    if not project.changed_files(ref) and not (f.ticket.get("external_id") or "").startswith(("sweep#", "coverage#")):
         run.record("change", False, patch_id, "no file changed",
                    output=f"Ticket {t.id} changes no file, so there is nothing to ship. If the work is already on the"
                           f" base branch, say so and close the ticket: rail drop {t.id} --reason \"already done:"

@@ -10,6 +10,7 @@ stores state. Never edit it by hand: the guard denies it.
 | `NN-review.json` | The review runs: each run's findings as the reviewer wrote them |
 | `NN-advice.md` | What consult advised, one section per consult |
 | `NN-summary.md` | A sweep ticket only: what the sweep found |
+| `NN-coverage.json` | Only where the ticket's ship was answered about a folder inside no project: `{folder: {types, answer, holds, covered_by}}` (`rail docs languages`) |
 
 ## Events: `NN-events.jsonl`
 

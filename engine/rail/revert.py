@@ -80,7 +80,7 @@ def apply(project, sha, cwd):
 
 def failed_verify(events, patch_id):
     """Whether verify has failed on this very patch: the exact reverse was tried, and the project doesn't hold with it."""
-    return any(e.get("event") == "step" and e.get("step") == "verify" and e.get("result") == "fail"
+    return any(e.get("event") == "step" and (e.get("step") or "").split(":")[0] == "verify" and e.get("result") == "fail"
                and e.get("patch_id") == patch_id for e in events)
 
 

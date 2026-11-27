@@ -130,188 +130,64 @@ Assumed, not verified:
 
 ### 7. Projects within a repository
 
-Size: L.
+Built (`rail docs languages`): Rail works the repository's projects out from the tracked manifests of the tree in
+front of it, each time it needs them, and a ticket sets up and checks only the projects its change reaches.
+uv, pnpm and Cargo workspaces and `go.work` give one project for each member, with the members' dependencies on
+each other as `uses`. `[[projects]]` took the place of `[[profiles]]` and holds only what can't be derived. A
+folder inside no project raises the triage question `uncovered` once, and `needs-checks` files a PERSON ticket
+that writes its checks. The reason: a check that runs once, at `rail init`, cannot follow what is put into a
+repository later, and one `verify` for the whole repository ran every project's checks for a change of one line.
+The owner's rule (2026-11-27): anything may be put into a repository, and Rail drives what needs driving.
 
-**What it does.** One repository may hold several projects: services, apps, libraries and infrastructure, in one
-language or several. Rail works out which they are from the tree in front of it, every time, and a ticket then
-sets up and checks only the projects its change reaches. Whatever is added to the repository later, by a ticket
-or by a person, is found the same way, and what no check reads is stated as a fact and raises a question. The
-shape the owner has in mind is a backend, three workers, a frontend and infrastructure in one repository, and
-one repository for each team.
+Settled while building, and not on this page before:
 
-The owner's rule (2026-11-27): anything may be put into a repository, and Rail drives what needs driving. A
-check that runs once, at `rail init`, cannot do that, so nothing here depends on init.
+- The profiles moved into the engine (`engine/profiles/`), because a project's copy of the engine has to read
+  them on every call.
+- A derived project's commands run in its folder; a project that an entry declares runs its commands at the
+  repository's root.
+- Two languages' manifests in one folder give two projects, `FOLDER-python` and `FOLDER-typescript`.
+- The answers about uncovered folders are in one file for each ticket that was answered
+  (`.rail/journal/NN-coverage.json`), not in one shared file: two tickets that were both answered would have
+  changed the same file and met at a rebase.
+- When the base has moved by a commit no ticket made, the engine files a ticket that changes no file of the
+  project's, and that ticket's ship asks (`ASK_COVERAGE`): a question belongs to a ticket's journal.
+- Every ticket that ships while a folder is unanswered asks about it, so two tickets at work at the same time
+  each ask once.
+- `rail init` writes one command into a new config: the secret scan, as `[commands] verify`.
 
-Tried on 2026-11-27 with today's `rail init`, on a tree with a backend, three workers and a shared library in
-Python, a TypeScript frontend and a Terraform folder. It wrote one `setup` of six installs and one `verify` of
-2,649 characters with about 26 checks in a row, so a change of one line in one worker runs all of them. It wrote
-no check for the Terraform folder. A manifest added after init is named by `rail doctor` and the sweep and
-checked by nothing until a ticket edits the config; a folder with no manifest is noticed by nothing.
+Left:
 
-**How.**
+- **The wording** of the `uncovered` question and its answers, of the coverage ticket's request, of the
+  reviewer's section on files no check read, of the sweep's line on kind paths, of the init task's first step
+  and of the two paragraphs on projects in the `rail-verify` skill is a first wording, marked as not tested
+  where it is written. It waits for the owner to restart the model tests.
+- **A workspace member's commands on a machine with every toolchain.** Rail's tests run a uv workspace's and a
+  pnpm workspace's members and a Cargo workspace's members with the real tools. Not run: the modules of a
+  `go.work`, any audit, and a planted mistake for a member's command (**Language fixtures checked on a machine
+  with every toolchain**).
+- **A profile for anything but the four languages.** What a Terraform folder or any other new kind of thing
+  needs is looked up by an agent the first time it appears and written into `[[projects]]` once.
+- **Not built:** a task graph or a build cache of Rail's own; a required check for each project; a release for
+  each project (**Release tickets** waits for a deploy target); the projects' checks run side by side, until
+  the time per step in `rail stats` asks for it.
 
-- **Projects are derived, each time they are needed.** The engine reads the tracked manifests of the tree it
-  works on: one project for each folder a manifest marks, named after its folder (`workers/billing`; `root` for
-  the repository's root), with the language profile's `setup` and `verify` run in that folder. The detection is
-  `detect` in `engine/rail/init.py`, which the `languages` line of `rail doctor` already runs on every call. A
-  ticket that adds a manifest is set up and checked as a project in its own ship, with no change to the config.
-  What a profile brings besides the commands (its rules, test paths, migration paths and generated files)
-  applies to the paths of each project of that profile, with nothing written. `rail init` writes no entry for a
-  project.
-- **`[[projects]]` holds only what can't be derived**, and takes the place of `[[profiles]]` in
-  `.rail/config.toml`. An entry either names a derived project and changes its `paths`, `setup`, `verify` or
-  `uses`, or declares a project no manifest marks: `name`, `paths`, `setup`, `verify`, `uses`. A repository with
-  one manifest at its root and no entry has one project, `root`, with the paths `**`.
-- **The base and the branch together.** At a ship the projects are derived from the base and from the branch. A
-  change that removes a manifest and keeps the code leaves that code in no project, which the next point states;
-  it does not quietly lose its checks.
-- **What nothing covers is a fact.** At each ship, and at `rail next` when the base branch has moved by a commit
-  no ticket made, the engine lists the tracked files inside no project, by folder and file type. Left out: files
-  at the repository's root, the folders Rail and the host own (`.rail/`, `.claude/`, `.github/`), and the
-  vendored, installed and built folders detection already skips. The reviewer's brief names the uncovered files
-  of the change it reviews.
-- **An uncovered folder raises a question, once.** A question type `uncovered` of **The triage step**, for a
-  folder and its set of file types. The brief shows the folder's file names and the first lines of a few files.
-  The answers:
-
-  | Answer | Evidence | What the engine does |
-  |---|---|---|
-  | `nothing-to-check`: docs, assets, data, examples | What the folder holds | Records it in `.rail/journal/coverage.json`, which only the engine writes. The folder is asked about again only when its file types change |
-  | `needs-checks`: code or configuration that a tool can check, or that takes effect somewhere | What kind of thing it is | Files a ticket, below |
-
-- **The ticket that covers a folder.** Filed by the engine with the id `coverage:FOLDER`, written by the
-  contract writer's model with `rail-verify`. Its work: look up the checks this kind of file has (a formatter, a
-  validator, a linter, tests), write the `[[projects]]` entry with them, and add the folder's path under its
-  kind in `[kinds]` when it is of a kind, as a Terraform folder is `infrastructure`. It edits
-  `.rail/config.toml`, so it is PERSON under `controls`: a person merges the gates for a new kind of thing once.
-- **Until that ticket merges** the folder's files are checked by nothing, and the change that added them is not
-  held for it: the reviewer sees them named, and names their kind, which makes the change PERSON without any
-  path (`rail docs kinds`, "The reviewer").
-- **Kind paths follow what reviewers find.** When a reviewer names a kind on a file that no `[kinds]` path
-  matches, the engine records the file and the kind. The folder's coverage ticket adds the path; where there is
-  none, the sweep files a ticket that does.
-- **What stays for the whole repository.** `[commands] setup` and `verify` hold only what belongs to the whole
-  repository, such as the secret scan over the branch's commits, and they run after the projects' own.
-- **What a change reaches.** The projects whose `paths` match a changed file, and every project that uses one of
-  them, followed through `uses` to the end. A changed file inside no project reaches every project: a root
-  manifest, a CI workflow, `.rail/config.toml`. A lockfile at a workspace's root reaches the members of that
-  workspace and no project outside it.
-- **Where the set is used.** At claim, `setup` runs for the projects the ticket's `scope_paths` reach. At ship
-  and in CI, `verify` runs for the projects the changed files reach, after `setup` for any of them the claim did
-  not set up. Each run is its own step, named `verify:NAME`, in the receipts and the journal, so retries, flaky
-  checks and time are counted for each project.
-- **One required check.** `rail ci` works the same set out from the pull request's diff against the base, so the
-  check GitHub requires stays the one check `rail`. No workflow uses a path filter: a required check that a path
-  filter skips never reports, and the pull request then waits for good.
-- **Where `uses` comes from.** A dependency in code is derived with the projects, from the workspace's own
-  files, read and not run: the members of a uv workspace and their workspace sources, the `workspace:`
-  dependencies of a pnpm workspace, the path dependencies of a Cargo workspace, the modules of a `go.work`. A
-  dependency no import shows, such as a frontend that calls the backend's API, is an entry in `[[projects]]`.
-  The next section, **Workspace layouts**, is that detection and the commands, and is built in this step.
-- **What `uses` does not do.** It decides which checks run. Whether the frontend still works against a changed
-  backend is shown only by a check that drives both (**Driving the real product**). A shape two services share,
-  such as a queue message or a database schema, is the kind `data-shape` and makes its ticket PERSON, as today.
-- **A repository with its own task graph.** Where Nx, Turborepo, Bazel or Pants already works out what a change
-  affects, an entry makes the workspace one project whose `verify` calls that tool with `$RAIL_BASE`.
-- **Printed, because it is not written.** `rail doctor` prints the projects as derived: name, paths, profile,
-  `uses` and commands, with the entries of `[[projects]]` marked. Its `languages` line becomes `coverage`: the
-  folders that are uncovered and not yet answered. `rail context NN` names the projects the ticket reaches and
-  their commands.
-- **Checks on the table.** The config check refuses a `[[projects]]` entry whose `uses` names no project, and a
-  cycle.
-- **Numbers.** `rail stats` gains a split by project beside the splits by worker and by language, with groups
-  under five summed into `other`.
-- **Docs.** `rail docs languages` (its section "A language added later" goes), `rail docs config`, `rail docs
-  triage`, the init task's brief, and the seed config.
-
-The areas map is a different thing and stays as it is: `## Areas` says, in a bug reporter's words, what lives
-where, for people and for routing. It gets no column for which area may use which (dropped, 2026-11-27): `uses`
-is the only graph. A package manager refuses most imports of a project that is not declared as a dependency, and
-a boundary inside one project is a rule of that language's sensor (**Sensor sets per language**).
-
-**Not built.** A profile for anything but the four languages: what a Terraform folder or any other new kind of
-thing needs is looked up by an agent the first time it appears and written into `[[projects]]` once. A task
-graph or a build cache of Rail's own. A required check for each project. A release for each project (**Release
-tickets** waits for a deploy target). The projects' checks run side by side, until the time per step in `rail
-stats` asks for it.
-
-**Kept when.**
-
-- Gate cases, no model, with the stand-in for the triage run, on a fixture with a Python service, a TypeScript
-  app and a library both use:
-  - with no `[[projects]]` entry, a change in the app runs the app's `setup` and `verify` only; a change in the
-    library runs the library's and both users'; a change to a root file runs all; `rail ci` on the same diff
-    runs the same set as the ship did;
-  - a ticket that adds a fourth folder with a manifest is set up and checked as a project in its own ship, and
-    the config is unchanged;
-  - a ticket that adds a Terraform folder raises one `uncovered` question; answered `needs-checks`, a ticket
-    `coverage:infra` is filed and is PERSON; answered `nothing-to-check`, the folder is not asked about on the
-    next ship, and is asked about again when a file of a new type is added to it;
-  - a commit on the base that no ticket made, adding an uncovered folder, raises the question at the next `rail
-    next`;
-  - a change that removes a manifest and keeps the code raises the question for that folder;
-  - an entry in `[[projects]]` replaces a derived project's `verify`, and one with `uses` makes a change in the
-    used project run the user's checks; an entry whose `uses` names no project, and a cycle, are refused;
-  - `rail doctor` prints the derived projects and the uncovered folders.
-  Kept when every case behaves as written.
-- The same fixture from `rail init` to a merged ticket with the real toolchains, as the language tests run their
-  projects (`python3 tests/run.py --languages`).
-
-**Waits for.** **The triage step**. The fixture's audit and type checks need the tools on the machine
-(**Provision lines and toolchain pins per language**). The wording of the `uncovered` brief and of the coverage
-ticket is not tested with a model until the owner restarts the model tests.
-
-**Open decision.** None. The ticket's `scope_paths` decide `setup` at claim, and a project the change first
-reaches at ship is set up then (owner, 2026-11-27).
-
-**Assumed, not verified.**
+Assumed, not verified:
 
 - That GitHub leaves a pull request waiting when a required check is skipped by a path filter. Its documentation
   says so; not tried here.
 - That each workspace tool keeps its members' dependencies on each other in files Rail can read without running
-  the tool.
+  the tool. The readers take the common spellings: a `pnpm-workspace.yaml` is read for its `packages` list
+  only, not as YAML.
 - That each package manager refuses an import from a project that is not a declared dependency. A uv workspace
   synced with every package in one environment does not.
-- That deriving the projects on every call is fast enough on a large tree. `detect` walks the tracked files
-  once; not timed.
+- That deriving the projects on every call is fast enough on a large tree. The tracked files are walked once
+  for each tree; not timed.
 - That an agent finds the right checks for a kind of file it has not seen in the repository before. The person's
   merge of the coverage ticket is where a wrong set is caught.
 - That many tickets changing one lockfile at a workspace's root will not make claims rest on each other too
   often. `rail stats` shows the time a ticket rests; **Claims by changed files** is the answer if it does.
-
-#### Workspace layouts
-
-Size: M.
-
-**What it does.** The detection recognises uv workspaces, pnpm workspaces, Cargo workspaces and `go.work`,
-derives one project for each member with commands that name the member, and reads the members' dependencies on
-each other into `uses`. Reason: today `uv sync --locked` at a uv workspace's root syncs the root package only,
-and a `go.work` repository is read as one profile for each folder that holds a `go.mod`, with nothing between
-them.
-
-**How.**
-
-- Already built, so not described here: manifests below the root are found with the folders that hold them; a
-  nested manifest inside another's folder counts for the top-most folder only; each part of `verify` and `setup`
-  runs in its folder (`(cd web && pnpm test)`).
-- A member's commands name it: `uv sync --locked --package NAME`, `pnpm --filter NAME`, `cargo test --locked -p
-  NAME`, and `go test ./...` in the module's folder. All not checked.
-- No filter for packages changed since the base is written into any command: the set a change reaches does that
-  work for every language.
-- Files that change: `profiles/*/profile.toml`, `engine/rail/init.py`, `engine/docs/languages.md`,
-  `tests/test_languages.py`.
-
-**Kept when.** Gate cases, no model, no toolchains, on fixture trees: a tree with a `pnpm-workspace.yaml`, one
-with `go.work`, one with a uv workspace and one with a Cargo workspace each give one project for each member,
-the member's commands, and `uses` as the workspace's files say. Kept when every case behaves as written. The
-commands themselves are checked on a machine with the toolchains (**Language fixtures checked on a machine with
-every toolchain**).
-
-**Waits for.** Nothing.
-
-**Assumed, not verified.**
-
-- That the commands above behave as written: not checked.
+- That the carrier ticket for a moved base is rare enough to be no noise: it is filed only when a folder is
+  unanswered.
 
 ### 8. The sweep reads more
 
@@ -673,7 +549,7 @@ project has a web surface (inferred).
 
 - The Go and Rust `profile.toml` provision adds Node when the project has a web surface. How init detects a
   web surface is not settled; the per-surface recipes in `rail-verify` own the surfaces.
-- Files: `profiles/go/profile.toml`, `profiles/rust/profile.toml`, `engine/rail/init.py`.
+- Files: `engine/profiles/go/profile.toml`, `engine/profiles/rust/profile.toml`, `engine/rail/init.py`.
 
 **Kept when.** Checked with the fixtures: a Go or Rust fixture with a web surface gets Node in `provision`,
 and its Playwright driving check passes and fails when the behaviour it drives is broken (**Language fixtures
@@ -812,7 +688,7 @@ language-neutral; a choice that makes one of the four worse for the sake of neut
 
 **How.**
 
-- Each profile's `profile.toml` (`profiles/LANG/profile.toml`) gains what installs its tools, and `rail init`
+- Each profile's `profile.toml` (`engine/profiles/LANG/profile.toml`) gains what installs its tools, and `rail init`
   writes it into a new config's `[commands] provision` (`engine/rail/init.py`). Init never writes a
   `provision` into an existing config. The profile's tools (ruff, basedpyright, pip-audit, oxlint, cargo-deny,
   golangci-lint, govulncheck, gitleaks) get one install line each, pinned to a version. Every line is not
@@ -841,7 +717,7 @@ language-neutral; a choice that makes one of the four worse for the sake of neut
   A missing tool on a cloud machine points at `provision`; on a person's machine it names the install, which
   is the person's to run. Each profile tool could be a declared `[tools.NAME]` with its own probe (`rail docs
   tools`); until then doctor checks `command -v`.
-- Files that change: `profiles/{python,typescript,rust,go}/profile.toml`; `engine/rail/init.py` (`provision`
+- Files that change: `engine/profiles/{python,typescript,rust,go}/profile.toml`; `engine/rail/init.py` (`provision`
   written into a new config; the Python `--no-build`); `engine/rail/doctor.py`; `engine/docs/languages.md`;
   `CHANGELOG.md`; `proposals`-side pointer is not needed once the page is merged into the feature list.
 
@@ -1080,7 +956,7 @@ or value for agent pull requests; mutation-style checks rejected about 20% of "s
   `$RAIL_BASE`, runs the tool, reads its report and prints the line. Mutants that do not build are left out of
   all three counts. With no changed source file it prints zeros without running the tool. Each profile
   proposes the wrapper as its `[commands] mutation` default. Each tool's report format is not checked.
-  `profiles/LANG/profile.toml` holds the wrapper beside the provision lines; `engine/docs/languages.md` lists
+  `engine/profiles/LANG/profile.toml` holds the wrapper beside the provision lines; `engine/docs/languages.md` lists
   each.
 
   | | Python | TypeScript | Rust | Go |
@@ -1150,7 +1026,7 @@ builds wait on Cargo's lock on that folder (not checked).
 **How.**
 
 - Measure first. If Rust `setup` and `verify` dominate the time per ticket (`rail stats`, "WHERE THE TIME
-  GOES"), the Rust profile adds a compiler cache (sccache) to `provision` (`profiles/rust/profile.toml`,
+  GOES"), the Rust profile adds a compiler cache (sccache) to `provision` (`engine/profiles/rust/profile.toml`,
   `engine/docs/languages.md`).
 - No shared `CARGO_TARGET_DIR`.
 

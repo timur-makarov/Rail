@@ -1,8 +1,9 @@
-# What every language profile shares. Read by rail init (rail docs languages); never copied into a project.
+# What every language profile shares. The engine reads it when it derives the projects (rail docs languages).
 
 # Folders whose manifests mark no language of the project's own: vendored, installed or built code. A manifest
 # with one of these anywhere in its path is skipped.
 ignore = ["node_modules", "vendor", "target", ".venv", "dist"]
 
-# The secret scan every profile's verify ends with: the branch's own commits, never the whole history.
+# The secret scan rail init writes into [commands] verify, which runs after the projects' own checks: the
+# branch's own commits, never the whole history.
 secrets = { part = "secrets", tool = "gitleaks", run = 'gitleaks git --no-banner --redact -v --log-opts="$RAIL_BASE..HEAD"' }

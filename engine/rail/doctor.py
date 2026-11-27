@@ -125,11 +125,19 @@ def checks(project):
         found.append(("guides", not gone, f"the {len(guides)} pages [guides] names are there" if not gone else
                       f"[guides] names pages or sections that aren't there, so no brief carries them:"
                       f" {', '.join(gone)}"))
-    from . import init
-    bare = init.unprofiled(init.tracked_files(root), project.config)
-    if bare or project.config["profiles"]:
-        found.append(("languages", not bare, "every tracked manifest is covered by a [[profiles]] entry" if not bare
-                      else init.uncovered(bare)))
+    # The projects are not written anywhere, so they are printed: as the engine derives them from the files this
+    # checkout tracks, each with its paths, what it uses and its commands.
+    here = project.layout()
+    for p in here.projects:
+        found.append((f"project {p['name']}", True, project_line(p)))
+    if not here.projects:
+        found.append(("projects", True, "no tracked manifest marks a project and [[projects]] declares none: only"
+                                        " [commands] setup and verify run"))
+    loose = here.unanswered()
+    found.append(("coverage", True, "every tracked file is inside a project, or its folder has been answered about"
+                  if not loose else "inside no project, and not answered about yet: "
+                  + "; ".join(f"{folder}/ ({', '.join(types)})" for folder, types in loose.items())
+                  + ". No check reads these files. The next ship, or rail next, asks what each folder holds"))
     from . import sources
     if sources.names(project):
         bad = sources.problems(project)
@@ -185,6 +193,18 @@ def cloud_checks(project):
                       " them on the machine before a session starts; rail provision does it now if"
                       " this session lets it. Until then GitHub's ruleset is the guard"))
     return found
+
+
+def project_line(p):
+    """One project as doctor prints it: where it comes from, its paths, what it uses and its commands."""
+    source = ("declared in [[projects]]" if p["folder"] is None else
+              ", ".join(filter(None, [p["profile"], p["manager"],
+                                      f"a member of the workspace at {p['workspace'] or 'the root'}"
+                                      if p["workspace"] is not None else "",
+                                      "changed by its [[projects]] entry" if p["entry"] else ""])))
+    return (f"{source}; paths {', '.join(p['paths']) or '(none)'}"
+            + (f"; uses {', '.join(p['uses'])}" if p["uses"] else "")
+            + f"; setup: {p['setup'] or '(none)'}; verify: {p['verify'] or '(none)'}")
 
 
 def as_steps(found):

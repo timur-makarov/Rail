@@ -1,0 +1,16 @@
+[project]
+name = "shop-api"
+version = "0.1.0"
+description = "What a cart costs."
+requires-python = ">=3.11"
+dependencies = ["shop-lib"]
+
+[tool.uv.sources]
+shop-lib = { workspace = true }
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "../lib/src"]
+testpaths = ["tests"]
+
+[tool.basedpyright]
+extraPaths = ["src", "../lib/src"]

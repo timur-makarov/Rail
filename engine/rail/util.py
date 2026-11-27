@@ -123,10 +123,15 @@ AFTER_SHELL = []  # called after every shell command: what the engine remembers 
 COULD_NOT_RUN = {126: "found but could not be run", 127: "command not found"}
 
 
+def family(step):
+    """The kind of a step: `verify` for a project's own `verify:NAME` too, `setup` for `setup:NAME`."""
+    return (step or "").split(":", 1)[0]
+
+
 def tried_help(step, ticket):
     """What a brief says after a failed attempt at the work itself: verify, a Check: line or a sensor. A failed lint
     or scope check is a slip, not an attempt."""
-    if step not in ("verify", "checks", "sensors"):
+    if family(step) not in ("verify", "checks", "sensors"):
         return ""
     return (f"Before you try again, write one line under \"## Tried\" in {ticket}: what you tried and how it failed."
             " The next attempt reads it, and it may start with none of what you know now.")

@@ -55,16 +55,16 @@ DEFAULTS = {
     "init": {"skill_dirs": [".claude/skills"], "other_manifests": []},
     "sensors": [],
     "tools": {},
-    "profiles": [],
+    "projects": [],
 }
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 RULE_KEYS = {"id": str, "files": str, "forbid": list, "only_in": str, "allow": list, "fix": str, "why": str,
              "flag": bool}
-PROFILE_KEYS = {"name": str, "paths": str}
+PROJECT_KEYS = {"name": str, "paths": list, "setup": str, "verify": str, "uses": list}
 SENSOR_KEYS = {"id": str, "paths": list, "command": str, "ok_exit": list, "violations_exit": list, "fix": str}
 # Arrays of tables: each item's keys and types, and the key every item needs.
-TABLE_ARRAYS = {"rules": (RULE_KEYS, "id"), "profiles": (PROFILE_KEYS, "name"), "sensors": (SENSOR_KEYS, "id")}
+TABLE_ARRAYS = {"rules": (RULE_KEYS, "id"), "projects": (PROJECT_KEYS, "name"), "sensors": (SENSOR_KEYS, "id")}
 
 
 def _suggest(key, known):
@@ -123,6 +123,7 @@ def _check_ladder(config):
 def timeout(config, step):
     """The seconds a command may run: setup and verify may have a limit of their own; 0, and every other command,
     takes timeout_secs."""
+    step = step.split(":", 1)[0]  # a project's own setup:NAME and verify:NAME take the same limits
     return config["commands"].get(f"{step}_timeout_secs") or config["commands"]["timeout_secs"]
 
 
@@ -156,6 +157,12 @@ def load(root):
         if kind not in KINDS:
             raise RailError(f"config: approve_contract names '{kind}', which is no kind{_suggest(kind, KINDS)}."
                             f" The kinds: {', '.join(KINDS)}")
+    for n, entry in enumerate(config["projects"]):
+        for key in ("paths", "uses"):
+            if not all(isinstance(item, str) for item in entry.get(key, [])):
+                raise RailError(f"config: projects[{n}].{key} must be a list of strings")
+        if not entry["name"].strip() or entry["name"] in [e["name"] for e in config["projects"][:n]]:
+            raise RailError(f"config: projects[{n}] needs a name no other entry has; got '{entry['name']}'")
     for n, sensor in enumerate(config["sensors"]):
         if not sensor.get("command", "").strip():
             raise RailError(f"config: sensors[{n}] needs a command")

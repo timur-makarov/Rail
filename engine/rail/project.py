@@ -112,6 +112,15 @@ class Project:
         self.ids_dir = os.path.join(common, "rail", "ids")
         self.orphans = []
         self._tools_missing = None
+        self.cwd = cwd
+        self._layouts = {}
+        # What the config itself holds, before the profiles of the projects add to it (use_trees).
+        self._own = {"rules": list(self.config["rules"]), "tests": list(self.config["tests"]["paths"]),
+                     "migration_paths": list(self.config["migration_paths"]),
+                     "generated": list(self.config["size"]["exclude"])}
+        from . import layout
+        layout.check(self.layout())
+        self.use_trees()
 
     # --- refs ---------------------------------------------------------------
 
@@ -134,6 +143,38 @@ class Project:
 
     def rel(self, path):
         return os.path.relpath(path, self.root) if path else None
+
+    # --- the projects inside the repository ---------------------------------------
+
+    def layout(self, ref=None):
+        """The projects of a commit's tree, derived now (rail docs languages); with no ref, of the files the root
+        checkout tracks, which is the tree the config was read from."""
+        from . import layout
+        key = gitx.rev(ref, self.root) if ref else None
+        if key not in self._layouts:
+            tree = layout.at(self.root, key) if key else layout.checkout(self.root)
+            self._layouts[key] = layout.Layout(tree, self.config)
+        return self._layouts[key]
+
+    def use_trees(self, *refs):
+        """What a language profile brings besides its commands (rules, test paths, migration paths, generated files)
+        applies to the paths of each project of that profile, and nothing of it is written into the config: it is
+        added here to the lists the config holds. The projects are those of the base branch, of the checkout the
+        command runs in, and of these refs: a ship names its branch, so a manifest the change adds counts in its
+        own ship."""
+        from . import layout
+        here = gitx.rev("HEAD", self.cwd) if self.cwd else None
+        layouts = [self.layout(ref) for ref in dict.fromkeys([self.base_ref, here, *refs]) if ref and gitx.rev(ref, self.root)]
+        found = layout.extras([*layouts, self.layout()])
+
+        def joined(own, more):
+            return own + [item for item in more if item not in own]
+        self.config["rules"] = self._own["rules"] + found["rules"]
+        self.config["tests"]["paths"] = joined(self._own["tests"], found["tests"])
+        self.config["migration_paths"] = joined(self._own["migration_paths"], found["migration_paths"])
+        self.config["size"]["exclude"] = joined(self._own["generated"], found["generated"])
+        self.origins = {glob: origin for glob, origin in found["origins"].items()
+                        if glob not in self._own["migration_paths"]}
 
     # --- discovery -------------------------------------------------------------
 

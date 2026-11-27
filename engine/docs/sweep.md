@@ -23,8 +23,7 @@ A sweep is itself an AUTO ticket that changes only its journal summary. It chang
 needs no review and merges on its own. Its squash commit carries a `Sweep:` trailer, which marks where the
 next sweep starts. The first sweep starts where Rail was set up.
 
-- **Free part:** doc-lint on the base branch, each structure rule counted over the whole tree, and the
-  manifests no `[[profiles]]` entry covers (`rail docs languages`, "A language added later").
+- **Free part:** doc-lint on the base branch, and each structure rule counted over the whole tree.
 - **Review part:** only when something merged with no review. One pass of the reviewer over those changes,
   looking for duplication across tickets, logic in the wrong area, weak checks, security and stale docs. It
   also reads the parked and open advisory findings and the proposed checks. With nothing unreviewed there is no model run: the
@@ -45,6 +44,11 @@ next sweep starts. The first sweep starts where Rail was set up.
   Read from the drop marks. The agent opens one ticket that puts the kind into `approve_contract`, so a person
   approves such a contract before the build (`rail docs kinds`). The summary's wording for this has not been
   tested with a model run.
+- **Kind paths reviewers found:** a file a reviewer named a kind on, in a ticket merged since the last sweep,
+  that the base branch still has and that no path of that kind in the config matches. A file under a folder
+  whose coverage ticket is open is left out: that ticket adds the path (`rail docs languages`). The agent opens
+  one ticket that adds the path under its kind in `[kinds]`. The summary's wording for this has not been tested
+  with a model run.
 - **Output:** tickets, never edits, and a one-page summary in `.rail/journal/NN-summary.md`: the free part,
   the review's findings, the parked and open advisory findings, the proposed checks by kind, the patterns and the flaky checks. The agent opens a ticket for
   each finding that names something wrong (a finding about style gets none), and one ticket
@@ -56,7 +60,7 @@ next sweep starts. The first sweep starts where Rail was set up.
   drives Rail with `rail next`, `rail work` and `rail advance` goes through a sweep with no step of its own.
 
 When the sweep finds nothing (no unreviewed change, no parked or open advisory finding, no proposed check, no
-pattern, no flaky check, no question type with one answer, no language without a profile, and doc-lint is clean), the agent gets no task: `rail next` answers `SWEEP_EMPTY` with `rail advance NN`, and the sweep's
+pattern, no flaky check, no question type with one answer, no kind path a reviewer found, and doc-lint is clean), the agent gets no task: `rail next` answers `SWEEP_EMPTY` with `rail advance NN`, and the sweep's
 ticket merges, which moves the marker.
 
 A sweep never blocks a merge. To turn other signals into tickets, such as failed CI runs or an error

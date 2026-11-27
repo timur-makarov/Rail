@@ -1,10 +1,13 @@
-"""Flaky checks: a `verify` or `Check:` command that both failed and passed on the same code.
+"""Flaky checks: a `verify` command, a project's or the repository's, or a `Check:` command that both failed and
+passed on the same code.
 
 At ship a failed command is run once more at once; when that passes, a `flake` event says so, and the step still
 fails. A command that failed on a patch where another ship passed it is a flake too, read from the step events.
 """
 
 import re
+
+from .util import family
 
 TOLD = ("This command failed, then passed when it was run again on the same code. Find why it is not deterministic;"
         " don't add a retry, a sleep or a skip.")
@@ -30,7 +33,7 @@ def of(events):
             key = e.get("command") if e.get("step") == "checks" else e.get("step")
             found.append({"step": e.get("step"), "command": e.get("command") or key, "patch_id": e.get("patch_id")})
             told.add((e.get("patch_id"), e.get("step"), key))
-        elif e.get("event") == "step" and e.get("step") in STEPS and e.get("patch_id") and e.get("status") == "ran" \
+        elif e.get("event") == "step" and family(e.get("step")) in STEPS and e.get("patch_id") and e.get("status") == "ran" \
                 and e.get("counted", True):
             results.setdefault((e["patch_id"], e["step"], _key(e)), set()).add(e.get("result"))
     for (patch_id, step, key), seen in results.items():
@@ -43,11 +46,12 @@ def runs(events):
     """{command: how many times ship ran it}, as `of` names commands."""
     counts = {}
     for e in events:
-        if e.get("event") == "step" and e.get("step") in STEPS and e.get("patch_id") and e.get("status") == "ran":
+        if e.get("event") == "step" and family(e.get("step")) in STEPS and e.get("patch_id") and e.get("status") == "ran":
             counts[_key(e)] = counts.get(_key(e), 0) + 1
     return counts
 
 
 def name(flake):
-    """The command as a later reader matches it: a check's line, or `verify`."""
-    return flake["command"] if flake["step"] == "checks" else "verify"
+    """The command as a later reader matches it: a check's line, or the step's name (`verify`, or a project's
+    `verify:NAME`)."""
+    return flake["command"] if flake["step"] == "checks" else flake["step"]

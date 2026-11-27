@@ -34,5 +34,6 @@ fix = "Create migrations with make migration."
   ticket that will do the work (`rail docs tickets`). `SHORTCUT` is how an agent says "I cut
   this corner on purpose": `SHORTCUT(41): linear scan, fine under 1,000 rows; index it past that`. A rule is a
   text match, so it refuses the marker without a number; it can't find a shortcut nobody marked.
-- `rail init` adds one rule per language it finds, forbidding that language's suppression markers in its own
-  files only (`rail docs languages`).
+- Each project of Python, TypeScript, Rust or Go that Rail finds has one more rule, forbidding that language's
+  suppression markers in its own files inside the project's paths. The rule is in no config: it comes with the
+  language's profile (`rail docs languages`).

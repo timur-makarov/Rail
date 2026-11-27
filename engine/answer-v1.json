@@ -228,6 +228,7 @@
       "skipped": {},
       "architecture": {},
       "areas": {},
+      "projects": {},
       "digest": {},
       "history": {},
       "text": {
@@ -551,6 +552,15 @@
           }
         }
       }
+    },
+    "ASK_COVERAGE": {
+      "says": "A ticket the engine filed to ask about the folders inside no project: its ship asks.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
     },
     "BUDGET": {
       "says": "The ticket's runs reported more than [worker] ticket_usd since a person last acted.",
@@ -1032,7 +1042,7 @@
           "base",
           "depth",
           "tools",
-          "profiles"
+          "projects"
         ],
         "properties": {
           "cloud": {
@@ -1049,9 +1059,9 @@
             "type": "string",
             "description": "What looks like a tool, as one line."
           },
-          "profiles": {
+          "projects": {
             "type": "string",
-            "description": "The language profiles found, as one line."
+            "description": "The projects found from the tracked manifests, as one line."
           }
         }
       }
@@ -1534,7 +1544,7 @@
       }
     },
     "SETUP_FAILED": {
-      "says": "The setup command failed in the ticket's worktree.",
+      "says": "A setup command failed in the ticket's worktree.",
       "owners": [
         "agent"
       ],

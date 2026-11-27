@@ -82,8 +82,9 @@ def violations(project, ref, cwd=None):
         if rule.get("flag"):
             continue  # a flag rule fails nothing: its matches go on the pull request's "Read these" list
         files, allow = rule.get("files", "**"), rule.get("allow", [])
+        within = rule.get("within")  # a language profile's rule: the paths of the projects of that language
         for path, added_lines in lines.items():
-            if not globmatch(files, path) or match_any(allow, path):
+            if not globmatch(files, path) or match_any(allow, path) or (within and not match_any(within, path)):
                 continue
             for text in added_lines:
                 hit = next((word for word in rule.get("forbid", []) if word in text), None)
@@ -91,7 +92,8 @@ def violations(project, ref, cwd=None):
                     found.append((rule, path, f"adds '{hit}': {text.strip()[:120]}"))
         if rule.get("only_in"):
             for path in new_files:
-                if globmatch(files, path) and not match_any(allow, path) and not globmatch(rule["only_in"], path):
+                if (globmatch(files, path) and not match_any(allow, path) and not globmatch(rule["only_in"], path)
+                        and not (within and not match_any(within, path))):
                     found.append((rule, path, f"is a new file outside {rule['only_in']}"))
     return found
 

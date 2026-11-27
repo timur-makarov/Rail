@@ -52,7 +52,8 @@ tier (`rail docs loop`).
   ticket without one, or with a part whose id is not in the list. A change with none of these kinds is AUTO,
   however large or new.
 - **The reviewer.** It lists each kind it sees in the change in `kinds`, on every ticket; on an AUTO ticket one
-  makes it PERSON (`rail docs review`).
+  makes it PERSON (`rail docs review`). When it names a kind on a file that no path of that kind matches, the
+  next sweep lists the file, so that a ticket adds its path (`rail docs sweep`).
 
 The `accepted` event records the ticket's kinds: its `person_reason`'s, in the order written, and those its
 scope's paths reach (`rail docs journal`).

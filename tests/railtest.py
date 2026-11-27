@@ -26,7 +26,13 @@ FAKE_WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_wor
 FAKE_GH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_gh.py")
 GITHUB_URL = "https://github.com/acme/app.git"
 
+# The calculator has no manifest, so no project is derived for it: one entry declares the whole fixture as a project
+# with no commands of its own. Without it every folder would be inside no project, and each ship would ask about it
+# (rail docs languages). A config a test writes itself gets the entry too, unless it has a [[projects]] of its own.
+CALC = '[[projects]]\nname = "calc"\npaths = ["**"]\n'
+
 CONFIG = f"""\
+{CALC}
 [commands]
 verify = "python3 -m py_compile src/calc.py"
 timeout_secs = 60
@@ -71,10 +77,10 @@ class Fixture:
     """A git project set up with `rail init`, with a test config and a tiny calculator.
 
     With `remote`, it is a clone of that bare repository instead. With `tree`, the project is a copy of that folder
-    and nothing else, not the calculator.
+    and nothing else, not the calculator. `projects=False` leaves a config with no [[projects]] entry as it is.
     """
 
-    def __init__(self, root, config=CONFIG, files=None, remote=None, init=True, tree=None):
+    def __init__(self, root, config=CONFIG, files=None, remote=None, init=True, tree=None, projects=True):
         self.root = root
         if remote:
             self.git("clone", "--quiet", remote, root, cwd=os.path.dirname(root))
@@ -96,6 +102,8 @@ class Fixture:
         if not init:
             return
         self.rail("init")
+        if not tree and "[[projects]]" not in config and projects:
+            config = config.rstrip("\n") + "\n\n" + CALC
         self.write(".rail/config.toml", config)
         self.git("add", "-A")
         self.git("commit", "--quiet", "-m", "init")

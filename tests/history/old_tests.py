@@ -63,7 +63,7 @@ def run(command, cwd):
 
 
 def test_globs(profile):
-    with open(os.path.join(ROOT, "profiles", profile, "profile.toml"), "rb") as f:
+    with open(os.path.join(ROOT, "engine", "profiles", profile, "profile.toml"), "rb") as f:
         return tomllib.load(f)["tests"]
 
 

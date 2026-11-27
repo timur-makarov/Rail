@@ -18,8 +18,11 @@ runs-with-secrets = [".github/workflows/**", ".claude/**"]
 # data-shape = ["db/schema/**"]
 
 [commands]
-setup = ""                                # reader: claim (after each worktree is made) and CI
-verify = ""                               # reader: ship and CI. The whole project: tests, lint, a secret scan, a dependency scan
+setup = ""                                # reader: claim (after each worktree is made) and CI, after each project's own
+verify = ""                               # reader: ship and CI, after each project's own. What belongs to the whole
+                                          # repository, such as a secret scan over the branch's commits. The projects are
+                                          # worked out from the tracked manifests, each with its language's setup and
+                                          # verify: rail doctor prints them (rail docs languages)
 provision = ""                            # reader: rail provision, next in a cloud session, and CI. Installs, as root, what the
                                           # checks need on a machine made for the work; never run on a person's own computer
 timeout_secs = 900                        # reader: every command run: setup, verify, each check, each review run
@@ -38,9 +41,9 @@ cap = 600                                 # an AUTO change over this is offered 
 exclude = []
 
 [tests]                                   # reader: ship and the review. Globs of the files that hold tests and their
-                                          # runner's settings; rail init fills it from the language profiles. When a
+                                          # runner's settings, besides the ones each project's language brings. When a
                                           # change edits one the base has, ship runs the checks once more with the
-                                          # base's version (rail docs triage). Empty switches that off
+                                          # base's version (rail docs triage)
 paths = []
 
 [retry]
@@ -119,8 +122,8 @@ model = "claude-fable-5-2"                # the model consult runs on; empty is 
 skill_dirs = [".claude/skills"]           # reader: init; the folders the skills are written to. An agent other than
                                           # Claude Code reads SKILL.md files from its own folder: add it here and
                                           # run rail init again. The skill pages in [guides] name the first
-other_manifests = []                      # reader: init, doctor and the sweep; globs of tracked manifests that mark no
-                                          # code of the project's own, such as a package.json kept for a formatter
+other_manifests = []                      # reader: every command that works out the projects; globs of tracked manifests
+                                          # that mark no project, such as a package.json kept for a formatter
 
 [guides]                                  # reader: next and advance; a page whose text the brief carries when its
                                           # situation applies, the whole page or each #Heading section named. A
@@ -133,6 +136,16 @@ conflict = ".rail/engine/guides/conflict.md"
 contract = ".claude/skills/rail-blast-radius/SKILL.md"
 split = ".claude/skills/rail-slice/SKILL.md#2. Three tests for each draft#When the engine offered the split"
 setup = ".claude/skills/rail-verify/SKILL.md"
+
+# [[projects]]                            # reader: claim, ship, CI and doctor; only what the tracked manifests don't show.
+# name = "web"                            # An entry with a found project's name changes it: its own verify in the
+# verify = "pnpm run check"               # default's place, and a dependency no import shows (a change in api then
+# uses = ["api"]                          # runs web's checks too)
+#
+# [[projects]]                            # An entry with a new name declares a part no manifest marks, with the
+# name = "infra"                          # commands that check it; they run at the repository's root
+# paths = ["infra/**"]
+# verify = "terraform fmt -check -recursive infra && terraform -chdir=infra validate"
 
 # [tools.payments]                        # reader: next, review and doctor; one table for each thing the work
 # use = "The payment service in test mode: create customers and charges in checks"   # reaches outside the

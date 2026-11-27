@@ -1,7 +1,8 @@
-"""Language profiles: rail init finds Python, TypeScript, Rust and Go from tracked manifests and writes each
-profile's commands, rules, paths and sandbox domains. `Projects` takes one small real program per language from
-rail init to a merged ticket with the language's own toolchain; it skips a language whose toolchain this machine
-lacks, and `python3 tests/run.py --languages` fails there instead."""
+"""Language profiles: Rail finds the projects of Python, TypeScript, Rust and Go from the tracked manifests, each
+time it needs them, and each project gets its profile's commands, rules and paths with nothing written for it
+(tests/test_projects.py has what a change reaches). `Projects` takes one small real program per language from rail
+init to a merged ticket with the language's own toolchain; it skips a language whose toolchain this machine lacks,
+and `python3 tests/run.py --languages` fails there instead."""
 
 import base64
 import hashlib
@@ -14,18 +15,18 @@ import sys
 import tomllib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import CONFIG, FAKE, RAIL, Fixture, RailTest, ticket  # noqa: E402
+from railtest import CONFIG, FAKE, FAKE_WORKER, RAIL, Fixture, RailTest, ticket  # noqa: E402
 
 FRAMEWORK = os.path.dirname(os.path.dirname(RAIL))
 sys.path.insert(0, os.path.join(FRAMEWORK, "engine"))
-from rail import config as configmod, init as initmod  # noqa: E402
+from rail import config as configmod, init as initmod, layout  # noqa: E402
 from rail.util import globmatch  # noqa: E402
 
 LANGUAGES = ("go", "python", "rust", "typescript")
 
 
 def profile(name):
-    with open(os.path.join(FRAMEWORK, "profiles", name, "profile.toml"), "rb") as f:
+    with open(os.path.join(FRAMEWORK, "engine", "profiles", name, "profile.toml"), "rb") as f:
         return tomllib.load(f)
 
 
@@ -36,6 +37,13 @@ def read(path):
 
 def step(answer, name):
     return [s for s in answer["steps"] if s["step"] == name][-1]
+
+
+def tree(*paths, config=None, **texts):
+    """The projects of a tree that tracks these files, empty unless `texts` gives one its text, by name."""
+    files = {path: "" for path in paths} | texts
+    found = layout.Layout(layout.Tree(sorted(files), lambda asked: {path: files[path] for path in asked}), config or {})
+    return {p["name"]: p for p in found.projects}
 
 
 class Detection(RailTest):
@@ -53,38 +61,40 @@ class Detection(RailTest):
         return root
 
     def found(self, files):
-        return [(f["name"], f["paths"]) for f in initmod.detect(self.repo(files))]
+        return [(p["name"], p["profile"], p["paths"]) for p in initmod.found(self.repo(files))]
 
-    def test_each_manifest_gives_its_profile(self):
+    def test_each_manifest_gives_a_project_of_its_profile(self):
         cases = {"pyproject.toml": "python", "setup.cfg": "python", "requirements-dev.txt": "python",
                  "package.json": "typescript", "Cargo.toml": "rust", "go.mod": "go"}
         for manifest, name in cases.items():
             with self.subTest(manifest):
-                self.assertEqual(self.found({manifest: "x\n"}), [(name, "**")])
+                self.assertEqual(self.found({manifest: "\n"}), [("root", name, ["**"])])
         self.assertEqual(self.found({"README.md": "x\n", "src/main.c": "x\n"}), [])
 
     def test_package_json_without_tsconfig_gives_typescript_with_type_checking_off(self):
-        [without] = initmod.detect(self.repo({"package.json": "{}\n"}))
-        [with_it] = initmod.detect(self.repo({"package.json": "{}\n", "tsconfig.json": "{}\n"}))
-        self.assertEqual((without["name"], without["type_check"], with_it["type_check"]), ("typescript", False, True))
-        self.assertEqual(initmod._describe([without]), "typescript (**, no tsconfig.json: type checking off)")
-        [go] = initmod.detect(self.repo({"go.mod": "module x\n"}))
+        [without] = initmod.found(self.repo({"package.json": "{}\n"}))
+        [with_it] = initmod.found(self.repo({"package.json": "{}\n", "tsconfig.json": "{}\n"}))
+        self.assertEqual((without["profile"], without["type_check"], with_it["type_check"]), ("typescript", False, True))
+        self.assertEqual(initmod.describe([without]), "root (typescript, pnpm, no tsconfig.json: type checking off)")
+        self.assertNotIn("tsc", without["verify"])
+        self.assertIn("pnpm exec tsc --noEmit", with_it["verify"])
+        [go] = initmod.found(self.repo({"go.mod": "module x\n"}))
         self.assertIsNone(go["type_check"])
 
-    def test_manifests_below_the_root_give_their_folders(self):
+    def test_a_manifest_below_the_root_gives_a_project_named_after_its_folder(self):
         self.assertEqual(self.found({"web/package.json": "{}\n", "api/go.mod": "module x\n"}),
-                         [("go", "api/**"), ("typescript", "web/**")])
-        # The top-most folders only, joined with braces; a manifest at the root takes the whole repository.
+                         [("api", "go", ["api/**"]), ("web", "typescript", ["web/**"])])
+        # The top-most folder only: a manifest nested in a project's folder counts for that project.
         self.assertEqual(self.found({"a/go.mod": "x\n", "a/tool/go.mod": "x\n", "b/c/go.mod": "x\n"}),
-                         [("go", "{a,b/c}/**")])
-        self.assertEqual(self.found({"pyproject.toml": "x\n", "libs/one/pyproject.toml": "x\n"}), [("python", "**")])
+                         [("a", "go", ["a/**"]), ("b/c", "go", ["b/c/**"])])
+        self.assertEqual(self.found({"pyproject.toml": "\n", "libs/one/pyproject.toml": "\n"}), [("root", "python", ["**"])])
 
     def test_vendored_installed_built_and_untracked_manifests_give_nothing(self):
         root = self.repo({"node_modules/x/package.json": "{}\n", "vendor/y/go.mod": "x\n", "web/vendor/z/go.mod": "x\n",
                           "target/debug/Cargo.toml": "x\n", ".venv/lib/pyproject.toml": "x\n", "dist/package.json": "x\n"})
         with open(os.path.join(root, "Cargo.toml"), "w") as f:
             f.write("[package]\n")  # not tracked
-        self.assertEqual(initmod.detect(root), [])
+        self.assertEqual(initmod.found(root), [])
 
     def test_brace_globs_match_either_word(self):
         cases = [("**/*.{ts,tsx,js}", "web/a.tsx", True), ("**/*.{ts,tsx,js}", "a.ts", True),
@@ -98,7 +108,7 @@ class Detection(RailTest):
 
 
 class Init(RailTest):
-    def test_init_writes_the_profiles_into_a_new_config_and_merges_the_registries(self):
+    def test_init_names_the_projects_writes_none_of_them_and_merges_the_registries(self):
         settings = {"sandbox": {"network": {"allowedDomains": ["example.com"]}}}
         p = Fixture(os.path.join(self.tmp, "mono"), init=False, files={
             "pyproject.toml": "[project]\nname = 'api'\n", "web/package.json": "{}\n", "web/tsconfig.json": "{}\n",
@@ -106,31 +116,24 @@ class Init(RailTest):
         p.git("add", "-A")
         p.git("commit", "--quiet", "-m", "start")
         done = p.rail("init")
-        self.assertEqual(step(done, "profiles")["detail"],
-                         "found python (**), typescript (web/**); wrote each to .rail/config.toml with its default"
-                         " setup and verify, rules, migration paths, generated files and [tests] paths")
+        self.assertEqual((step(done, "projects")["status"], step(done, "projects")["detail"]), (
+            "ran", "found root (python, uv), web (typescript, pnpm). Each is set up and checked with its commands, for the"
+                   " changes that reach it; rail doctor prints them. Nothing is written for a project: they are worked out"
+                   " from the tracked manifests each time"))
+        seed = tomllib.loads(read(os.path.join(FRAMEWORK, "seed", "config.toml")))
         with open(p.path(".rail/config.toml"), "rb") as f:
             config = tomllib.load(f)
-        self.assertEqual(config["profiles"], [{"name": "python", "paths": "**"}, {"name": "typescript", "paths": "web/**"}])
-        self.assertEqual(config["migration_paths"], ["**/migrations/**", "**/alembic/versions/**", "**/drizzle/**"])
-        self.assertEqual(config["size"]["exclude"], ["**/*_pb2.py", "**/*_pb2_grpc.py"])
-        self.assertEqual(config["tests"]["paths"], profile("python")["tests"] + profile("typescript")["tests"])
-        # No lockfile is tracked, so each language gets the manager a new project starts with.
-        self.assertEqual(config["commands"]["setup"],
-                         "uv sync --locked && (cd web && pnpm install --frozen-lockfile --ignore-scripts)")
-        self.assertEqual(config["commands"]["verify"].split(" && ")[:2], [
-            "uv run ruff format --check --extend-exclude .rail --extend-exclude .claude .",
-            "uv run ruff check --extend-exclude .rail --extend-exclude .claude ."])
+        # The one command init writes is the whole repository's: the secret scan over the branch's commits.
+        self.assertEqual(config["commands"], dict(seed["commands"], verify=profile("common")["secrets"]["run"]))
+        self.assertEqual({k: v for k, v in config.items() if k != "commands"}, {k: v for k, v in seed.items() if k != "commands"})
+        self.assertNotIn("projects", config)
+        self.assertIn("\n[tests]", read(p.path(".rail/config.toml")))  # the seed's own comments stay
         brief = p.rail("next")["action"]["brief"]
-        self.assertIn("rail init found python (**), typescript (web/**) and wrote each language's default `setup` and"
-                      " `verify` into [commands]. The repository's own commands win over a default", brief)
-        self.assertIn("rail init found python (**), typescript (web/**)", p.rail("next", cloud=True)["action"]["brief"])
-        ids = [r["id"] for r in config["rules"]]
-        self.assertEqual(ids, ["no-new-suppressions", "shortcut-names-its-ticket", "sensor-marker-names-its-ticket", "todo-names-its-ticket",
-                               "no-new-python-suppressions",
-                               "no-new-typescript-suppressions"])
-        self.assertEqual(config["rules"][4], profile("python")["rules"][0])
-        self.assertIn("\n[tests]", read(p.path(".rail/config.toml")))  # the seed's own comment stays
+        self.assertIn("Rail finds these projects from the tracked manifests: root (python, uv), web (typescript, pnpm). ", brief)
+        self.assertIn("a [[projects]] entry with a derived project's `name` puts the repository's own `setup` or `verify`"
+                      " in the\n     default's place.", brief)
+        self.assertIn("Rail finds these projects from the tracked manifests: root (python, uv), web (typescript, pnpm).",
+                      p.rail("next", cloud=True)["action"]["brief"])
 
         domains = json.loads(read(p.path(".claude/settings.json")))["sandbox"]["network"]["allowedDomains"]
         self.assertEqual(domains, ["example.com", "api.anthropic.com", "pypi.org", "files.pythonhosted.org",
@@ -140,7 +143,7 @@ class Init(RailTest):
 
         again = p.rail("init")
         self.assertEqual(step(again, ".claude/settings.json")["status"], "not_run")
-        self.assertIn(".rail/config.toml was there already", step(again, "profiles")["detail"])
+        self.assertEqual(step(again, "projects")["status"], "not_run")
 
     def test_an_existing_config_is_left_alone_and_the_registries_still_merge(self):
         p = Fixture(os.path.join(self.tmp, "existing"), init=False, files={"go.mod": "module x\n",
@@ -149,27 +152,20 @@ class Init(RailTest):
         p.git("commit", "--quiet", "-m", "start")
         done = p.rail("init")
         self.assertEqual(read(p.path(".rail/config.toml")), CONFIG)
-        detail = step(done, "profiles")["detail"]
-        self.assertTrue(detail.startswith("found go (**); .rail/config.toml was there already, so nothing was written"
-                                          " to it. It lacks what follows"), detail)
-        self.assertIn('go in the root:\n- a new entry and its rules, at the end of the file:\n[[profiles]]', detail)
-        self.assertIn("gitleaks", detail)  # a config with no profile has no secret scan from one either
+        self.assertEqual(step(done, "projects")["status"], "not_run")
+        self.assertTrue(step(done, "projects")["detail"].startswith("found calc (declared in [[projects]]), root (go, go). "))
         domains = json.loads(read(p.path(".claude/settings.json")))["sandbox"]["network"]["allowedDomains"]
         self.assertEqual(domains, ["api.anthropic.com", "proxy.golang.org", "sum.golang.org"])
 
-    def test_the_engines_manifest_lists_are_the_profiles_own(self):
-        # A project's copy of the engine has no profiles/ folder, so doctor reads these two lists from the engine.
-        self.assertEqual(initmod.MANIFESTS, {name: profile(name)["manifests"] for name in LANGUAGES})
-        self.assertEqual(initmod.VENDORED, profile("common")["ignore"])
-
-    def test_a_language_added_after_init_is_named_and_init_prints_what_the_config_lacks(self):
+    def test_a_project_added_after_init_is_found_with_no_change_to_the_config(self):
         p = Fixture(os.path.join(self.tmp, "later"), init=False, files={"api/pyproject.toml": "[project]\nname = 'api'\n"})
         p.git("add", "-A")
         p.git("commit", "--quiet", "-m", "start")
         p.rail("init")
         config = read(p.path(".rail/config.toml"))
-        doctor = lambda: {s["step"]: s for s in p.rail("doctor", expect=None)["steps"]}["languages"]  # noqa: E731
-        self.assertEqual(doctor()["result"], "pass")
+        projects = lambda: sorted(s["step"] for s in p.rail("doctor", expect=None)["steps"]  # noqa: E731
+                                  if s["step"].startswith("project "))
+        self.assertEqual(projects(), ["project api"])
 
         # A Rust service is added next year, and a vendored manifest with it.
         for path in ("worker/Cargo.toml", "worker/vendor/dep/Cargo.toml", "worker/sub/Cargo.toml"):
@@ -177,66 +173,38 @@ class Init(RailTest):
             with open(p.path(path), "w") as f:
                 f.write("[package]\nname = 'x'\n")
         p.git("add", "-A")
-        found = doctor()
-        self.assertEqual(found["result"], "fail")
-        self.assertIn("worker/Cargo.toml marks rust: no [[profiles]] entry covers it", found["detail"])
-        self.assertNotIn("vendor", found["detail"])
-        self.assertNotIn("worker/sub", found["detail"])  # the top-most folder stands for those below it
+        self.assertEqual(projects(), ["project api", "project worker"])  # the top-most folder stands for those below it
+        self.assertEqual(read(p.path(".rail/config.toml")), config)
+        self.assertIn("found api (python, uv), worker (rust, cargo). ", step(p.rail("init"), "projects")["detail"])
 
-        detail = step(p.rail("init"), "profiles")["detail"]
-        self.assertEqual(read(p.path(".rail/config.toml")), config)  # init writes nothing to a config that is there
-        self.assertIn("found python (api/**), rust (worker/**); .rail/config.toml was there already, so nothing was"
-                      " written to it. It lacks what follows", detail)
-        self.assertIn('rust in worker:\n- a new entry and its rules, at the end of the file:\n[[profiles]]', detail)
-        self.assertIn('name = "rust"\npaths = "worker/**"', detail)
-        self.assertIn(f'id = "{profile("rust")["rules"][0]["id"]}"', detail)
-        manager = profile("rust")["managers"][0]
-        self.assertIn(f"- [commands] setup gains: (cd worker && {manager['setup']})", detail)
-        self.assertIn(f"(cd worker && {manager['verify'][0]['run']})", detail)
-        self.assertNotIn("gitleaks", detail)  # the secret scan is in the config's verify already
-        self.assertNotIn("python in", detail)
-
-        # What init printed, put into the config, covers the manifest; so does naming it as no code of the project's.
-        added = detail.split("at the end of the file:\n")[1].split("\n- ")[0]
-        with open(p.path(".rail/config.toml"), "w") as f:
-            f.write(config + "\n" + added + "\n")
-        self.assertEqual(doctor()["result"], "pass")
+        # A manifest that marks no project is named as one in [init] other_manifests.
         with open(p.path(".rail/config.toml"), "w") as f:
             f.write(config.replace("other_manifests = []", 'other_manifests = ["worker/**"]'))
-        self.assertEqual(doctor()["result"], "pass")
-
-        # A second folder of a language the config has: its entry's paths are what changes.
-        with open(p.path(".rail/config.toml"), "w") as f:
-            f.write(config.replace("other_manifests = []", 'other_manifests = ["worker/**"]'))
-        os.makedirs(p.path("jobs"))
-        with open(p.path("jobs/pyproject.toml"), "w") as f:
-            f.write("[project]\nname = 'jobs'\n")
-        p.git("add", "-A")
-        self.assertIn("jobs/pyproject.toml marks python", doctor()["detail"])
-        detail = step(p.rail("init"), "profiles")["detail"]
-        self.assertIn('python in jobs:\n- the python entry of [[profiles]]: paths = "{api,jobs}/**" (it is "api/**")', detail)
-        self.assertNotIn("rust in", detail)
-        self.assertNotIn("a new entry", detail)
+        self.assertEqual(projects(), ["project api"])
 
     def test_a_repository_in_no_profiles_language_gets_the_seed_config_as_it_is(self):
         p = Fixture(os.path.join(self.tmp, "plain"), init=False)
         p.git("add", "-A")
         p.git("commit", "--quiet", "-m", "start")
         done = p.rail("init")
-        self.assertEqual(step(done, "profiles")["status"], "not_run")
+        self.assertEqual(step(done, "projects")["status"], "not_run")
         self.assertEqual(read(p.path(".rail/config.toml")), read(os.path.join(FRAMEWORK, "seed", "config.toml")))
 
 
+# One project for each language, none of which runs a command: these tests are about the rules.
+QUIET = "".join(f'\n[[projects]]\nname = "{name}"\nsetup = ""\nverify = ""\n' for name in LANGUAGES)
+MANIFESTS = {"go/go.mod": "module x\n", "python/pyproject.toml": "[project]\nname = 'x'\n",
+             "rust/Cargo.toml": "[package]\nname = 'x'\n", "typescript/package.json": "{}\n"}
+
+
 class Markers(RailTest):
-    def test_each_languages_markers_fail_in_its_own_files_and_not_in_a_markdown_file(self):
-        rules = "".join("\n" + initmod._toml_table("rules", rule, name)
-                        for name in LANGUAGES for rule in profile(name)["rules"])
-        p = self.fixture(config=CONFIG + rules)
-        p.add(ticket())
+    def test_each_languages_markers_fail_in_its_own_projects_files_and_not_in_a_markdown_file(self):
+        p = self.fixture(config=CONFIG + QUIET, files=MANIFESTS)
+        p.add(ticket(scope=("src/**", *(f"{name}/**" for name in LANGUAGES))))
         p.rail("next")
         p.fix_calc("1")
-        files = {"go": ["src/a.go"], "python": ["src/a.py"], "rust": ["src/a.rs"],
-                 "typescript": ["src/a.ts", "src/b.tsx", "src/c.mjs"]}
+        files = {"go": ["go/a.go"], "python": ["python/a.py"], "rust": ["rust/a.rs"],
+                 "typescript": ["typescript/a.ts", "typescript/b.tsx", "typescript/c.mjs"]}
         expected, markdown = [], []
         for name in LANGUAGES:
             markers = profile(name)["rules"][0]["forbid"]
@@ -244,23 +212,26 @@ class Markers(RailTest):
                 p.write(path, "".join(f"x = 1  {marker}\n" for marker in markers), base=p.worktree("1"))
                 expected += [f"{path} adds '{marker}'" for marker in markers]
             markdown += markers
-            # The marker in another language's file breaks nothing.
-            other = files[LANGUAGES[(LANGUAGES.index(name) + 1) % 4]][0].replace("src/a", "src/other")
+            # The marker in another language's file breaks nothing, and neither does it in a file of the language
+            # that is inside no project of the language.
+            other = files[LANGUAGES[(LANGUAGES.index(name) + 1) % 4]][0].replace("/a.", "/other.")
             p.write(other, "".join(f"x = 1  {marker}\n" for marker in markers), base=p.worktree("1"))
-        p.write("src/notes.md", "".join(f"Never write {m}\n" for m in markdown), base=p.worktree("1"))
+            p.write(files[name][0].replace(f"{name}/a.", "src/outside."), "".join(f"x = 1  {m}\n" for m in markers),
+                    base=p.worktree("1"))
+        p.write("python/notes.md", "".join(f"Never write {m}\n" for m in markdown), base=p.worktree("1"))
         failed = p.rail("advance", "1", expect=3)
         brief = failed["action"]["brief"]
         for line in expected:
             self.assertIn(line, brief)
-        self.assertNotIn("notes.md", brief)
-        self.assertNotIn("src/other", brief)
+        for word in ("notes.md", "/other.", "src/outside."):
+            self.assertNotIn(word, brief)
         self.assertTrue(step(failed, "rules")["detail"].startswith(f"{len(expected)} broken: "), step(failed, "rules"))
 
 
 class Data(RailTest):
     def test_every_profile_has_its_keys_and_the_languages_page_names_its_data(self):
         page = read(os.path.join(FRAMEWORK, "engine", "docs", "languages.md"))
-        names = sorted(n for n in os.listdir(os.path.join(FRAMEWORK, "profiles")) if n != "common")
+        names = sorted(n for n in os.listdir(os.path.join(FRAMEWORK, "engine", "profiles")) if n != "common")
         self.assertEqual(names, sorted(LANGUAGES))
         for name in names:
             data = profile(name)
@@ -271,91 +242,74 @@ class Data(RailTest):
             for word in data["manifests"] + data["domains"] + data["generated"] + data["migration_paths"] + \
                     [m for rule in data["rules"] for m in rule["forbid"] + [rule["files"]]]:
                 self.assertIn(f"`{word}`", page, name)
-            # The commands: every manager and its lockfile, and each line of the one a new project starts with.
+            # The commands: every manager and its lockfile, each line of the one a new project starts with, and
+            # what a workspace's member runs in their place.
             first = data["managers"][0]
+            member = [first[key] for key in ("member_setup",) if key in first] + \
+                     [part["member"] for part in first["verify"] if "member" in part]
             for word in [w for m in data["managers"] for w in (m["name"], m["lockfile"])] + [first["setup"]] + \
-                    [part["run"].replace("|", "\\|") for part in first["verify"]]:
-                self.assertIn(f"`{word}`", page, name)
+                    [part["run"] for part in first["verify"]] + member + [data.get("workspace") or first["lockfile"]]:
+                self.assertIn(f"`{word.replace('|', chr(92) + '|')}`", page, name)
         for folder in profile("common")["ignore"]:
             self.assertIn(f"`{folder}`", page)
         self.assertIn(f"`{profile('common')['secrets']['run']}`", page)
 
 
-def tree(root, *paths):
-    """A git repository at root that tracks these empty files: what detection reads."""
-    os.makedirs(root)
-    for path in paths:
-        os.makedirs(os.path.dirname(os.path.join(root, path)), exist_ok=True)
-        open(os.path.join(root, path), "w").close()
-    subprocess.run(["git", "init", "--quiet", "-b", "main"], cwd=root, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
-    return initmod.detect(root)
-
-
 class Defaults(RailTest):
-    """The commands a new config starts with, from the profiles alone: no toolchain runs here."""
+    """The commands a project gets, from the profiles alone: no toolchain runs here."""
 
-    def test_the_lockfile_names_the_manager_and_each_folder_runs_its_own_commands(self):
-        found = tree(os.path.join(self.tmp, "mono"), "api/pyproject.toml", "api/poetry.lock", "web/package.json",
-                     "web/package-lock.json", "web/tsconfig.json", "tools/gen/go.mod", "tools/lint/go.mod")
-        self.assertEqual([(f["name"], f["dirs"], f["manager"]["name"]) for f in found],
-                         [("go", ["tools/gen", "tools/lint"], "go"), ("python", ["api"], "poetry"),
-                          ("typescript", ["web"], "npm")])
-        setup, verify, left = initmod.default_commands(found)
-        self.assertEqual(setup, "(cd tools/gen && go mod download) && (cd tools/lint && go mod download)"
-                                " && (cd api && poetry install) && (cd web && npm ci --ignore-scripts)")
-        self.assertEqual(left, [])
-        # A part runs in its folder, and a language in two folders runs each part in both.
-        self.assertTrue(verify.startswith('(cd tools/gen && test -z "$(gofmt -l .)") && (cd tools/gen && go vet ./...)'))
-        self.assertIn('(cd tools/lint && test -z "$(gofmt -l .)")', verify)
-        self.assertIn("(cd api && poetry run pytest -q)", verify)
-        self.assertIn("(cd web && npx --no-install tsc --noEmit)", verify)
-        # An audit runs only on a change that touches the folder's lockfile.
-        self.assertIn('{ git diff --quiet "$RAIL_BASE"...HEAD -- web/package-lock.json || (cd web && npm audit); }', verify)
-        self.assertIn('{ git diff --quiet "$RAIL_BASE"...HEAD -- tools/gen/go.sum || (cd tools/gen && govulncheck ./...); }',
-                      verify)
-        # One secret scan over the branch's commits, after every language.
-        self.assertTrue(verify.endswith(' && gitleaks git --no-banner --redact -v --log-opts="$RAIL_BASE..HEAD"'), verify)
+    def test_the_lockfile_names_the_manager_and_each_project_runs_its_commands_in_its_folder(self):
+        found = tree("api/pyproject.toml", "api/poetry.lock", "web/package.json", "web/package-lock.json",
+                     "web/tsconfig.json", "tools/gen/go.mod", "tools/lint/go.mod")
+        self.assertEqual([(p["name"], p["folder"], p["profile"], p["manager"], p["setup"]) for p in found.values()], [
+            ("api", "api", "python", "poetry", "poetry install"),
+            ("tools/gen", "tools/gen", "go", "go", "go mod download"),
+            ("tools/lint", "tools/lint", "go", "go", "go mod download"),
+            ("web", "web", "typescript", "npm", "npm ci --ignore-scripts")])
+        # The folder is where the command runs, so no command names it.
+        self.assertTrue(found["tools/gen"]["verify"].startswith('test -z "$(gofmt -l .)" && go vet ./...'))
+        self.assertIn("poetry run pytest -q", found["api"]["verify"])
+        self.assertIn("npx --no-install tsc --noEmit", found["web"]["verify"])
+        # An audit runs only on a change that touches the project's lockfile, wherever the command runs.
+        self.assertTrue(found["web"]["verify"].endswith(
+            """ && { git diff --quiet "$RAIL_BASE"...HEAD -- ':(top)web/package-lock.json' || npm audit; }"""))
+        self.assertTrue(found["tools/gen"]["verify"].endswith(
+            """ && { git diff --quiet "$RAIL_BASE"...HEAD -- ':(top)tools/gen/go.sum' || govulncheck ./...; }"""))
+        # The secret scan is the whole repository's, and no project's.
+        self.assertNotIn("gitleaks", "".join(p["verify"] for p in found.values()))
 
-    def test_types_are_left_out_where_type_checking_is_off_and_a_missing_tool_is_named(self):
-        found = tree(os.path.join(self.tmp, "js"), "package.json", "pnpm-lock.yaml", "Cargo.toml", "Cargo.lock")
-        self.assertEqual([(f["name"], f["type_check"]) for f in found], [("rust", None), ("typescript", False)])
-        _, parts, left = initmod.default_parts(found)
-        self.assertEqual([(p["profile"], p["part"], p["tool"]) for p in parts], [
+    def test_types_are_left_out_where_type_checking_is_off_and_each_part_names_its_tool(self):
+        found = tree("package.json", "pnpm-lock.yaml", "Cargo.toml", "Cargo.lock")
+        self.assertEqual(sorted(found), ["root-rust", "root-typescript"])  # two languages' manifests in one folder
+        self.assertEqual([(p["profile"], part["part"], part["tool"]) for p in found.values() for part in p["parts"]], [
             ("rust", "format", "rustfmt"), ("rust", "lint", "cargo-clippy"), ("rust", "tests", "cargo"),
             ("rust", "audit", "cargo-deny"), ("typescript", "lint", "oxlint"), ("typescript", "tests", "pnpm"),
-            ("typescript", "audit", "pnpm"), ("common", "secrets", "gitleaks")])
-        self.assertEqual(left, [])
-        setup, verify, left = initmod.default_commands(found, available=lambda tool: tool in ("cargo", "pnpm"))
-        self.assertEqual(setup, "cargo fetch --locked && pnpm install --frozen-lockfile --ignore-scripts")
-        self.assertEqual(verify, 'cargo test --locked && pnpm test && { git diff --quiet "$RAIL_BASE"...HEAD --'
-                                 ' pnpm-lock.yaml || pnpm audit; }')
-        self.assertEqual(left, ["rust format (rustfmt)", "rust lint (cargo-clippy)", "rust audit (cargo-deny)",
-                                "typescript lint (oxlint)", "secrets (gitleaks)"])
+            ("typescript", "audit", "pnpm")])
+        self.assertEqual((found["root-rust"]["setup"], found["root-typescript"]["setup"]),
+                         ("cargo fetch --locked", "pnpm install --frozen-lockfile --ignore-scripts"))
+        self.assertEqual(found["root-typescript"]["verify"], "pnpm exec oxlint --deny-warnings && pnpm test && { git diff"
+                         """ --quiet "$RAIL_BASE"...HEAD -- ':(top)pnpm-lock.yaml' || pnpm audit; }""")
 
     def test_a_requirements_file_with_no_lockfile_picks_pip_and_its_commands_name_the_file(self):
-        [found] = tree(os.path.join(self.tmp, "pip"), "requirements-dev.txt", "src/app.py")
-        self.assertEqual((found["manager"]["name"], found["manager"]["lockfile"]), ("pip", "requirements-dev.txt"))
-        setup, verify, _ = initmod.default_commands([found])
-        self.assertEqual(setup, "python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt")
-        self.assertIn('{ git diff --quiet "$RAIL_BASE"...HEAD -- requirements-dev.txt || pip-audit -r'
-                      " requirements-dev.txt; }", verify)
-        self.assertNotIn("uv ", verify)
-        self.assertNotIn("requirements.txt", setup + verify)
+        [found] = tree("requirements-dev.txt", "src/app.py").values()
+        self.assertEqual((found["manager"], found["setup"]),
+                         ("pip", "python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"))
+        self.assertIn("""{ git diff --quiet "$RAIL_BASE"...HEAD -- ':(top)requirements-dev.txt' || pip-audit -r"""
+                      " requirements-dev.txt; }", found["verify"])
+        self.assertNotIn("uv ", found["verify"])
+        self.assertNotIn("requirements.txt", found["setup"] + found["verify"])
         # A lockfile beside it names the manager, whatever else is tracked; with neither, the first manager.
-        for name, files, manager in (("locked", ("requirements-dev.txt", "pyproject.toml", "uv.lock"), "uv"),
-                                     ("poetry", ("requirements-dev.txt", "pyproject.toml", "poetry.lock"), "poetry"),
-                                     ("bare", ("pyproject.toml",), "uv"),
-                                     ("pinned", ("requirements.txt", "requirements-dev.txt"), "pip")):
-            with self.subTest(name):
-                [found] = tree(os.path.join(self.tmp, name), *files)
-                self.assertEqual(found["manager"]["name"], manager)
-        self.assertEqual(found["manager"]["lockfile"], "requirements.txt")  # the last one: the file pip pins with
+        for files, manager in ((("requirements-dev.txt", "pyproject.toml", "uv.lock"), "uv"),
+                               (("requirements-dev.txt", "pyproject.toml", "poetry.lock"), "poetry"),
+                               (("pyproject.toml",), "uv"), (("requirements.txt", "requirements-dev.txt"), "pip")):
+            with self.subTest(files):
+                [found] = tree(*files).values()
+                self.assertEqual(found["manager"], manager)
+        self.assertIn("pip install -r requirements.txt", found["setup"])  # the last one: the file pip pins with
         # Below the root, the file is looked for in the folder that holds the manifest.
-        [found] = tree(os.path.join(self.tmp, "below"), "api/requirements-test.txt", "requirements-dev.txt.bak")
-        self.assertEqual((found["dirs"], found["manager"]["lockfile"]), (["api"], "requirements-test.txt"))
-        self.assertEqual(initmod.default_commands([found])[0],
-                         "(cd api && python3 -m venv .venv && .venv/bin/pip install -r requirements-test.txt)")
+        [found] = tree("api/requirements-test.txt", "requirements-dev.txt.bak").values()
+        self.assertEqual((found["folder"], found["setup"]),
+                         ("api", "python3 -m venv .venv && .venv/bin/pip install -r requirements-test.txt"))
 
     def test_every_default_is_a_command_the_config_can_hold(self):
         for name in LANGUAGES:
@@ -363,8 +317,10 @@ class Defaults(RailTest):
                 self.assertTrue(manager["name"] and manager["lockfile"] and manager["setup"], name)
                 self.assertLessEqual({p["part"] for p in manager["verify"]}, {"format", "lint", "types", "tests", "audit"})
                 for part in manager["verify"]:
-                    self.assertEqual(sorted(part), ["part", "run", "tool"], name)
-                    self.assertEqual(tomllib.loads("x = " + initmod.toml_string(part["run"]))["x"], part["run"])
+                    self.assertLessEqual({"part", "run", "tool"}, set(part), name)
+                    self.assertLessEqual(set(part), {"part", "run", "tool", "member"}, name)
+                    for command in (part["run"], part.get("member", "")):
+                        self.assertEqual(tomllib.loads("x = " + initmod.toml_string(command))["x"], command)
 
 
 GENERATED = "// Code generated by protoc-gen-go. DO NOT EDIT.\n"
@@ -542,6 +498,20 @@ func TestTitleSpacesAreDropped(t *testing.T) {
 }
 
 
+def stand_ins(text):
+    """The seed config's text with Rail's stand-ins where it names a model's CLI: the worker, the reviewer, which the
+    triage run uses too, and consult. No test here starts a model."""
+    text, workers = re.subn(r"(?ms)^command = '''claude -p --output-format stream-json.*?'''",
+                            f'command = "python3 {FAKE_WORKER}"', text)
+    text, reviewers = re.subn(r"(?m)^command = '''claude -p --safe-mode .*--json-schema.*$",
+                              f'command = "python3 {FAKE}"', text)
+    text, consults = re.subn(r'(?m)^command = "claude -p --safe-mode --effort high .*--tools Read,Grep,Glob"$',
+                             f'command = "python3 {FAKE} --consult"', text)
+    assert (workers, reviewers, consults) == (1, 1, 1), (workers, reviewers, consults)
+    assert "claude -p" not in "\n".join(line.split("#")[0] for line in text.splitlines()), "a model's CLI is left"
+    return text
+
+
 def edit(root, path, old, new):
     full = os.path.join(root, path)
     text = read(full) if os.path.exists(full) else ""
@@ -553,7 +523,7 @@ def edit(root, path, old, new):
 
 
 class Projects(RailTest):
-    """Each language's project from rail init to a merged ticket, with the profile's own commands."""
+    """Each language's project from rail init to a merged ticket, with the commands its profile gives it."""
 
     def project(self, name):
         spec = PROJECTS[name]
@@ -566,29 +536,36 @@ class Projects(RailTest):
         p.git("add", "-A")
         p.git("commit", "--quiet", "-m", "start")
         done = p.rail("init")
-        self.assertIn(f"found {name} (**); wrote each to .rail/config.toml with its default setup and verify",
-                      step(done, "profiles")["detail"])
-        found = initmod.detect(p.root)
-        setup, verify, _ = initmod.default_commands(found)
+        found = initmod.found(p.root)
+        self.assertTrue(found and all(f["profile"] == name for f in found), found)
+        self.assertIn(f"found {initmod.describe(found)}. ", step(done, "projects")["detail"])
         text = read(p.path(".rail/config.toml"))
-        written = tomllib.loads(text)["commands"]
-        self.assertEqual((written["setup"], written["verify"]), (setup, verify))
-        brief = p.rail("next")["action"]["brief"]
-        self.assertIn(f"rail init found {name} (**) and wrote each language's default `setup` and `verify`", brief)
-        self.assertIn("The repository's own commands win over a default", brief)
+        secrets = profile("common")["secrets"]
+        self.assertEqual(tomllib.loads(text)["commands"]["verify"], secrets["run"])  # the one command init writes
+        self.assertNotIn("\n[[projects]]", text)
+        self.assertIn(f"Rail finds these projects from the tracked manifests: {initmod.describe(found)}. ",
+                      p.rail("next")["action"]["brief"])
 
         # What the init task leaves on this machine: the parts whose tools are here, and Rail's stand-in reviewer.
-        setup, parts, left = initmod.default_parts(found, available=have)
+        # A project keeps its derived commands unless a part's tool is missing: then an entry gives it the rest.
+        parts, left = [], []
+        for f in found:
+            here = [part for part in f["parts"] if have(part["tool"])]
+            left += [f"{name} {part['part']} ({part['tool']})" for part in f["parts"] if part not in here]
+            parts += [dict(part, cwd=f["folder"]) for part in here]
+            if len(here) < len(f["parts"]):
+                verify = " && ".join(part["run"] for part in here)
+                text += f'\n[[projects]]\nname = "{f["name"]}"\nverify = {initmod.toml_string(verify)}\n'
+        if have(secrets["tool"]):
+            parts.append(dict(secrets, part="secrets", cwd=""))
+        else:
+            left.append(f"secrets ({secrets['tool']})")
+            text = text.replace(f"verify = {initmod.toml_string(secrets['run'])}", 'verify = ""')
         report = os.environ.get("RAIL_LANGUAGES_REPORT")
         if report and left:
             with open(report, "a") as f:
                 f.write(f"{name}: not run, the tool is not on this machine: {', '.join(left)}\n")
-        here = " && ".join(part["run"] for part in parts)
-        text = text.replace(f"verify = {initmod.toml_string(verify)}", f"verify = {initmod.toml_string(here)}")
-        text, swapped = re.subn(r"(?m)^command = '''claude -p --safe-mode .*--json-schema.*$",
-                                f'command = "python3 {FAKE}"', text)
-        self.assertEqual(swapped, 1)
-        p.write(".rail/config.toml", text)
+        p.write(".rail/config.toml", stand_ins(text))
         p.git("add", "-A")
         p.git("commit", "--quiet", "-m", "set up Rail")
 
@@ -599,14 +576,24 @@ class Projects(RailTest):
               f"## Done Contract\n- Check: `{change['check']}`\n")
         claimed = p.rail("next")
         self.assertEqual((claimed["ticket"], claimed["reason"]["code"]), ("1", "IMPLEMENT"), claimed)
-        self.assertEqual(step(claimed, "setup")["result"], "pass", claimed["steps"])  # the profile's setup, run by Rail
+        set_up = [s for s in claimed["steps"] if s["step"].startswith("setup:")]  # each project's setup, run by Rail
+        self.assertTrue(set_up and all(s["result"] == "pass" for s in set_up), claimed["steps"])
         work = p.worktree("1")
 
-        # verify passes on the untouched project, and each part catches the mistake made for it.
-        code, output = shell(here, work)
+        def run_all():
+            for part in parts:
+                code, output = shell(part["run"], os.path.join(work, part["cwd"]))
+                if code:
+                    return code, f"{part['part']} in {part['cwd'] or 'the root'}: {output}"
+            return 0, ""
+
+        # Every part passes on the untouched project, and each catches the mistake made for it.
+        code, output = run_all()
         self.assertEqual(code, 0, output)
         for part in parts:
             mistake = spec["mistakes"].get((part["part"], part["tool"]))
+            if mistake and not mistake[0].startswith(part["cwd"]):
+                continue  # another project's file
             if part["part"] == "secrets":
                 edit(work, "deploy.pem", "", fake_key())
                 subprocess.run("git add -A && git commit --quiet -m 'add a key'", shell=True, cwd=work, check=True)
@@ -614,29 +601,89 @@ class Projects(RailTest):
                 subprocess.run(["git", "reset", "--quiet", "--hard", "HEAD~1"], cwd=work, check=True)
             elif mistake:
                 edit(work, *mistake)
-                code, output = shell(part["run"], work)
+                code, output = shell(part["run"], os.path.join(work, part["cwd"]))
                 subprocess.run("git checkout --quiet -- . && git clean --quiet -fd", shell=True, cwd=work, check=True)
             else:
                 continue  # an audit: these projects have no dependency to pin to a version with an advisory
             self.assertNotEqual(code, 0, f"{name} {part['part']} ({part['tool']}) passed a planted mistake:\n{output}")
             self.assertNotEqual(code, 127, f"{name} {part['part']}: the command could not run:\n{output}")
-        code, output = shell(here, work)
+        code, output = run_all()
         self.assertEqual(code, 0, output)  # every mistake is gone again
 
-        # The ticket: its test alone fails verify, through Rail; with the fix it is reviewed and merged.
+        # The ticket: its test alone fails a project's verify, through Rail; with the fix it is reviewed and merged.
         edit(work, change["test"][0], "", change["test"][1])
         failed = p.rail("advance", "1", expect=3)
-        self.assertEqual((failed["reason"]["code"], step(failed, "verify")["result"]), ("STEP_FAILED", "fail"), failed)
+        self.assertEqual(failed["reason"]["code"], "STEP_FAILED", failed)
+        self.assertEqual([(s["step"].split(":")[0], s["result"]) for s in failed["steps"] if s.get("result") == "fail"],
+                         [("verify", "fail")], failed["steps"])
         for key in ("fix", "fix_too"):
             if key in change:
                 edit(work, *change[key])
         p.queue_reviews({"summary": "Clean.", "findings": []})
         shipped = p.rail("advance", "1")
-        self.assertEqual(step(shipped, "verify")["result"], "pass", shipped["steps"])
+        checked = [s for s in shipped["steps"] if s["step"].split(":")[0] == "verify"]
+        self.assertTrue(len(checked) > 1 and all(s["result"] == "pass" for s in checked), shipped["steps"])
         self.assertEqual(step(shipped, "checks")["result"], "pass", shipped["steps"])
         self.assertEqual(p.rail("advance", "1")["state"], "merged")
         self.assertIn(change["fix"][2].strip().splitlines()[-1].strip(), p.git("show", f"main:{change['fix'][0]}"))
         self.assertEqual(p.git("show", f"main:{change['test'][0]}"), change["test"][1])
+
+    def test_a_python_service_a_typescript_app_and_a_library_both_use(self):
+        """tests/projects/shop: a uv workspace and a pnpm workspace that share `lib`. From rail init to a merged
+        ticket in the library, which runs the library's checks and both users', with the members' own commands."""
+        missing = [tool for tool in ("uv", "node", "pnpm") if not have(tool)]
+        if missing:
+            said = f"the shop project needs {', '.join(missing)} on this machine"
+            self.fail(said) if STRICT else self.skipTest(said)
+        p = Fixture(os.path.join(self.tmp, "shop"), tree=os.path.join(HERE, "projects", "shop"), init=False)
+        p.git("add", "-A")
+        p.git("commit", "--quiet", "-m", "start")
+        done = p.rail("init")
+        self.assertIn("found api (python, uv), lib-python (python, uv), lib-typescript (typescript, pnpm),"
+                      " web (typescript, pnpm). ", step(done, "projects")["detail"])
+        text = read(p.path(".rail/config.toml"))
+        found, left = initmod.found(p.root), []
+        for f in found:  # as in `project`: a part whose tool this machine lacks is left out, and said
+            here = [part for part in f["parts"] if have(part["tool"])]
+            left += [f"shop {f['name']} {part['part']} ({part['tool']})" for part in f["parts"] if part not in here]
+            if len(here) < len(f["parts"]):
+                verify = " && ".join(part["run"] for part in here)
+                text += f'\n[[projects]]\nname = "{f["name"]}"\nverify = {initmod.toml_string(verify)}\n'
+        secrets = profile("common")["secrets"]
+        if not have(secrets["tool"]):
+            left.append(f"shop secrets ({secrets['tool']})")
+            text = text.replace(f"verify = {initmod.toml_string(secrets['run'])}", 'verify = ""')
+        report = os.environ.get("RAIL_LANGUAGES_REPORT")
+        if report and left:
+            with open(report, "a") as f:
+                f.write(f"shop: not run, the tool is not on this machine: {', '.join(left)}\n")
+        p.write(".rail/config.toml", stand_ins(text))
+        p.git("add", "-A")
+        p.git("commit", "--quiet", "-m", "set up Rail")
+
+        everyone = ["lib-python", "api", "lib-typescript", "web"]
+        ran = lambda answer, family: [s["step"].split(":")[1] for s in answer["steps"]  # noqa: E731
+                                      if s["step"].startswith(family + ":") and s.get("result") == "pass"]
+        p.add('+++\ntitle = "Refuse a negative price"\ntier = "AUTO"\nscope_paths = ["lib/src/**", "lib/tests/**"]\n+++\n\n'
+              "## Why\nA negative price lowers the total of a cart, and nothing refuses it.\n\n"
+              "## Done Contract\n- Check: `cd lib && uv run pytest -q tests/test_negative.py`\n")
+        claimed = p.rail("next")
+        self.assertEqual((claimed["ticket"], claimed["reason"]["code"]), ("1", "IMPLEMENT"), claimed)
+        self.assertEqual(ran(claimed, "setup"), everyone, claimed["steps"])  # the library, then both of its users
+        work = p.worktree("1")
+        edit(work, "lib/tests/test_negative.py", "", "import unittest\n\nfrom shop_lib.money import total\n\n\n"
+             "class NegativeTest(unittest.TestCase):\n    def test_a_negative_price_is_refused(self) -> None:\n"
+             "        with self.assertRaises(ValueError):\n            total([250, -100])\n")
+        failed = p.rail("advance", "1", expect=3)
+        self.assertEqual([(s["step"], s["result"]) for s in failed["steps"] if s.get("result") == "fail"],
+                         [("verify:lib-python", "fail")], failed["steps"])
+        edit(work, "lib/src/shop_lib/money.py", "    return sum(prices)\n",
+             '    if any(price < 0 for price in prices):\n        raise ValueError("a price is negative")\n    return sum(prices)\n')
+        p.queue_reviews({"summary": "Clean.", "findings": []})
+        shipped = p.rail("advance", "1")
+        self.assertEqual(ran(shipped, "verify"), everyone, shipped["steps"])
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
+        self.assertIn("a price is negative", p.git("show", "main:lib/src/shop_lib/money.py"))
 
     def test_python(self):
         self.project("python")

@@ -1,15 +1,18 @@
-# The Go profile. rail init reads it when a tracked manifest below marks Go, and writes what it holds into the
-# project's own files (rail docs languages). After init the project's files are the project's.
+# The Go profile. The engine reads it each time it derives the projects of a tree: a folder that tracks a manifest
+# below is a project, with these commands, rules and paths (rail docs languages). Nothing of it is written into a
+# project's files.
 
+workspace = "go.work"                                      # its `use` lines name the modules
 manifests = ["go.mod"]                                     # file names, matched in any folder
 domains = ["proxy.golang.org", "sum.golang.org"]           # the module proxy and the checksum database
 generated = ["**/*.pb.go"]                                 # protobuf and gRPC output, left out of the size count
 migration_paths = []
 tests = ["**/*_test.go", "**/testdata/**"]
 
-# The commands rail init writes into [commands] when the project's config is new: `setup`, and the parts of
-# `verify`. Each part names the tool it needs on the machine; `audit` runs only on a change that touches go.sum.
-# -race needs cgo and a C compiler. The repository's own commands win over these (rail docs languages).
+# A project's commands: `setup`, and the parts of `verify`, run in the project's folder. Each part names the tool
+# it needs on the machine; `audit` runs only on a change that touches go.sum. -race needs cgo and a C compiler.
+# A module of a go.work is a project of its own with these same commands. A [[projects]] entry of the config
+# puts the repository's own commands in their place (rail docs languages).
 [[managers]]
 name = "go"
 lockfile = "go.sum"

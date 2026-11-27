@@ -287,6 +287,15 @@ def checks_changed(project, t, ref, patch_id):
     return lines
 
 
+def unchecked(project, ref):
+    """The files of the change that are inside no project, in a folder the engine asks about (rail docs languages):
+    no check read them."""
+    here = project.layout(ref)
+    folders = here.uncovered()
+    return [path for path in project.changed_files(ref) if path in here.tree.names and not here.owners(path)
+            and any(path.startswith(folder + "/") for folder in folders)]
+
+
 def brief(project, f, role, ledger, disputed=None):
     t, ref = f.t, f.t.ref
     ticket_text = gitx.read_blobs([f"{ref}:{ticket_path(t.id)}"], project.root)[f"{ref}:{ticket_path(t.id)}"] or ""
@@ -314,6 +323,7 @@ def brief(project, f, role, ledger, disputed=None):
     from . import tools
     reviewer_tools = tools.lines(tools.declared(project, review=True), review=True)
     checked = checks_changed(project, t, ref, patch)
+    loose = unchecked(project, ref)
     parts = [
         f"# Review brief: ticket {t.id}, {f.tier}", "", f"This run's job: {job}", "",
         "## The ticket", ticket_text.strip(), "",
@@ -332,6 +342,12 @@ def brief(project, f, role, ledger, disputed=None):
            "The change edits these itself. A test that was weakened until it passed, or guidance that was loosened, is"
            " a finding unless the contract asks for the new behaviour.", *checked, ""]
           if checked and role in ("review", "security") else []),
+        # Not tested with a model run: the wording of this section.
+        *(["## Files of this change that no check read",
+           "These files are inside no project of the repository, so no command checked them at ship. What they do is"
+           " yours to read. When a file is of a kind a revert does not undo, such as infrastructure code or a schema,"
+           " list it in `kinds`.", *[f"- {path}" for path in loose], ""]
+          if loose and role in ("review", "security") else []),
         *(["## Tools", *reviewer_tools, ""] if reviewer_tools else []),
         "## The diff", "```diff", diff, "```", "",
         "## Areas this change touches", "| Area | Paths | Holds |", "|---|---|---|", rows, "",

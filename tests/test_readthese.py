@@ -48,7 +48,9 @@ class Body(RailTest):
         self.assertLess(body.index("## Read these"), body.index("## Look at"))
 
     def test_markers_flag_rules_manifests_and_gitattributes_are_listed_with_their_lines(self):
-        p = self.fixture(config=CONFIG + FLAG, files={"pyproject.toml": "[project]\nname = 'calc'\n"})
+        # The manifest marks a project at the root; this test is about the body, so the project runs no command.
+        p = self.fixture(config=CONFIG + FLAG + '\n[[projects]]\nname = "root"\nsetup = ""\nverify = ""\n',
+                         files={"pyproject.toml": "[project]\nname = 'calc'\n"})
         p.add(ticket(scope=("src/**", "pyproject.toml", ".gitattributes")))
         p.rail("next")
         work = p.worktree("1")

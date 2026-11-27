@@ -25,9 +25,11 @@ READERS = {
                        " reversibility and rollback",
     **{f"kinds.{kind}": f"add, amend and ship: paths that hold the kind `{kind}` (rail docs kinds); a ticket whose"
                         f" scope or changed files match one is PERSON" for kind in KINDS},
-    "commands.setup": "the claim: runs in each new ticket worktree, with RAIL_TICKET set; rail adopt: runs in the"
+    "commands.setup": "the claim: runs in each new ticket worktree at the repository's root, with RAIL_TICKET set,"
+                      " after the setup of each project the ticket's scope reaches; rail adopt: runs in the"
                       " throwaway worktrees on the base and the branch before its checks",
-    "commands.verify": "ship and CI: the whole project's checks, scanners included",
+    "commands.verify": "ship and CI: checks of the whole repository, run at its root on every change after the"
+                       " verify of each project the change reaches (rail docs languages)",
     "commands.provision": "rail provision, next in a cloud session, and CI: installs what the machine lacks, once"
                           " per machine, as root. Never run on a person's own machine",
     "commands.timeout_secs": "every command: setup, verify, provision, each check, each review run, each source's"
@@ -97,8 +99,8 @@ READERS = {
                       " path of the schema its JSON answer must match) and RAIL_TRIAGE (the question's type) set."
                       " Empty: review.command (rail docs triage)",
     "triage.model": "advance: the model a triage run is on. Empty: review.model",
-    "tests.paths": "ship and the review: globs of the files that hold tests and their runner's settings, which rail"
-                   " init writes from the language profiles it finds (rail docs languages). When a change edits,"
+    "tests.paths": "ship and the review: globs of the files that hold tests and their runner's settings, besides the"
+                   " ones the profile of each project found names (rail docs languages). When a change edits,"
                    " deletes or renames one the base branch has, ship runs verify and each Check: line once more"
                    " with the base's version, and a command that then fails raises the old-test question (rail docs"
                    " triage). The reviewer's brief lists the changed ones. Empty switches both off",
@@ -108,14 +110,15 @@ READERS = {
     "init.skill_dirs": "init: the folders, from the repository root, that rail init writes the skills to. An agent"
                        " other than Claude Code reads SKILL.md files from a folder of its own: add it, and run rail"
                        " init again. The [guides] pages that are skills name the first",
-    "init.other_manifests": "init, doctor and the sweep: globs of tracked manifests that mark no code of the project's"
-                            " own, such as a package.json kept for a formatter. Any other manifest of Python,"
-                            " TypeScript, Rust or Go needs a [[profiles]] entry that covers it (rail docs languages)",
+    "init.other_manifests": "every command that works out the projects: globs of tracked manifests that mark no"
+                            " project, such as a package.json kept for a formatter. Any other manifest of Python,"
+                            " TypeScript, Rust or Go marks one (rail docs languages)",
     "tools": "next, advance, review and doctor: a [tools.NAME] table for each thing the work reaches outside the"
              " repository, listed in the briefs; a ticket is not claimed while a name in its `env` is not set, and"
              " only the key of a tool with `ci = true` may be in a ticket branch's reach (rail docs tools)",
-    "profiles": "nothing yet: the language profiles rail init found, each a name and the paths that hold its files"
-                " (rail docs languages)",
+    "projects": "the claim, ship, CI, adopt and doctor: each [[projects]] entry changes a project Rail found from a"
+                " tracked manifest, by its name, or declares one no manifest marks: the paths that hold its files,"
+                " its setup and verify commands, and the projects it uses (rail docs languages)",
     "guides.start": "next and advance: the page whose text a ticket's first IMPLEMENT brief carries, once per"
                     " ticket. Each guides key is a path from the repository root, optionally followed by #Heading"
                     " for each section to take, or empty for none; a config with no [guides] table adds none"

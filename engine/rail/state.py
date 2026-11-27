@@ -5,7 +5,7 @@ import os
 from . import gitx
 from .project import NON_PRODUCT, ticket_path
 from .ticket import KINDS, TIERS, Ticket, highest, lint
-from .util import globs_overlap, match_any, minutes_since
+from .util import family, globs_overlap, match_any, minutes_since
 
 OPEN = ("implementing", "reviewing", "in-ci", "merge-ready")  # claimed and not finished
 SHIP_STEPS = ("rebase", "ticket-lint", "assumptions", "scope", "change", "rules", "migration", "size", "doc-lint", "verify",
@@ -34,10 +34,20 @@ def floor(project, scope):
         project._tracked = listing.stdout.splitlines()
 
     inside = [f for f in project._tracked if match_any(scope, f)]
+    origins = getattr(project, "origins", {})
+
+    def could(s, g):
+        # A glob a profile brought is its own glob under one project's path (api/** and **/alembic/versions/** give
+        # api/**/alembic/versions/**), and the text of that would match every scope under the path: the scope is
+        # held against the two parts instead.
+        if g in origins:
+            path, glob = origins[g]
+            return globs_overlap(s, path) and globs_overlap(s, glob)
+        return globs_overlap(s, g)
 
     def hit(globs):
         path = next((f for f in inside if match_any(globs, f)), None)
-        return path or next((s for s in scope for g in globs if globs_overlap(s, g)), None)
+        return path or next((s for s in scope for g in globs if could(s, g)), None)
 
     found = [(kind, path, key) for kind, globs, key in kind_paths(project.config) if (path := hit(globs))]
     return ("PERSON" if found else "AUTO"), found
@@ -98,6 +108,8 @@ class Facts:
         self.merge_note = project.cache_read("merge", t.id)
         self.red_base = None
         self.sweep = bool(self.ticket) and (self.ticket.get("external_id") or "").startswith("sweep#")
+        # The ticket the engine files to ask about the folders inside no project: its ship is all there is to it.
+        self.asks_coverage = bool(self.ticket) and (self.ticket.get("external_id") or "").startswith("coverage#")
         # A sweep is done once its review run is stored, or once its harvest step passed when nothing needed one.
         harvest = [e for e in t.events if e.get("event") == "step" and e.get("step") == "harvest"
                    and e.get("result") == "pass"]
@@ -243,7 +255,7 @@ class Facts:
                     passed = step
                 else:
                     passed = None
-                if (e.get("result") != "pass" and e.get("counted") is False and step in SHIP_STEPS
+                if (e.get("result") != "pass" and e.get("counted") is False and family(step) in SHIP_STEPS
                         and (e.get("status") == "could_not_run" or e.get("tools_down"))):
                     # The machine's failure, not the change's: a program the shell could not start, or a declared
                     # tool out of reach. It spends no attempt; the same one twice in a row waits for a person.
@@ -409,7 +421,7 @@ class Facts:
                 with open(copy) as f:
                     self.open_assumptions = Ticket(f.read()).open_assumptions()
         steps = [e for e in t.events if e.get("event") == "step"]
-        setups = [e for e in steps if e.get("step") == "setup"]
+        setups = [e for e in steps if family(e.get("step")) == "setup"]
         if setups and setups[-1].get("result") == "fail":
             self.setup_failed = setups[-1]
         # The last word on the current patch: a shipped event, a split offered, a ship step that failed, or a triage
@@ -419,7 +431,7 @@ class Facts:
         again = max((i for i, e in enumerate(t.events) if e.get("event") == "restarted"), default=-1)
         verdicts = [e for e in t.events[again + 1:] if e.get("patch_id") == self.patch_id and (
             e.get("event") in ("shipped", "split_offered") or (e.get("event") == "step" and e.get("result") == "fail"
-                                                              and (e.get("step") in SHIP_STEPS or _stops(e))))]
+                                                              and (family(e.get("step")) in SHIP_STEPS or _stops(e))))]
         if verdicts and verdicts[-1].get("event") == "shipped":
             self.shipped = verdicts[-1]
         elif verdicts and verdicts[-1].get("event") == "split_offered":

@@ -141,7 +141,8 @@ def section(project, ticket, found, added_count, reviewed):
     if not found:
         lines.append("Nothing needs a person's eye.")
     listed = len({(x["path"], n) for x in found if x["path"] for n in x["lines"]})
-    by = (["verify"] if project.config["commands"]["verify"].strip() else []) \
+    verified = project.config["commands"]["verify"].strip() or any(p["verify"] for p in project.layout(project.base_ref).projects)
+    by = (["verify"] if verified else []) \
         + [f"{len(ticket.checks())} check{'' if len(ticket.checks()) == 1 else 's'}"] \
         + (["the reviewer"] if reviewed else [])
     checked = by[0] if len(by) == 1 else f"{', '.join(by[:-1])} and {by[-1]}"

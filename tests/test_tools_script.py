@@ -99,7 +99,7 @@ class Tools(RailTest):
 
     def test_every_tool_a_profile_names_is_installed_here_or_comes_with_the_machine_or_the_project(self):
         named = set()
-        for path in glob.glob(os.path.join(FRAMEWORK, "profiles", "*", "profile.toml")):
+        for path in glob.glob(os.path.join(FRAMEWORK, "engine", "profiles", "*", "profile.toml")):
             with open(path) as f:
                 named |= set(re.findall(r'\btool = "([^"]+)"', f.read()))
         self.assertTrue(named, "the profiles name their tools")

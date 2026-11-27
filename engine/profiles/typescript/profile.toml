@@ -1,6 +1,8 @@
-# The TypeScript profile, which JavaScript gets too. rail init reads it when a tracked manifest below marks it, and
-# writes what it holds into the project's own files (rail docs languages). After init the files are the project's.
+# The TypeScript profile, which JavaScript gets too. The engine reads it each time it derives the projects of a tree: a
+# folder that tracks a manifest below is a project, with these commands, rules and paths (rail docs languages).
+# Nothing of it is written into a project's files.
 
+workspace = "pnpm-workspace.yaml"                          # its `packages` list names the members
 manifests = ["package.json"]                               # file names, matched in any folder
 type_check_file = "tsconfig.json"                          # type checking is on only where one is tracked
 domains = ["registry.npmjs.org", "registry.yarnpkg.com"]   # npm's registry (npm, pnpm, Bun) and Yarn's default
@@ -9,20 +11,23 @@ migration_paths = ["**/drizzle/**"]                        # Drizzle Kit's migra
 tests = ["**/*.test.*", "**/*.spec.*", "**/__tests__/**", "**/e2e/**", "**/vitest.config.*",
          "**/playwright.config.*"]
 
-# The commands rail init writes into [commands] when the project's config is new: `setup`, and the parts of
-# `verify`. The manager is the first whose lockfile is tracked beside the manifest; with none, the first one. Each
+# A project's commands: `setup`, and the parts of `verify`, run in the project's folder. The manager is the first
+# whose lockfile is tracked beside the manifest, or at the workspace's root; with none, the first one. Each
 # part names the tool it needs on the machine. `types` runs only where a tsconfig.json is tracked; `audit` only on
 # a change that touches the lockfile. Installs run no dependency's lifecycle scripts. oxlint reports its default
-# rules as warnings and exits 0 on them, so the lint part runs it with --deny-warnings. The project's own formatter
-# check and scripts win over these (rail docs languages).
+# rules as warnings and exits 0 on them, so the lint part runs it with --deny-warnings. `member_setup` and a
+# part's `member` are what a member of a pnpm workspace runs, where {name} is the member's package name; not
+# checked on a machine with pnpm. A [[projects]] entry of the config puts the repository's own formatter check
+# and scripts in their place (rail docs languages).
 [[managers]]
 name = "pnpm"
 lockfile = "pnpm-lock.yaml"
 setup = "pnpm install --frozen-lockfile --ignore-scripts"
+member_setup = "pnpm install --frozen-lockfile --ignore-scripts --filter {name}..."
 verify = [
-  { part = "lint", tool = "oxlint", run = "pnpm exec oxlint --deny-warnings" },
-  { part = "types", tool = "tsc", run = "pnpm exec tsc --noEmit" },
-  { part = "tests", tool = "pnpm", run = "pnpm test" },
+  { part = "lint", tool = "oxlint", run = "pnpm exec oxlint --deny-warnings", member = "pnpm --filter {name} exec oxlint --deny-warnings" },
+  { part = "types", tool = "tsc", run = "pnpm exec tsc --noEmit", member = "pnpm --filter {name} exec tsc --noEmit" },
+  { part = "tests", tool = "pnpm", run = "pnpm test", member = "pnpm --filter {name} test" },
   { part = "audit", tool = "pnpm", run = "pnpm audit" },
 ]
 
