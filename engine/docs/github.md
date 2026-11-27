@@ -48,6 +48,9 @@ merged ticket costs in calls.
   merges a PERSON ticket by pressing the button, and that is the one act it takes. A person who closes the pull
   request instead drops the ticket; the drop's mark says a person did it, and for a PERSON ticket its kinds, which
   `rail stats` counts (`rail docs stats`).
+- A ticket from an issue closes it when it merges (`Closes #N` in its pull request). While another open ticket
+  names the same issue, as the parts of a ticket that was split do, it says `Part of #N` instead, and the last
+  of them to merge closes the issue (`rail docs retries`).
 
 ## Testing every merge on the latest base
 

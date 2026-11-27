@@ -67,9 +67,10 @@ READERS = {
                      " model:effort, one rung per failed attempt at the step the ticket is failing. Empty names none",
     "worker.person_ladder": "next, advance and work: the same ladder for a PERSON ticket, which starts higher",
     "worker.contract": "next and work: the model:effort the task that writes a ticket's contract (TICKET_LINT), the"
-                       " task that files a sweep's tickets (SWEEP_TICKETS) and the task that decides on a dropped"
-                       " `after` (AFTER_DROPPED) name. A contract is accepted with nobody looking, so it gets a"
-                       " stronger model. Empty: the ladder's",
+                       " task that files a sweep's tickets (SWEEP_TICKETS), the task that decides on a dropped"
+                       " `after` (AFTER_DROPPED) and the tasks the diagnosis of a stuck ticket gives the contract"
+                       " writer (STUCK_CONTRACT, STUCK_SPLIT) name; the diagnosis itself runs on its model. A"
+                       " contract is accepted with nobody looking, so it gets a stronger model. Empty: the ladder's",
     "worker.command": "work: the worker, run in the answer's cwd with the brief on stdin and RAIL_TICKET, RAIL_MODEL,"
                       " RAIL_EFFORT, RAIL_SESSION (a session to resume, or empty), ANTHROPIC_MODEL and RAIL_WORKER=1"
                       " set. The engine reads total_cost_usd, session_id, num_turns and subtype from its last JSON"

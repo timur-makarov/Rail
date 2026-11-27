@@ -6,8 +6,8 @@ Rail: the request is filed as `rail intake` files an issue, then each answer of 
 - a script that is a rail command runs as given (`rail advance`, `rail next --ticket`, `rail sweep`);
 - a wait for a person on a PERSON ticket (approve the contract or an amend, merge) is answered with `rail accept NN`
   and counted;
-- STUCK (an AUTO ticket at the retry cap, which the next `rail next` drops with its worktree and branch) ends the run
-  before that drop, so the change at the stop is still there to grade;
+- an AUTO ticket at the retry cap ends the run as STUCK, before `rail next` gives it its diagnosis and may drop it
+  with its worktree and branch, so the change at the stop is still there to grade;
 - any other wait, rest or task ends the run, and its code is how it ended.
 
 Plain: the request, one fixed sentence, and the project's commands go to the arm's worker command once. See
@@ -178,9 +178,11 @@ def engine_default(table, key):
 
 
 def stopped(answer):
-    """End the run at STUCK: the engine's drop, which its script (`rail next --ticket NN`) or any later `rail next` makes,
-    removes the ticket's worktree and branch, and with them the change at the stop."""
-    if (answer.get("reason") or {}).get("code") == "STUCK":
+    """End the run at STUCK, an AUTO ticket at its retry cap. Its script (`rail next --ticket NN`) or any later `rail
+    next` starts the ticket's diagnosis and may then drop it, and the drop removes the ticket's worktree and branch,
+    and with them the change at the stop."""
+    code = (answer.get("reason") or {}).get("code")
+    if code == "STUCK" or (code == "DIAGNOSE" and answer.get("tier") == "AUTO"):
         raise Ended("STUCK", detail=((answer.get("action") or {}).get("brief") or "")[:300])
 
 

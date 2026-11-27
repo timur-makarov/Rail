@@ -302,6 +302,7 @@
           "code": {
             "type": "string",
             "enum": [
+              "BAD_REPLACEMENT",
               "BAD_SOURCE",
               "CONSULT_LIMIT",
               "GIT",
@@ -722,6 +723,15 @@
         "script"
       ]
     },
+    "DIAGNOSE": {
+      "says": "A ticket at its retry budget or cap that has had no diagnosis: next starts the one run that says why it is stuck, before it is dropped or waits.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
     "DOCS": {
       "says": "rail docs.",
       "owners": [
@@ -979,6 +989,12 @@
                   },
                   "file": {
                     "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
                   }
                 }
               },
@@ -986,7 +1002,7 @@
                 "type": "null"
               }
             ],
-            "description": "Until the next ship: the branch the engine replaced with this one, started again from the base, and the scan's rule and file of the secret its commits held."
+            "description": "Until the next ship: the branch the engine replaced with this one, started again from the base; the type of the question that led to it; the scan's rule and file of the secret its commits held, or what the diagnosis of a stuck ticket said its attempts shared."
           }
         }
       }
@@ -1295,7 +1311,7 @@
       }
     },
     "RESTART": {
-      "says": "A person has rotated the secret: next starts the ticket's branch again from the base, under a new name.",
+      "says": "A person has rotated the secret, or the diagnosis of a stuck ticket judged that its attempts share a mistake: next starts the ticket's branch again from the base, under a new name.",
       "owners": [
         "agent"
       ],
@@ -1313,7 +1329,7 @@
       ]
     },
     "RETRY_CAP": {
-      "says": "A PERSON ticket is at the retry budget or cap.",
+      "says": "A PERSON ticket is at the retry budget or cap, and its diagnosis names nothing to do.",
       "owners": [
         "person"
       ],
@@ -1332,6 +1348,9 @@
         "properties": {
           "stuck": {
             "$ref": "#/$defs/stuck"
+          },
+          "diagnosis": {
+            "$ref": "#/$defs/diagnosis"
           },
           "could_not_run": {
             "type": "array",
@@ -1777,7 +1796,7 @@
       }
     },
     "STUCK": {
-      "says": "An AUTO ticket at the retry budget or cap: next drops it with a record.",
+      "says": "An AUTO ticket at the retry budget or cap, whose diagnosis names nothing to do: next drops it with a record.",
       "owners": [
         "agent"
       ],
@@ -1793,6 +1812,37 @@
         "properties": {
           "stuck": {
             "$ref": "#/$defs/stuck"
+          },
+          "diagnosis": {
+            "$ref": "#/$defs/diagnosis"
+          }
+        }
+      }
+    },
+    "STUCK_CONTRACT": {
+      "says": "The diagnosis of a stuck ticket judged that its contract is at fault: the contract writer amends it.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stuck",
+          "diagnosis"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "stuck": {
+            "$ref": "#/$defs/stuck"
+          },
+          "diagnosis": {
+            "$ref": "#/$defs/diagnosis"
           }
         }
       }
@@ -1829,6 +1879,45 @@
           },
           "wait": {
             "$ref": "#/$defs/wait"
+          }
+        }
+      }
+    },
+    "STUCK_SPLIT": {
+      "says": "The diagnosis of a stuck ticket judged that the work is more than one ticket: the contract writer files the parts and drops this one.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stuck",
+          "diagnosis"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "stuck": {
+            "$ref": "#/$defs/stuck"
+          },
+          "diagnosis": {
+            "$ref": "#/$defs/diagnosis"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The issue the ticket came from, which the engine writes into each ticket that replaces it."
           }
         }
       }
@@ -1921,7 +2010,7 @@
       }
     },
     "TOOL_DOWN": {
-      "says": "A step failed for the machine's own reason twice in a row: a tool out of reach, or a command that could not run.",
+      "says": "A step failed for the machine's own reason twice in a row: a tool out of reach, or a command that could not run. Or the diagnosis of a stuck ticket judged that the machine is at fault.",
       "owners": [
         "person"
       ],
@@ -1949,6 +2038,9 @@
           },
           "wait": {
             "$ref": "#/$defs/wait"
+          },
+          "diagnosis": {
+            "$ref": "#/$defs/diagnosis"
           }
         }
       }
@@ -2345,6 +2437,43 @@
         }
       },
       "description": "Each step at its limit: cap ([retry] cap failures of any kind), same (the same failure [retry] budget times in a row), consulted (once more after consult advised)."
+    },
+    "diagnosis": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "answer",
+            "means"
+          ],
+          "properties": {
+            "answer": {
+              "type": "string",
+              "enum": [
+                "contract",
+                "too-large",
+                "approach",
+                "machine",
+                "cannot-tell"
+              ]
+            },
+            "means": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The one diagnosis the ticket got at its retry cap, from a run that did not write the change: its answer, what the answer means, the run's reason and what it names. Null while it has no answer."
     },
     "revert": {
       "type": "object",

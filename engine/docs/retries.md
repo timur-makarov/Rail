@@ -17,11 +17,46 @@ same failures starts again at 1.
 signatures, the ticket is stuck. This is what stops an agent that keeps producing new errors.
 An agent could also make a failure look new by changing the text it prints; the cap bounds that too.
 
-**A stuck ticket.** An AUTO ticket that is stuck is dropped by the engine with a record (`STUCK`): nothing
+**A stuck ticket gets one diagnosis.** Before anything else happens to it, a run that did not write the change
+says why the attempts fail: a stuck ticket more often has a wrong or too large contract than a worker that
+needs a hint. `rail next` answers `DIAGNOSE` for the ticket, on either tier, and `rail next --ticket NN` starts
+the run. It is a question of the triage step (`rail docs triage`), type `stuck`, on the contract writer's
+model (`[worker] contract`), with `[triage] command`. The brief shows the ticket, each failed attempt in the
+journal with its step, signature and detail, the last attempt's output where this machine still has it, the
+reviewer's findings, consult's advice, and the change. Consult advises the worker about the code, before the
+cap; the diagnosis asks whether the contract is at fault. `rail advance` ships nothing until it is made.
+
+| Answer | Its evidence, and the engine's check | What happens then |
+|---|---|---|
+| `contract`: a `Check:` line or a Done Contract item is wrong, or two contradict each other | The line or lines, word for word: each is in the Done Contract | `STUCK_CONTRACT`, a task for the contract writer: amend the contract (`rail amend NN "why"`). The amend gives a fresh budget and cap |
+| `too-large`: the work is more than one ticket | The parts, one on each line: at least two | `STUCK_SPLIT`, a task for the contract writer: file a ticket for each part with `rail add`, then drop this one with `rail drop NN --reason "why" --replaced-by A,B` |
+| `approach`: the contract is right, and the attempts share a mistake | What they share, and what to do instead | The engine starts the ticket's branch again from the base branch under a new name (`RESTART`, as after a rotated secret: `rail docs triage`), the worker's next brief has what the run named, and the budget and cap start again |
+| `machine`: the failures are the machine's or a tool's | The failure that shows it | The ticket waits for a person (`TOOL_DOWN`, below) |
+| `cannot-tell` | None | As without a diagnosis (below) |
+
+- **Once.** A ticket gets one diagnosis. At the cap again after it, the ticket is dropped or waits as below,
+  and the record and the wait's brief have the diagnosis.
+- **No answer.** A run that timed out, gave invalid output or named evidence that fails the check is started
+  once more. After two such runs the ticket is handled as if the answer were `cannot-tell`, and so it is when
+  neither `[triage] command` nor `[review] command` is set.
+- **The tier stays.** No answer changes it: a PERSON ticket whose contract the diagnosis amended still stops at
+  the person's merge.
+- **A split ticket's issue stays open.** The drop's record names the tickets that replace it. When the ticket
+  came from a GitHub issue, the engine writes that issue into each of them (`external_id`), the issue keeps
+  its `rail` label and gets a comment, and each part's pull request says `Part of #N` while another part is
+  open. The last part's says `Closes #N`.
+
+The wording of the diagnosis and of the two tasks has not been tested with a model run. Assumed, not
+verified: that a fresh run can tell a wrong contract from a wrong approach from the journal and the change.
+
+**With no diagnosis to act on,** an AUTO ticket that is stuck is dropped by the engine with a record
+(`STUCK`): nothing
 merged, so nothing needs undoing, and a wait would only spend a person's attention on doubt. `rail next` writes a
-`dropped` event with `by: "engine"`, the step and its last failure's signature; writes the drop's mark on the
+`dropped` event with `by: "engine"`, the step, its last failure's signature and the diagnosis's answer; writes
+the drop's mark on the
 counter branch; closes the pull request; takes the `rail` label off the issue with a comment that says what was
-tried and why it stopped; and removes the worktree and branches. The closed pull request keeps the commits on
+tried, why it stopped and what the diagnosis said; and removes the worktree and branches. The closed pull
+request keeps the commits on
 GitHub. To try again, label the issue `rail` again. A PERSON ticket that is stuck waits for a person
 (`RETRY_CAP`): a person is there anyway.
 

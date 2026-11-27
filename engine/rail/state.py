@@ -136,6 +136,7 @@ class Facts:
         held, where = waiting(t.events)
         self.triage_wait = held if where == "wait" else None
         self.restart_due = held if where == "restart" else None
+        self._diagnosis(project)
         self.state = self._state()
 
     def _revert(self, project):
@@ -168,6 +169,26 @@ class Facts:
                 return stop
         return None
 
+    def _diagnosis(self, project):
+        """The one diagnosis a ticket gets at its retry cap (rail docs retries). `diagnose_due`: the cap is reached and
+        the question has no answer yet; two runs that gave none count as `cannot-tell`. `diagnosed`: its answer, while
+        what the answer leads to is still to do, which is until something gives the ticket a fresh budget. A ticket
+        that reaches the cap again after that is handled as one with no diagnosis."""
+        from . import triage
+        q = self.diagnosis = triage.diagnosis(self.t.events)
+        answer = q["answer"] if q else None
+        self.diagnose_due = bool(self.capped) and bool(triage.command(project)[0]) and not answer and not (
+            q and q["runs_without_answer"] >= triage.STUCK_RUNS)
+        self.diagnosed = (answer["answer"] if answer and self.capped and answer["at_index"] > self.fresh_at
+                          and triage.diagnosed(q) else None)
+        if self.diagnosed == "approach" and not self.restart_due:
+            self.restart_due = q  # the branch starts again from the base, with no person
+        if self.diagnosed == "machine" and not self.machine_stuck:
+            step = self.capped[0]
+            last = [e for e in self.t.events if e.get("event") == "step" and e.get("step") == step
+                    and e.get("result") == "fail"]
+            self.machine_stuck = (last[-1] if last else {"step": step}, self.attempts.get(step, 0))
+
     def _budgets(self, project, events):
         """Retry budgets and the waits derived from the journal. A step is stuck when it fails the same way
         retry.budget times in a row; whatever the failures, retry.cap of them since it last passed wait for a person."""
@@ -186,6 +207,8 @@ class Facts:
                 faults.pop(passed, None)
 
         accepted_at = amended_at = shipped_at = continued_at = -1
+        fresh = -1       # where the budget and cap last started again: a person's act, or a diagnosis's remedy
+        remedy = None    # the answer of the diagnosis of a stuck ticket, until what it leads to is done
         self.amend_reason = ""
         spent = {}  # what the ticket's runs reported they cost since a person last acted, by what ran
         for i, e in enumerate(events):
@@ -197,9 +220,17 @@ class Facts:
             if passed is not None and not (kind == "step" and e.get("step") == passed):
                 settle()
                 passed = None
+            if kind == "answered" and e.get("type") == "stuck" and e.get("evidence_ok") is not False:
+                remedy = e.get("answer")
+            if (kind == "amended" and remedy == "contract") or (kind == "restarted" and e.get("type") == "stuck"):
+                # What the diagnosis of a stuck ticket led to is done, the amended contract or the branch started
+                # again: a fresh budget and a fresh cap, with no person. What the runs cost still counts.
+                attempts, same, seen, consulted, remedy, fresh = {}, {}, {}, {}, None, i
+                faults.clear()
             if kind == "continued" or (kind == "accepted" and e.get("by") == "person"):
                 # A person's act gives a fresh budget and a fresh cap, whether it continues a wait or approves.
                 attempts, same, seen, consulted, since = {}, {}, {}, {}, i
+                fresh = i
                 spent = {}
                 faults.clear()
                 if kind == "accepted":
@@ -241,6 +272,7 @@ class Facts:
             elif kind == "shipped":
                 shipped_at = i
         settle()
+        self.fresh_at = fresh
         self.consults = sum(1 for e in events if e.get("event") == "consulted")
         pack = os.path.join(project.root, ".rail", "packs", "consult", "bin", "consult")
         can_consult = os.path.exists(pack) and self.consults < 3
@@ -382,7 +414,10 @@ class Facts:
             self.setup_failed = setups[-1]
         # The last word on the current patch: a shipped event, a split offered, a ship step that failed, or a triage
         # answer that stops the change (a triage run with no answer is not the change's failure).
-        verdicts = [e for e in t.events if e.get("patch_id") == self.patch_id and (
+        # A branch the engine started again from the base has nothing of the old one's work: what was said of a patch
+        # there says nothing of this one, even where the two are the same, such as no change at all.
+        again = max((i for i, e in enumerate(t.events) if e.get("event") == "restarted"), default=-1)
+        verdicts = [e for e in t.events[again + 1:] if e.get("patch_id") == self.patch_id and (
             e.get("event") in ("shipped", "split_offered") or (e.get("event") == "step" and e.get("result") == "fail"
                                                               and (e.get("step") in SHIP_STEPS or _stops(e))))]
         if verdicts and verdicts[-1].get("event") == "shipped":

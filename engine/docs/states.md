@@ -15,7 +15,7 @@ new -> accepted -> implementing -> reviewing -> in-ci -> merge-ready -> merged
 | `in-ci` | Shipped and reviewed, with a remote: waiting for the required checks on the pull request |
 | `merge-ready` | Ready to merge. An AUTO ticket merges with `rail advance NN`; a PERSON ticket waits for a person's merge, the one act it takes |
 | `merged` | A squash commit with `Ticket: NN` is on the base branch |
-| `dropped` | `rail drop NN` ended it, the engine dropped an AUTO ticket at the retry cap (`STUCK`), or its pull request was closed without a merge. Until the drop's mark is on the counter branch, the ticket keeps its worktree, branches and pull request (`DROP_PENDING`) |
+| `dropped` | `rail drop NN` ended it, the engine dropped an AUTO ticket at the retry cap after its diagnosis (`STUCK`), or its pull request was closed without a merge. Until the drop's mark is on the counter branch, the ticket keeps its worktree, branches and pull request (`DROP_PENDING`) |
 
 With a pull request, a conflict with the base or a red required check returns a shipped ticket to
 `implementing`, with the check's output in the brief.

@@ -537,8 +537,11 @@ def describe(project, t, ticket, tier):
     if reverted and reverted[1]:
         body.append(f"Reverts: {reverted[1]}")  # rail stats reads it: a squash has neither of git's revert wordings
     if external.startswith("github#"):
-        # A ticket narrowed to the first part of its request leaves the issue open for the rest.
-        word = "Part of" if ticket.sections.get("Split") else "Closes"
+        # A ticket narrowed to the first part of its request leaves the issue open for the rest, and so does one of
+        # several tickets for the same issue while another of them is still open (the parts of a split ticket).
+        others = [x for x in project.tickets().values() if x.id != t.id and x.ticket and x.ticket.get("external_id") == external
+                  and not x.merged and not x.dropped_mark and not x.last("dropped")]
+        word = "Part of" if ticket.sections.get("Split") or others else "Closes"
         body.append(f"{word} #{external.split('#', 1)[1]}")
     if external.startswith("smoke#"):
         body.append(f"Part of #{external.split('#', 1)[1]}")  # the fix after this revert closes the issue

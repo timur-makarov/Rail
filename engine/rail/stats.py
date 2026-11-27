@@ -230,6 +230,26 @@ def drops(tickets, start):
             "person_refused": dict(sorted(refused.items())), "cost_usd": round(cost, 4)}
 
 
+def stuck(tickets, start):
+    """The tickets that got a diagnosis at their retry cap (those requested on or after `start`), by its answer, and
+    how many merged afterwards: themselves, or, for a ticket that was split, every ticket that replaced it. Read from
+    the journals and, for a dropped ticket, from its drop mark."""
+    from . import triage
+    answers, merged = Counter(), 0
+    for t in tickets.values():
+        record = t.dropped_record or (t.last("dropped") if not t.merged else None) or {}
+        answer = (triage.diagnosed(triage.diagnosis(t.events)) or {}).get("answer") or record.get("diagnosis")
+        if not answer:
+            continue
+        req = next((e for e in t.events if e.get("event") == "requested"), None) or t.dropped_request
+        if start is not None and (not req or parse_iso(req["at"]).timestamp() < start):
+            continue
+        answers[answer] += 1
+        parts = [tickets.get(nn) for nn in record.get("replaced_by") or []]
+        merged += bool(t.merged or (parts and all(x is not None and x.merged for x in parts)))
+    return {"diagnosed": sum(answers.values()), "answers": dict(sorted(answers.items())), "merged_after": merged}
+
+
 def _held_a_kind(tickets):
     """{id of a ticket: the kinds a later PERSON ticket that names it in caused_by holds}. Such a ticket did
     something a revert doesn't undo: when it merged AUTO, nobody was asked."""
@@ -535,7 +555,7 @@ def collect(project, tickets, since=None, states=None, now=None):
         # What the triage step asked about the merged tickets' patches: for each type its questions, the answers
         # they ended with, the runs, those that gave no answer, and what the runs reported they cost.
         "triage": {name: dict(row, cost_usd=round(row["cost_usd"], 4)) for name, row in sorted(questions.items())},
-        "tiers": tiers, "raised": dict(raised), "drops": drops(tickets, start),
+        "tiers": tiers, "raised": dict(raised), "drops": drops(tickets, start), "stuck": stuck(tickets, start),
         # AUTO tickets a later PERSON ticket names as its cause, by that ticket's kinds: nobody was asked.
         "auto_held_a_kind": {"tickets": under["tickets"], "kinds": dict(sorted(under["kinds"].items()))},
         "base_checks": base, "adopted": adopted, "split": split, "size": {"cap": cap, **sizes},
@@ -658,6 +678,15 @@ def render_drops(data):
     return [line]
 
 
+def render_stuck(data):
+    found = data["stuck"]
+    if not found["diagnosed"]:
+        return []
+    return [f"Stuck tickets that got a diagnosis: {found['diagnosed']}"
+            f" ({', '.join(f'{answer} {n}' for answer, n in found['answers'].items())}). Merged afterwards, themselves"
+            f" or through the tickets that replaced them: {found['merged_after']}."]
+
+
 def render_flakes(data):
     rows = data["flakes"]
     if not rows:
@@ -767,7 +796,7 @@ def render_outcomes(data):
 def render(data):
     when = f" since {data['since']}" if data["since"] else ""
     if not data["merged"]:
-        grill = render_drops(data) + render_sources(data) + render_grilling(data)
+        grill = render_drops(data) + render_stuck(data) + render_sources(data) + render_grilling(data)
         if grill:
             return "\n".join([f"Rail stats: no ticket has merged{when} yet.", *grill])
         return f"No ticket has merged{when}, so there is nothing to count yet."
@@ -807,7 +836,7 @@ def render(data):
         lines.append(f"AUTO tickets over [size] cap of {data['size']['cap']}: {over['merged']} merged,"
                      f" {over['reverted_or_fixed']} reverted or named in a later ticket's caused_by. Under it:"
                      f" {under['merged']} merged, {under['reverted_or_fixed']}.")
-    lines += render_drops(data)
+    lines += render_drops(data) + render_stuck(data)
     failed = [[name, s["runs"], s["failed"], s["could_not_run"]] for name, s in data["steps"].items()
               if s["failed"] or s["could_not_run"]]
     lines.append("")

@@ -211,7 +211,8 @@ class Stats(RailTest):
         p.rail("accept", "1")  # PERSON: at the budget it waits for a person
         p.rail("next")
         p.rail("advance", "1", expect=3)  # the budget of 1 is used: consult advises
-        self.assertEqual(p.rail("advance", "1", expect=3)["reason"]["code"], "RETRY_CAP")  # then a person looks
+        self.assertEqual(p.rail("advance", "1", expect=3)["reason"]["code"], "DIAGNOSE")
+        self.assertEqual(p.undiagnosed()["reason"]["code"], "RETRY_CAP")  # after its diagnosis a person looks
         p.rail("accept", "1", "fix add")
         p.rail("next", "--ticket", "1")
         p.write("src/calc.py", "def add(a, b):\n    return a + b\n", base=p.worktree("1"))

@@ -87,13 +87,18 @@ def day_budget(project, tickets):
                                  " after that."})
 
 
+# The agent tasks that are the contract writer's.
+CONTRACT_WORK = ("TICKET_LINT", "SWEEP_TICKETS", "AFTER_DROPPED", "STUCK_CONTRACT", "STUCK_SPLIT")
+
+
 def worker(f, action, code=None):
     """The model and effort an agent_task for a ticket's work names: the tier's ladder, one rung per failed attempt at
     the step the ticket is failing, capped at the last rung. Writing a contract (TICKET_LINT), filing a sweep's
-    tickets (SWEEP_TICKETS) and deciding on a dropped `after` (AFTER_DROPPED) name worker.contract when it is set.
+    tickets (SWEEP_TICKETS), deciding on a dropped `after` (AFTER_DROPPED) and what the diagnosis of a stuck ticket
+    asks of the contract (STUCK_CONTRACT, STUCK_SPLIT) name worker.contract when it is set.
     `rail work` starts [worker] command on them; a session a person drives may ignore them."""
     ladder = f.project.config["worker"]["person_ladder" if f.tier == "PERSON" else "ladder"]
-    if code in ("TICKET_LINT", "SWEEP_TICKETS", "AFTER_DROPPED") and f.project.config["worker"]["contract"]:
+    if code in CONTRACT_WORK and f.project.config["worker"]["contract"]:
         ladder = [f.project.config["worker"]["contract"]]
     if action.get("kind") == "agent_task" and ladder:
         model, _, effort = ladder[min(f.attempts.get(f.failing, 0), len(ladder) - 1)].rpartition(":")
@@ -284,10 +289,11 @@ def restart_on_base(project, f, run):
 
 
 def restart_branch(project, f, run):
-    """Start the ticket's branch again from the base branch, under a new name: the old branch's commits hold a secret,
-    and the secret scan reads every commit of a branch, so it would fail there for good. The new branch has one
-    commit on the base's tip, with the ticket and its journal as the old branch had them; none of the work comes
-    along, since the work is where the secret is. The old branch and its pull request are closed."""
+    """Start the ticket's branch again from the base branch, under a new name. Either the old branch's commits hold a
+    secret, and the secret scan reads every commit of a branch, so it would fail there for good; or the diagnosis of
+    a stuck ticket judged that its attempts share a mistake. The new branch has one commit on the base's tip, with
+    the ticket and its journal as the old branch had them; none of the work comes along, since the work is where the
+    secret or the mistake is. The old branch and its pull request are closed."""
     t, q = f.t, f.restart_due
     ensure_local(project, t)
     root, old, old_remote = project.root, t.branch, t.remote_branch
@@ -305,20 +311,23 @@ def restart_branch(project, f, run):
     gitx.update_ref(root, f"refs/heads/{name}", commit, None)
     if t.worktree:
         if gitx.dirty(t.worktree):
-            # Work nobody committed stays on this machine, out of the new branch: it may hold the secret too.
+            # Work nobody committed stays on this machine, out of the new branch: it may hold the secret too, or the
+            # mistake the attempts shared.
             gitx.git(["stash", "push", "--quiet", "--include-untracked", "-m",
                       f"rail: ticket {t.id} before its branch was started again"], t.worktree, check=False)
         gitx.git(["checkout", "--quiet", "--force", name], t.worktree)
     gitx.git(["branch", "-D", old], root, check=False)
-    fact = q.get("fact") or {}
+    fact, stuck = q.get("fact") or {}, q["type"] == "stuck"
+    note = (q.get("answer") or {}).get("evidence") if stuck else None
     record = event(t.id, "restarted", question=q["id"], type=q["type"], branch=old, to=name,
-                   **{key: fact[key] for key in ("rule", "file") if fact.get(key)})
+                   **{key: fact[key] for key in ("rule", "file") if fact.get(key)}, **({"note": note} if note else {}))
     t.branch, t.ref, t.remote_branch = name, f"refs/heads/{name}", None
     project.append_events(t, [record], f"start again from {project.base}")
     if f.pr_open:
-        project.forge.comment(f.pr["number"], f"Ticket {t.id} goes on, on the branch `{name}`: this branch's commits hold"
-                                              f" a secret a person has rotated, so the work starts again from"
-                                              f" `{project.base}`.\n{ENGINE_MARK}")
+        why = ("its attempts here kept failing, and a diagnosis judged that they share a mistake" if stuck else
+               "this branch's commits hold a secret a person has rotated")
+        project.forge.comment(f.pr["number"], f"Ticket {t.id} goes on, on the branch `{name}`: {why}, so the work starts"
+                                              f" again from `{project.base}`.\n{ENGINE_MARK}")
         project.forge.update_pr(f.pr["number"], state="closed")
     if old_remote and project.remote and project.online and not cloud():
         # Not from a cloud session, whose git access can't delete a branch: there the old branch stays on the
@@ -429,6 +438,24 @@ def transition(project, f, code):
         commit(project, f, run, "consult")
     elif code == "RESTART":
         restart_branch(project, f, run)
+    elif code == "DIAGNOSE":
+        # One run that did not write the change says why the ticket is stuck, before it is dropped or waits.
+        from . import triage
+        from .table import stuck_reason
+        ensure_local(project, t)
+        q = f.diagnosis
+        if not q:
+            record = triage.raise_stuck(f, stuck_reason(f)[0], list(f.capped))
+            run.events.append(record)
+            q = dict(record, answers=[], answer=None)
+        # The run's worktree is put back as the branch has it afterwards: work nobody committed is kept aside.
+        aside = bool(gitx.dirty(t.worktree, exclude=[".rail/journal"])) and gitx.git(
+            ["stash", "push", "--quiet", "--include-untracked", "-m", f"rail: ticket {t.id} during its diagnosis"],
+            t.worktree, check=False).returncode == 0
+        triage.run(project, f, run, q)
+        if aside:
+            gitx.git(["stash", "pop", "--quiet"], t.worktree, check=False)
+        commit(project, f, run, "diagnosis")
     elif code == "CLAIM":
         if not claim(project, t):
             return False, run
@@ -1629,8 +1656,9 @@ def cmd_advance(project, args):
         f = facts[nn]
         f.explicit = True
         code, owner, _ = first_match(f)
-        if code in ("REBASING", "STOPPED"):
-            # Nothing to ship while the rebase is open (the brief says how to end it), or while a person's brake is on.
+        if code in ("REBASING", "STOPPED", "DIAGNOSE", "STUCK_CONTRACT", "STUCK_SPLIT"):
+            # Nothing to ship while the rebase is open (the brief says how to end it), while a person's brake is on, or
+            # while a ticket at its retry cap waits for its diagnosis or for what the diagnosis asks of the contract.
             return from_facts(f, receipts)
         mine = bool(f.worktree) and not f.claimed_elsewhere
         run = steps.Run(project, f.t)
@@ -1692,7 +1720,7 @@ def cmd_advance(project, args):
                 if advice:
                     brief += f"\n\n{advice}"
                 code_, owner_, action_ = first_match(nf)
-                if owner_ == "person" or code_ == "STUCK":  # a person's wait, or the engine's drop at the cap
+                if owner_ == "person" or code_ in ("STUCK", "DIAGNOSE"):  # a person's wait, or the cap: rail next
                     return from_facts(nf, receipts)
                 action = worker(nf, {"kind": "agent_task", "brief": brief})
                 # A rebase that stopped on a conflict has its own page; any other failure gets one once it repeats.
@@ -1783,8 +1811,29 @@ def cmd_drop(project, args):
         raise RailError(f"say why the ticket ends: rail drop {f.id} --reason \"why\". The reason is kept in the drop's"
                         " mark, which is all that is left of a dropped ticket once its branch is gone. A person who"
                         f" drops it needs none: rail drop {f.id} --by person", code="NO_REASON")
+    # The tickets that replace one that was split. Where the split ticket came from an issue, each of them names
+    # that issue from here on, so the issue stays open until the last of them merges (its pull request closes it).
+    external = (f.ticket.get("external_id") or "") if f.ticket else ""
+    external = external if external.startswith("github#") else ""
+    parts = [facts[project.find(key, tickets).id] for key in (args.replaced_by or "").split(",") if key.strip()]
+    for other in parts:
+        if other.id == f.id or other.state == "dropped" or not other.ticket:
+            raise RailError(f"ticket {other.id} can't replace ticket {f.id}: name tickets that are filed and not dropped",
+                            code="BAD_REPLACEMENT")
+        if external and other.ticket.get("external_id") not in ("", None, external):
+            raise RailError(f"ticket {other.id} can't replace ticket {f.id}, which came from issue"
+                            f" #{external.split('#', 1)[1]}: it names {other.ticket.get('external_id')} already",
+                            code="BAD_REPLACEMENT")
+    for other in parts:
+        if external and not other.ticket.get("external_id") and other.t.name and other.state != "merged":
+            ensure_local(project, other.t)
+            ref = f"{other.t.ref}:{ticket_path(other.id)}"
+            text = gitx.read_blobs([ref], project.root)[ref]
+            project.append_events(other.t, [], f"part of the issue of ticket {f.id}",
+                                  files={ticket_path(other.id): with_field(text, "external_id", external)})
+    replaced = [other.id for other in parts]
     receipts, leftovers = [], []
-    if drop(project, f, args.by, args.reason or "", receipts):
+    if drop(project, f, args.by, args.reason or "", receipts, replaced_by=replaced):
         tickets, facts = load(project)
         leftovers = steps.remove_ticket(project, facts[f.id].t)
     tickets, facts = load(project)
@@ -1795,7 +1844,12 @@ def drop(project, f, by, reason, receipts, **record):
     """End a ticket without merging it: a `dropped` event in its journal, then the mark on the counter branch, then
     the pull request closed and the issue released. Removing the worktree and branches is the caller's, and only
     once this returns True: the mark is the record that outlives the branch, so nothing goes before it is written.
-    `record` (the step and signature the engine stopped at) goes into the event and the mark."""
+    `record` (the step and signature the engine stopped at, the tickets that replace a split one) goes into the event
+    and the mark, and so does the answer of the diagnosis the ticket got at its retry cap, when it got one."""
+    from . import triage
+    found = triage.diagnosed(f.diagnosis)
+    if found:
+        record.setdefault("diagnosis", found["answer"])
     if f.state != "dropped" and f.t.name:
         ensure_local(project, f.t)
         project.append_events(f.t, [event(f.id, "dropped", by=by, reason=reason,
@@ -1815,7 +1869,7 @@ def finish_drop(project, f, receipts, closed=None):
     DROP_PENDING."""
     kept = next((e for e in f.t.events if e.get("event") == "requested"), None)
     last = f.t.last("dropped") or closed or {}
-    dropped = {k: last[k] for k in ("by", "reason", "step", "signature", "at") if last.get(k)}
+    dropped = {k: last[k] for k in ("by", "reason", "step", "signature", "diagnosis", "replaced_by", "at") if last.get(k)}
     if closed and not dropped.get("at"):
         dropped["at"] = event(f.id, "dropped")["at"]
     if not f.auto:
@@ -1829,22 +1883,23 @@ def finish_drop(project, f, receipts, closed=None):
                          "detail": "the counter branch can't be pushed: the ticket keeps its worktree, branches and"
                                    " pull request until a later rail next writes the mark"})
         return False
-    close_and_release(project, f, last.get("reason", ""), receipts)
+    close_and_release(project, f, last.get("reason", ""), receipts, last.get("replaced_by") or ())
     return True
 
 
-def close_and_release(project, f, reason, receipts):
+def close_and_release(project, f, reason, receipts, replaced_by=()):
     if f.pr_open:
         project.forge.update_pr(f.pr["number"], state="closed")
         receipts.append({"step": "close-pr", "status": "ran", "result": "pass", "detail": f"closed #{f.pr['number']}"})
     elif project.remote and not (project.forge and project.forge.ok):
         receipts.append({"step": "close-pr", "status": "unavailable", "detail": "the forge can't be reached"})
-    release_issue(project, f, reason)
+    release_issue(project, f, reason, replaced_by)
 
 
-def release_issue(project, f, reason=""):
+def release_issue(project, f, reason="", replaced_by=()):
     """A dropped ticket from an issue: take the rail label off the issue and say so, so intake doesn't make the
-    ticket again. Labelling the issue again is how to retry."""
+    ticket again. Labelling the issue again is how to retry. A ticket that was split keeps its issue as it is: the
+    tickets that replace it name the issue, and the last of them to merge closes it."""
     from .forge import ForgeError
 
     external = (f.ticket.get("external_id", "") if f.ticket else "") or ""
@@ -1852,6 +1907,11 @@ def release_issue(project, f, reason=""):
         return
     number = external.split("#", 1)[1]
     try:
+        if replaced_by:
+            why = f" Reason: {reason}." if reason else ""
+            project.forge.comment(number, f"Ticket {f.id} was split into ticket {', '.join(replaced_by)}.{why} This issue"
+                                          f" stays open until the last of them merges.\n{ENGINE_MARK}")
+            return
         issue = project.forge.call("GET", f"issues/{number}")
         if "rail" in {l["name"] for l in issue.get("labels", [])}:
             project.forge.remove_label(number, "rail")
@@ -2412,6 +2472,8 @@ def parser():
     drop = verb("drop", "end a ticket without merging it")
     drop.add_argument("--reason", default="")
     drop.add_argument("--by", choices=("agent", "person"), default="agent")
+    drop.add_argument("--replaced-by", default="", metavar="NN,NN",
+                      help="the tickets that replace a ticket that was split; its issue stays open until the last merges")
     answer_ = verb("answer", "record how a review finding ended", ticket=False)
     answer_.add_argument("ticket", help="ticket ID")
     answer_.add_argument("finding", help="the finding's id, such as F2")

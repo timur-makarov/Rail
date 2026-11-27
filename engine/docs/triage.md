@@ -12,7 +12,9 @@ Only closed questions go here. Whether a change is good stays the reviewer's que
 
 - **Raised at ship.** When every ship step has passed, each type looks for its fact in the patch. A fact found
   is a `question` event with the type, the `patch_id` and the fact (`rail docs journal`). One fact raises one
-  question for a patch: shipping the same patch again raises nothing.
+  question for a patch: shipping the same patch again raises nothing. One type, `stuck`, is not about a patch:
+  it is raised for a ticket at its retry cap, and what this list says about patches does not hold for it ("A
+  ticket at its retry cap", below).
 - **Answered before any review.** A shipped ticket with an open question is `reviewing`, and `rail next`
   answers `TRIAGE` with `rail advance NN`. `advance` starts one run for each open question, then the review
   runs the patch needs, so no review is spent on a patch that is about to change. A ticket whose change needs
@@ -49,7 +51,7 @@ Only closed questions go here. Whether a change is good stays the reviewer's que
 ## The question types
 
 The table is `QUESTIONS` in `.rail/engine/rail/triage.py`. An entry holds the type's id, the fact that raises
-it, the question, what the brief shows, two to four answers with what each means and whether the ticket then
+it, the question, what the brief shows, two to five answers with what each means and whether the ticket then
 goes on, stops or waits for a person, and, for an answer that lets the change through, the evidence it must
 name and the engine's check of it.
 
@@ -165,6 +167,15 @@ credential in any file. Another clone that still has a worktree on the old branc
 
 Checked with gitleaks 8.24.2: a line in `.gitleaksignore` takes its finding out of `gitleaks git`. Assumed, not
 verified: that a redacted finding with the lines around it is enough to tell an example from a secret.
+
+## A ticket at its retry cap
+
+The type `stuck` is not about a patch. `rail next` raises it once for a ticket that reaches its retry cap, or
+its budget after consult, before the ticket is dropped or waits, and its run uses the contract writer's model
+(`[worker] contract`). Its five answers are `contract`, `too-large`, `approach`, `machine` and `cannot-tell`,
+and each names what the engine does next, not whether a change goes through: `rail docs retries` has the
+table. A run with no answer is started once more; after two the ticket is handled as with `cannot-tell`, and
+no wait for a person follows from the runs themselves.
 
 ## What to read in the numbers
 

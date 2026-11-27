@@ -299,7 +299,7 @@ class IgnoredSecret(RailTest):
         self.assertIn({"step": "restart", "status": "ran", "result": "pass", "detail": "1-fix-add -> 1-fix-add--2"},
                       again["steps"])
         self.assertEqual(again["action"]["facts"]["restarted"],
-                         {"branch": "1-fix-add", "rule": "generic-api-key", "file": "src/keys.py"})
+                         {"branch": "1-fix-add", "rule": "generic-api-key", "file": "src/keys.py", "type": "secret"})
         for text in ("The engine started this ticket's branch again from the base branch",
                      "(1-fix-add) held a secret (generic-api-key in src/keys.py)", "write no credential into any file"):
             self.assertIn(text, again["action"]["brief"])

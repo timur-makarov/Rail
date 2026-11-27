@@ -18,7 +18,7 @@ from .ticket import Ticket
 from .util import MISSING_HELP, NOT_COUNTED, tried_help
 
 TRANSITIONS = {"ACCEPT_AUTO", "CLAIM", "RESUME", "CONSULT", "GO", "REBASE_BEHIND", "CONTRACT_MERGED", "STUCK",
-               "RESTART"}
+               "RESTART", "DIAGNOSE"}
 MERGE_PATIENCE = 600  # seconds a requested merge may take before a person looks
 OPEN = ("implementing", "reviewing", "in-ci", "merge-ready")
 
@@ -196,15 +196,32 @@ def _facts_approve_amend(f):
     return {**_shared(f), "amend_reason": f.amend_reason, "pr": _pr_fact(f), "wait": _wait("APPROVE_AMEND", f)}
 
 
+def _diagnosis(f):
+    """The diagnosis the ticket got at its retry cap, once it has an answer: {answer, means, reason, evidence}."""
+    from . import triage
+    return triage.diagnosed(f.diagnosis)
+
+
 def _facts_capped(f):
     return {**_shared(f), "stuck": _stuck_facts(f), "could_not_run": _could_not_run(f, f.capped), "pr": _pr_fact(f),
-            "wait": _wait("RETRY_CAP", f)}
+            "diagnosis": _diagnosis(f), "wait": _wait("RETRY_CAP", f)}
+
+
+def _facts_stuck_contract(f):
+    return {**_shared(f), "cwd": f.cwd, "stuck": _stuck_facts(f), "diagnosis": _diagnosis(f)}
+
+
+def _facts_stuck_split(f):
+    external = (f.ticket.get("external_id") or "") if f.ticket else ""
+    return {**_shared(f), "cwd": f.cwd, "stuck": _stuck_facts(f), "diagnosis": _diagnosis(f),
+            "external_id": external if external.startswith("github#") else None}
 
 
 def _facts_tool_down(f):
     e, times = f.machine_stuck
     return {**_shared(f), "failed": {key: e[key] for key in ("step", "detail", "tools_down") if e.get(key)},
-            "times": times, "pr": _pr_fact(f), "wait": _wait("TOOL_DOWN", f)}
+            "times": times, "pr": _pr_fact(f), "diagnosis": _diagnosis(f) if f.diagnosed == "machine" else None,
+            "wait": _wait("TOOL_DOWN", f)}
 
 
 def _facts_person(code):
@@ -226,16 +243,16 @@ def _facts_secret(f):
 
 def _restarted(f):
     """The branch the engine started again from the base, until the ticket ships on the new one: the old branch's
-    name and what the scan found there."""
+    name, and what the scan found there or, after the diagnosis of a stuck ticket, what the attempts shared."""
     last = max((i for i, e in enumerate(f.t.events) if e.get("event") == "restarted"), default=-1)
     if last < 0 or any(e.get("event") == "shipped" for e in f.t.events[last:]):
         return None
     e = f.t.events[last]
-    return {key: e[key] for key in ("branch", "rule", "file") if e.get(key)}
+    return {key: e[key] for key in ("branch", "rule", "file", "type", "note") if e.get(key)}
 
 
 def _facts_stuck(f):
-    return {**_shared(f), "stuck": _stuck_facts(f)}
+    return {**_shared(f), "stuck": _stuck_facts(f), "diagnosis": _diagnosis(f)}
 
 
 def _facts_sweep_tickets(f):
@@ -391,6 +408,10 @@ def stuck_reason(f):
     last = [e for e in f.t.events if e.get("event") == "step" and e.get("step") == step and e.get("result") == "fail"]
     detail = last[-1].get("detail") if last else ""
     reason = f"stuck: {_stuck(_stuck_facts(f)[0])}" + (f"; the last failure: {detail}" if detail else "")
+    found = _diagnosis(f)
+    if found:
+        from . import triage
+        reason += f". The diagnosis it got at the cap: {triage.diagnosis_said(found)}"
     return reason, step, last[-1].get("signature") if last else None
 
 
@@ -463,15 +484,61 @@ def _render_capped(x):
     missing = [f"'{row['step']}' ({row['detail']})" for row in x["could_not_run"]]
     could_not = (f" Its last attempt at {_join(missing)} could not run: the shell couldn't start the command or a tool it"
                  f" calls, so nothing was checked.") if missing else ""
-    return (f"Ticket {x['ticket']} is stuck: {'; '.join(_stuck(row) for row in x['stuck'])}.{could_not} A person"
+    return (f"Ticket {x['ticket']} is stuck: {'; '.join(_stuck(row) for row in x['stuck'])}.{could_not}"
+            f"{_diagnosed(x)} A person"
             f" looks at the journal and the branch {x['branch']}, then continues it: {x['wait']['accept']} \"what to do"
             f" differently\". That gives a fresh budget and a fresh cap." + _go(x))
+
+
+def _diagnosed(x):
+    """The diagnosis a stuck ticket got, as a sentence of a brief; empty when it got none."""
+    found = x.get("diagnosis")
+    if not found:
+        return ""
+    from . import triage
+    return (f" A run that did not write the change read the attempts once and answered {triage.diagnosis_said(found)}")
+
+
+# Not tested with a model run: the wording of the two briefs below, which the contract writer reads.
+def _render_stuck_contract(x):
+    nn, found = x["ticket"], x["diagnosis"]
+    return "\n".join([
+        f"Ticket {nn} is stuck: {'; '.join(_stuck(row) for row in x['stuck'])}. A run that did not write the change read"
+        f" the attempts and judged that the contract is at fault, not the work: {found.get('reason', '')}",
+        "", "The lines of the Done Contract it names:", found.get("evidence", ""), "",
+        f"Amend the contract. Read the ticket's Why and the lines above, then edit the Done Contract in"
+        f" {x['ticket_file']} (in {x['cwd']}) so that each Check: line tests what the Why asks for and no two lines"
+        f" contradict each other. Change nothing but the ticket. Then run rail amend {nn} \"why the contract was"
+        f" wrong\". The amend gives the ticket a fresh retry budget and a fresh cap, and the work goes on under the"
+        f" new contract.",
+    ])
+
+
+def _render_stuck_split(x):
+    nn, found = x["ticket"], x["diagnosis"]
+    issue = (f" The engine then writes this ticket's issue ({x['external_id']}) into each of them, and the issue stays"
+             f" open until the last of them merges.") if x.get("external_id") else ""
+    return "\n".join([
+        f"Ticket {nn} is stuck: {'; '.join(_stuck(row) for row in x['stuck'])}. A run that did not write the change read"
+        f" the attempts and judged that the work is more than one ticket: {found.get('reason', '')}",
+        "", "The parts it names:", found.get("evidence", ""), "",
+        f"Split it. Write one ticket for each part, each with its own Done Contract and scope_paths, and `after` where"
+        f" one part needs another. File each with"
+        f" rail add FILE. Then drop this ticket and name the tickets that replace it: rail drop {nn} --reason"
+        f" \"split: why\" --replaced-by A,B (their numbers).{issue} Nothing of this ticket's branch is kept, so a"
+        f" part that needs its work says so in its own ticket.",
+    ])
 
 
 def _render_tool_down(x):
     """A step failed for the machine's own reason more than once in a row: more attempts would not mend it."""
     e, times = x["failed"], x["times"]
-    if e.get("tools_down"):
+    if x.get("diagnosis"):
+        found = x["diagnosis"]
+        said = (f"it failed {times} times, and a run that did not write the change read the attempts and judged that"
+                f" the machine or a tool is at fault, not the change: {found.get('reason', '')} The failure it names:"
+                f" {found.get('evidence', '')}. A person mends that on this machine")
+    elif e.get("tools_down"):
         said = (f"it failed {times} times in a row while a tool the project declares was out of reach"
                 f" ({tools.down_said(e['tools_down'])}). No failure of these counted as an attempt, since it may not be"
                 f" the change's. A person checks that the tool answers and that its credential is valid on this machine")
@@ -648,7 +715,13 @@ def _render_implement(x):
                   f" line that fails now and passes once the work is done, such as one that runs your new test by name: edit"
                   f" the Done Contract in {x['ticket_file']}, then run rail amend {nn} \"why\".", ""]
     again = x.get("restarted")
-    if again:
+    if again and again.get("type") == "stuck":
+        # Not tested with a model run: the wording of this paragraph.
+        lines += [f"The engine started this ticket's branch again from the base branch. The attempts on the branch before"
+                  f" it ({again.get('branch')}) kept failing, and a run that did not write them judged that they shared a"
+                  f" mistake. What it names, and what to do instead: {again.get('note', '')}",
+                  "None of that work is here. Do the ticket again, and not that way.", ""]
+    elif again:
         lines += [f"The engine started this ticket's branch again from the base branch: the commits of the branch before"
                   f" it ({again.get('branch')}) held a secret"
                   + (f" ({again['rule']} in {again['file']})" if again.get("file") else "") +
@@ -714,6 +787,7 @@ RENDER = {
     "TOOL_MISSING": _render_tool_missing, "APPROVE_AMEND": _render_approve_amend, "RETRY_CAP": _render_capped,
     "TOOL_DOWN": _render_tool_down, "STUCK_REVIEW": _render_stuck_review, "SECRET_FOUND": _render_secret,
     "MERGE_FAILED": _render_merge_failed, "HOLD": _render_hold, "STUCK": _next_ticket,
+    "STUCK_CONTRACT": _render_stuck_contract, "STUCK_SPLIT": _render_stuck_split,
     "SWEEP_TICKETS": _render_sweep_tickets, "SETUP_FAILED": _render_setup_failed,
     "VERIFY_ASSUMPTIONS": _render_assumptions, "CONFLICT": _render_conflict, "RED_CHECK": _render_red_check,
     "SPLIT": _render_split, "STEP_FAILED": _render_step_failed, "REVERT_SHIP": lambda x: f"rail advance {x['ticket']}",
@@ -827,7 +901,9 @@ ROWS = [
      lambda f: f"rail next --ticket {f.id}"),
     ("APPROVE_AMEND",      "person", "person_wait",  lambda f: f.amend_pending,
      _facts_approve_amend),
-    ("RETRY_CAP",          "person", "person_wait",  lambda f: f.state in OPEN and f.capped and not f.auto,
+    # A PERSON ticket at the retry cap waits for a person, once its one diagnosis is made and names nothing the
+    # engine or the contract writer can do (the rows below STUCK).
+    ("RETRY_CAP",          "person", "person_wait",  lambda f: f.state in OPEN and f.capped and not f.auto and _undiagnosed(f),
      _facts_capped),
     ("TOOL_DOWN",          "person", "person_wait",  lambda f: f.state in OPEN and f.machine_stuck,
      _facts_tool_down),
@@ -844,15 +920,27 @@ ROWS = [
     # merge) needs no claim: the rows below move it from whichever session looks.
     ("CLAIMED_ELSEWHERE",  "none",  "rest",        lambda f: f.held and not f.explicit,
      _held),
-    # The person has rotated the secret: the branch starts again from the base, under a new name.
+    # The branch starts again from the base, under a new name: the person has rotated the secret, or the diagnosis
+    # of a stuck ticket judged that its attempts share a mistake.
     ("RESTART",            "agent", "script",      lambda f: f.state in OPEN and f.restart_due,
      lambda f: f"rail next --ticket {f.id}"),
     # An AUTO ticket at the retry cap: nothing merged, so nothing needs undoing, and the engine drops it with a
-    # record instead of asking a person. A PERSON ticket waits (RETRY_CAP).
-    ("STUCK",              "agent", "script",      lambda f: f.state in OPEN and f.capped and f.auto,
+    # record instead of asking a person. A PERSON ticket waits (RETRY_CAP). Both come after the ticket's one
+    # diagnosis, and only when that names nothing to do.
+    ("STUCK",              "agent", "script",      lambda f: f.state in OPEN and f.capped and f.auto and _undiagnosed(f),
      _facts_stuck),
     ("RESUME",             "agent", "script",      lambda f: f.in_flight and (f.claimed_elsewhere or not f.worktree),
      lambda f: f"rail next --ticket {f.id}"),
+    # A ticket at its retry cap gets one diagnosis before it is dropped or waits: rail next starts the run, which
+    # did not write the change (rail docs retries). What its answer leads to: the contract writer amends the
+    # contract or splits the ticket (the two rows below), the branch starts again (RESTART), the machine is a
+    # person's to mend (TOOL_DOWN), or nothing, and the ticket is dropped or waits as before.
+    ("DIAGNOSE",           "agent", "script",      lambda f: f.state in OPEN and f.diagnose_due,
+     lambda f: f"rail next --ticket {f.id}"),
+    ("STUCK_CONTRACT",     "agent", "agent_task",  lambda f: f.state in OPEN and f.diagnosed == "contract",
+     _facts_stuck_contract),
+    ("STUCK_SPLIT",        "agent", "agent_task",  lambda f: f.state in OPEN and f.diagnosed == "too-large",
+     _facts_stuck_split),
     ("CONSULT",            "agent", "script",      lambda f: f.state in OPEN and f.consult_due,
      lambda f: f"rail next --ticket {f.id}"),
     ("SWEEP_RUN",          "agent", "script",      lambda f: f.state == "implementing" and f.sweep and not f.sweep_done,
@@ -913,6 +1001,12 @@ ROWS = [
     ("MERGE_BY_PERSON",    "person", "person_wait",  lambda f: f.state == "merge-ready",
      _facts_merge_by_person),
 ]
+
+
+def _undiagnosed(f):
+    """A ticket at its cap whose diagnosis leaves it where it was: made and `cannot-tell`, not to be had (two runs
+    gave no answer, or no command runs one), or made for an earlier cap."""
+    return not f.diagnose_due and f.diagnosed in (None, "cannot-tell")
 
 
 def first_match(f):

@@ -14,8 +14,9 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
 - `action.model` and `action.effort` name the model and effort for an `agent_task` that is a ticket's work,
   from `[worker] ladder` (`person_ladder` for a PERSON ticket). The rung is the number of failed attempts at
   the step the ticket is failing, 0 when there are none, capped at the last rung; a person's act starts it
-  again at 0. Writing a ticket's contract (`TICKET_LINT`), filing a sweep's tickets (`SWEEP_TICKETS`) and
-  deciding on a dropped `after` (`AFTER_DROPPED`) name `[worker] contract` instead, when it is set.
+  again at 0. Writing a ticket's contract (`TICKET_LINT`), filing a sweep's tickets (`SWEEP_TICKETS`),
+  deciding on a dropped `after` (`AFTER_DROPPED`) and what the diagnosis of a stuck ticket asks of its contract
+  (`STUCK_CONTRACT`, `STUCK_SPLIT`) name `[worker] contract` instead, when it is set.
   With an empty ladder neither is there. A session a person is driving does the brief itself and
   may ignore them. An unattended runner, a cloud session a scheduled task starts, starts one subagent on
   that model and effort, gives it the brief word for word and the `cwd`, and runs `rail advance` itself when
@@ -28,7 +29,10 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   `ANSWER_FINDINGS`, `TRIAGE` (a question the engine raised about the shipped patch is answered first: run
   `rail advance`; `rail docs triage`), `REBASING` and `CONFLICT`, `SPLIT`, `RED_BASE` (the base branch fails `verify`),
   `WAITING_AFTER` and `SCOPE_OVERLAP` (another ticket goes first), `AFTER_DROPPED` (decide
-  whether it stands without the dropped one), `STUCK` (an AUTO ticket at the retry cap: `rail next` drops it),
+  whether it stands without the dropped one), `DIAGNOSE` (a ticket at the retry cap gets one diagnosis first: run `rail next --ticket NN`),
+  `STUCK_CONTRACT` and `STUCK_SPLIT` (the diagnosis asks the contract writer to amend the contract, or to split
+  the ticket), `STUCK` (an AUTO ticket at the retry cap whose diagnosis names nothing to do: `rail next` drops
+  it; `rail docs retries`),
   `DROP_PENDING`, `CI_WAIT`, `GITHUB_LIMIT` (GitHub's rate limit is used up: sleep as the script says, or come
   back at the time the brief names), `NO_WORK`. A person's turn is `MERGE_BY_PERSON`, the one
   act a PERSON ticket takes; `APPROVE_CONTRACT` and `APPROVE_AMEND`, only for a kind the project names in
@@ -152,7 +156,7 @@ lost.
 `rail work NN` runs one attempt at a ticket's agent work, the way `advance` runs the reviewer. It builds the
 brief `next` would give for the ticket, and runs only when that is a ticket's work: `TICKET_LINT`,
 `VERIFY_ASSUMPTIONS`, `IMPLEMENT`, `REVERT`, `STEP_FAILED`, `RED_CHECK`, `ANSWER_FINDINGS`, `CONFLICT`, `REBASING`,
-`SPLIT`, a sweep's `SWEEP_TICKETS` (`rail docs sweep`), or `AFTER_DROPPED`. For any other
+`SPLIT`, a sweep's `SWEEP_TICKETS` (`rail docs sweep`), `AFTER_DROPPED`, `STUCK_CONTRACT` or `STUCK_SPLIT`. For any other
 answer, such as `SETUP_FAILED` or a `BUDGET` wait, it runs nothing and returns that answer, and so it does when
 `[worker] command` is empty. Over `[worker] daily_usd` it starts no worker and answers `BUDGET_DAY`.
 

@@ -18,13 +18,13 @@ from .project import event
 from .util import could_not_run, run_shell, tail
 
 # What the engine does on an answer: the ticket goes on, the step `triage` fails and the worker mends the change,
-# or the ticket waits for a person.
-GO, STOP, WAIT = "go", "stop", "wait"
+# the ticket waits for a person, or the engine does what the answer's own `does` names (a row of the table reads it).
+GO, STOP, WAIT, ACT = "go", "stop", "wait", "act"
 
 QUESTIONS = {}
 
 
-def question(id, raised, ask, answers, find, show, once=False):
+def question(id, raised, ask, answers, find, show, once=False, at="ship", model=None):
     """Add a type to the table.
 
     `raised`: the fact that raises it, in a sentence for the docs. `ask`: the question the run answers. `answers`:
@@ -37,14 +37,20 @@ def question(id, raised, ask, answers, find, show, once=False):
     tells one fact from another, and `said`, the fact in one line; `run` is the ship's receipt, whose events are not
     in the journal yet. `show(project, f, fact)`: the lines of the brief that show the fact, and nothing else of the
     change. `once`: the fact is a line the author wrote, not what the patch does, so an answer that lets it through
-    stands for the ticket's later patches too, until the contract is amended."""
-    assert 2 <= len(answers) <= 4, id
+    stands for the ticket's later patches too, until the contract is amended.
+
+    `at`: "ship" for a question about a shipped patch, which `find` raises; "cap" for the one question about a ticket
+    at its retry cap, which the table raises (`find` is not called). An answer of such a type has `then` ACT, with
+    `does`, the name the table reads, and `effect`, what the brief says the engine then does. `model(project)`: the
+    model the run uses where it is not the triage step's own."""
+    assert 2 <= len(answers) <= 5, id
     for name, a in answers.items():
-        assert a["then"] in (GO, STOP, WAIT) and a["means"], (id, name)
-        assert a["then"] != GO or not a.get("evidence") or a.get("check"), (id, name)
+        assert a["then"] in (GO, STOP, WAIT, ACT) and a["means"], (id, name)
+        assert a["then"] not in (GO, ACT) or not a.get("evidence") or a.get("check"), (id, name)
         assert (a["then"] == WAIT) == bool(a.get("wait")), (id, name)
+        assert (a["then"] == ACT) == bool(a.get("does") and a.get("effect")), (id, name)
     QUESTIONS[id] = {"id": id, "raised": raised, "ask": ask, "answers": answers, "find": find, "show": show,
-                     "once": once}
+                     "once": once, "at": at, "model": model}
 
 
 # --- what the journal holds -------------------------------------------------------------------
@@ -65,10 +71,15 @@ def asked(events):
     return list(found.values())
 
 
+def _at_ship(q):
+    """Whether a question is about a shipped patch. The one about a ticket at its retry cap is the table's."""
+    return (QUESTIONS.get(q.get("type")) or {}).get("at", "ship") == "ship"
+
+
 def open_questions(events, patch_id):
     """The questions about this patch that have no answer yet. A question about an earlier patch is over: the patch
     it asked about is gone, and a fact that still holds raised a new one at the ship."""
-    return [q for q in asked(events) if q.get("patch_id") == patch_id and not q["answer"]]
+    return [q for q in asked(events) if _at_ship(q) and q.get("patch_id") == patch_id and not q["answer"]]
 
 
 def then(q):
@@ -81,7 +92,7 @@ def then(q):
 
 def stopped(events, patch_id):
     """The questions about this patch whose answer stops the change, or holds it for a person."""
-    return [q for q in asked(events) if q.get("patch_id") == patch_id and then(q) in (STOP, WAIT)]
+    return [q for q in asked(events) if _at_ship(q) and q.get("patch_id") == patch_id and then(q) in (STOP, WAIT)]
 
 
 def waiting(events):
@@ -184,6 +195,8 @@ def raise_at_ship(project, f, run, ref, patch_id):
     amended = max((i for i, e in enumerate(t.events) if e.get("event") == "amended"), default=-1)
     number = len(before)
     for kind in QUESTIONS.values():
+        if kind["at"] != "ship":
+            continue
         for fact in kind["find"](project, f, ref, patch_id, run):
             every = [q for q in before if (q.get("type"), q.get("key")) == (kind["id"], fact["key"])]
             same = [q for q in every if q.get("patch_id") == patch_id]
@@ -237,9 +250,9 @@ def answer_schema(kind):
 def brief(project, f, q):
     """What the run reads: the question, its answers, the fact, and only what the type says to show."""
     kind = QUESTIONS[q["type"]]
+    effect = {GO: "It lets the change through.", STOP: "It stops the change.", WAIT: "It holds the ticket for a person."}
     answers = [f"- `{name}`: {a['means']}" + (f" Evidence: {a['evidence']}" if a.get("evidence") else "")
-               + (" It lets the change through." if a["then"] == GO else " It stops the change." if a["then"] == STOP
-                  else " It holds the ticket for a person.")
+               + " " + (a.get("effect") or effect[a["then"]])
                for name, a in kind["answers"].items()]
     return "\n".join([
         f"# One question about ticket {f.id} ({q['id']}, {q['type']})", "",
@@ -250,21 +263,24 @@ def brief(project, f, q):
     ]).rstrip() + "\n"
 
 
-def command(project):
-    """The command and the model of a triage run: [triage]'s, and the review seat's where that is empty."""
+def command(project, kind=None):
+    """The command and the model of a triage run: [triage]'s, and the review seat's where that is empty. A type may
+    name its own model."""
     config = project.config
-    return config["triage"]["command"] or config["review"]["command"], config["triage"]["model"] or config["review"]["model"]
+    own = kind["model"](project) if kind and kind.get("model") else ""
+    return (config["triage"]["command"] or config["review"]["command"],
+            own or config["triage"]["model"] or config["review"]["model"])
 
 
-def run(project, f, receipt):
-    """One run for the first open question about the ticket's patch: its `answered` event and its `triage` step go
-    into `receipt`. A run that timed out, could not start or answered with something invalid records the step alone,
-    not counted against the author, as a review run with no verdict is."""
+def run(project, f, receipt, q=None):
+    """One run for a question: `q`, or the first open question about the ticket's patch. Its `answered` event and its
+    `triage` step go into `receipt`. A run that timed out, could not start or answered with something invalid records
+    the step alone, not counted against the author, as a review run with no verdict is."""
     from .review import _structured, model_env
     from .steps import keep_alive
 
     t, wt = f.t, f.t.worktree
-    q = open_questions(t.events, f.patch_id)[0]
+    q = q or open_questions(t.events, f.patch_id)[0]
     kind = QUESTIONS.get(q["type"])
     named = {"question": q["id"], "type": q["type"]}
     if not kind:
@@ -276,7 +292,7 @@ def run(project, f, receipt):
     keep_alive(project, t)
     head = gitx.rev(t.ref, project.root)
     text = brief(project, f, q)
-    line, model = command(project)
+    line, model = command(project, kind)
     timeout = project.config["commands"]["timeout_secs"]
     with tempfile.TemporaryDirectory(prefix="rail-triage-") as held:
         files = {"RAIL_REVIEW_PROMPT": ("triage.md", PROMPT),
@@ -317,7 +333,7 @@ def run(project, f, receipt):
     if meta.get("model"):
         fields["model"] = meta["model"]
     wrong = None
-    if a["then"] == GO and a.get("check"):
+    if a["then"] in (GO, ACT) and a.get("check"):
         if data.get("evidence"):
             wrong = a["check"](project, f, dict(q.get("fact") or {}, key=q.get("key")), data["evidence"])
         else:
@@ -625,3 +641,118 @@ question(
                         " the person has acted, the engine starts the ticket's branch again from the base branch,"
                         " because the scan fails on this branch's commits for good."}},
     _find_secret, _show_secret, once=True)
+
+
+# --- a ticket at its retry cap --------------------------------------------------------------------
+#
+# One question for a ticket, raised by the table when the ticket reaches its retry cap or its budget after consult
+# (rail docs retries). It is not about a patch: it asks why the attempts fail, and each answer names what the engine
+# does next.
+
+STUCK_RUNS = 2  # runs with no answer after which the ticket is handled as if the answer were `cannot-tell`
+
+
+def diagnosis(events):
+    """The `stuck` question of a ticket as `asked` gives it, with `runs_without_answer`, or None when none was
+    raised."""
+    q = next((q for q in asked(events) if q.get("type") == "stuck"), None)
+    if q:
+        q["runs_without_answer"] = sum(
+            1 for e in events[q["at_index"]:]
+            if e.get("event") == "step" and e.get("step") == "triage" and e.get("question") == q["id"]
+            and (e.get("counted") is False or e.get("status") == "could_not_run"))
+    return q
+
+
+def diagnosed(q):
+    """A diagnosis in the words a record or a brief keeps: {answer, means, reason, evidence}, or None while it has
+    no answer."""
+    if not q or not q.get("answer") or q["answer"].get("answer") not in QUESTIONS["stuck"]["answers"]:
+        return None
+    a = q["answer"]
+    return {key: value for key, value in {
+        "answer": a["answer"], "means": QUESTIONS["stuck"]["answers"][a["answer"]]["means"],
+        "reason": a.get("reason"), "evidence": a.get("evidence")}.items() if value}
+
+
+def diagnosis_said(x):
+    """A diagnosis in one line, from `diagnosed`."""
+    return (f"`{x['answer']}`, {x['means']}" + (f" Its reason: {x['reason']}" if x.get("reason") else "")
+            + (f" What it names: {x['evidence']}" if x.get("evidence") else ""))
+
+
+def raise_stuck(f, said, steps_):
+    """The `question` event of the diagnosis: `said` is why the ticket is stuck, `steps_` the steps at their cap."""
+    number = len(asked(f.t.events)) + 1
+    return event(f.id, "question", id=f"Q{number}", type="stuck", key="stuck", fact={"said": said, "steps": steps_})
+
+
+def _show_stuck(project, f, fact):
+    from .project import advice_path
+    t, ticket = f.t, f.ticket
+    lines = [*_contract(f), "", "## Where the ticket may change", ", ".join(ticket.scope) or "(no scope)", ""]
+    failed = [e for e in t.events if e.get("event") == "step" and e.get("result") == "fail" and e.get("step") != "triage"
+              and e.get("counted", True)]
+    lines += ["## Each failed attempt, oldest first",
+              *([f"- step `{e.get('step')}`" + (f", signature `{e['signature']}`" if e.get("signature") else "")
+                 + (f": {e['detail']}" if e.get("detail") else "") for e in failed[-20:]] or ["(none in the journal)"]), ""]
+    try:
+        kept = json.loads(project.cache_read("failure", f.id) or "null")
+    except ValueError:
+        kept = None
+    if isinstance(kept, dict) and kept.get("output"):
+        lines += ["## The output of the last failed attempt", "```", tail(kept["output"], 60), "```", ""]
+    found = [f.ledger.describe(fid) for fid in f.ledger.findings]
+    if found:
+        lines += ["## What the reviewer found", *found, ""]
+    ref = f"{t.ref}:{advice_path(f.id)}"
+    advice = (gitx.read_blobs([ref], project.root).get(ref) or "").strip()
+    if advice:
+        lines += ["## Advice a second model gave the worker (consult)", advice, ""]
+    diff = gitx.out(["diff", "--no-color", "--no-ext-diff", f"{project.base_ref}...{t.ref}", "--", ".",
+                     ":(exclude).rail/tickets", ":(exclude).rail/journal"], project.root)
+    if len(diff) > SHOWN:
+        diff = diff[:SHOWN] + f"\n(cut at {SHOWN} characters)"
+    return [*lines, "## The change as it stands", "```diff", diff.rstrip() or "(no change to any product file)", "```"]
+
+
+def lines_in_contract(project, f, fact, evidence):
+    """The evidence is one or more lines of the Done Contract, each word for word but for spacing and backticks.
+    Returns what is wrong, or None."""
+    held = _plain(f.ticket.sections.get("Done Contract", ""))
+    rows = [_plain(row) for row in evidence.splitlines() if _plain(row)]
+    if not rows or any(len(row) < 8 for row in rows):
+        return "a quoted line is too short to be looked up"
+    missing = [row for row in rows if row not in held]
+    return f"this line is not in the Done Contract of the ticket: {missing[0]}" if missing else None
+
+
+def _parts(project, f, fact, evidence):
+    rows = [row for row in evidence.replace(";", "\n").splitlines() if row.strip(" -*")]
+    return None if len(rows) >= 2 else "the answer names fewer than two parts: one on each line"
+
+
+# Not tested with a model run: the question, the answers and what each tells the run, as the rest of the brief.
+question(
+    "stuck",
+    "A ticket reaches its retry cap, or its retry budget after consult advised. Raised once for a ticket.",
+    "This ticket's attempts keep failing. Before anything else is done with it: why? Is the contract at fault, is the"
+    " work too large for one ticket, do the attempts share a mistake, or is the machine at fault?",
+    {"contract": {"means": "a `Check:` line or a Done Contract item is wrong, or two of them contradict each other.",
+                  "then": ACT, "does": "amend", "check": lines_in_contract,
+                  "evidence": "the line or lines of the Done Contract that are wrong, word for word, one on each line.",
+                  "effect": "The contract writer amends the contract, and the ticket is tried again."},
+     "too-large": {"means": "the work is more than one ticket.", "then": ACT, "does": "split", "check": _parts,
+                   "evidence": "the parts it falls into, one on each line.",
+                   "effect": "The contract writer files a ticket for each part, and this one is dropped."},
+     "approach": {"means": "the contract is right, and the attempts share a mistake.", "then": ACT, "does": "restart",
+                  "check": _said, "evidence": "what the attempts share, and what to do instead.",
+                  "effect": "The ticket's branch starts again from the base branch, and the worker is told what you"
+                            " name."},
+     "machine": {"means": "the failures are the machine's or a tool's, not the change's.", "then": ACT,
+                 "does": "machine", "check": _said, "evidence": "the failure that shows it, as the output has it.",
+                 "effect": "The ticket waits for a person to mend the machine."},
+     "cannot-tell": {"means": "none of the others can be shown from what is here.", "then": ACT, "does": "as-before",
+                     "effect": "An AUTO ticket is dropped, and a PERSON ticket waits for a person."}},
+    lambda project, f, ref, patch_id, run: [], _show_stuck, at="cap",
+    model=lambda project: project.config["worker"]["contract"].rpartition(":")[0])

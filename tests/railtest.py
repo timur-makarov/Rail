@@ -191,6 +191,12 @@ class Fixture:
     def worktree(self, nn):
         return self.path(".claude", "worktrees", nn)
 
+    def undiagnosed(self, nn="1"):
+        """A ticket at its retry cap gets one diagnosis before it is dropped or waits (rail docs retries). Here the
+        stand-in answers `cannot-tell`, which leaves the ticket where it was: what rail next then answers."""
+        self.queue_reviews({"answer": "cannot-tell", "reason": "Nothing here shows which."})
+        return self.rail("next", "--ticket", nn)
+
     def fix_calc(self, nn):
         self.write("src/calc.py", "def add(a, b):\n    return a + b\n", base=self.worktree(nn))
 

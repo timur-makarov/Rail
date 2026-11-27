@@ -97,8 +97,6 @@ Left:
 
 - **A release ticket** keeps its own act, the approval of the release, because the release is where its kinds
   take effect (**Release tickets**). It is built with release tickets.
-- **A PERSON ticket at its retry cap** still waits for a person (`RETRY_CAP`) until **A diagnosis before a stuck
-  ticket is dropped or waits** is built.
 - **The sweep's line** that names a kind for `approve_contract` is a first wording, marked as not tested where
   it is written. It waits for the owner to restart the model tests.
 
@@ -109,54 +107,23 @@ Assumed, not verified:
 
 ### 6. A diagnosis before a stuck ticket is dropped or waits
 
-Size: M.
+Built (`rail docs retries`): a ticket at its retry cap gets one diagnosis from a run that did not write the
+change, the triage type `stuck`, and its answer says what happens next: the contract writer amends the contract
+or splits the ticket, the branch starts again from the base, the machine is a person's to mend, or the ticket is
+dropped or waits as before. The reason: a ticket that is stuck more often has a wrong or too large contract than
+a worker that needs a person's hint, and both ends before told nobody why. The owner decided this on 2026-11-27.
 
-**What it does.** A ticket at its retry cap gets one diagnosis before anything else happens to it. Today an AUTO
-ticket at the cap is dropped with a record, and it is tried again only when a person labels its issue again; a
-PERSON ticket waits for a person to read the journal and the branch and say what to do differently. Both end at
-a person, and neither says why the ticket was stuck. A ticket that is stuck more often has a wrong or too large
-contract than a worker that needs a person's hint. The owner decided this on 2026-11-27.
+Left:
 
-**How.**
+- **The wording** of the question, its answers and the two tasks for the contract writer is a first wording,
+  marked as not tested where it is written. It waits for the owner to restart the model tests.
+- **In use,** over the first 20 diagnosed tickets: kept when at least five merged afterwards, themselves or
+  through the tickets that replaced them; otherwise the type is removed. `rail stats` has both numbers.
+- **No guide is named for the split.** The task says what to file and how to drop the ticket. The one page on
+  splitting, the `rail-slice` skill's section for `[guides] split`, is about a change that is built already. A
+  situation of its own would be a new key under `[guides]`.
 
-- **A question type, `stuck`**, of **The triage step**, raised once for a ticket, on either tier, when it
-  reaches the budget after consult, or the cap. It runs on the contract writer's model (`[worker] contract`).
-  The brief shows the ticket, each failure in the journal with its step, signature and output's tail, the
-  reviewer's findings, consult's advice, and the change.
-- **The answers.**
-
-  | Answer | Evidence | What the engine does |
-  |---|---|---|
-  | `contract`: a `Check:` line or Done Contract item is wrong, or two contradict each other | The quoted line or lines | An agent task for the contract writer: amend the contract. Then a fresh budget and cap |
-  | `too-large`: the work is more than one ticket | The parts it names | An agent task for the contract writer: split it with `rail-slice`. The ticket is dropped with a record that names the tickets that replace it, and its issue stays open until the last of them merges |
-  | `approach`: the contract is right and the attempts share a mistake | What they share, and what to do instead | A new branch from the base, the note in the implement brief, a fresh budget and cap |
-  | `machine`: the failures are the machine's or a tool's | The failure it names | The wait that exists for it (`TOOL_DOWN`) |
-  | `cannot-tell` | None | As today: an AUTO ticket is dropped, a PERSON ticket waits (`RETRY_CAP`). The diagnosis is in the record and in the wait's brief |
-
-- **Once.** A ticket that reaches the cap again after its diagnosis is dropped or waits, as today, with the
-  diagnosis in the record.
-- **The tier is not changed by any answer.** The paths and kinds make a ticket PERSON, so a PERSON ticket whose
-  contract the diagnosis amended still stops at the person's merge.
-- **Not consult.** Consult advises the worker about the code, before the cap. The diagnosis asks whether the
-  contract is the fault.
-- A dropped ticket's issue gets the diagnosis as a comment.
-- **Numbers.** `rail stats` counts stuck tickets by answer, and how many merged after their diagnosis.
-- Files that change: `engine/rail/triage.py`, `engine/rail/table.py` (`STUCK`, `RETRY_CAP`, the two agent
-  tasks), `engine/rail/stats.py`, `engine/docs/retries.md`, `engine/docs/triage.md`, `engine/docs/loop.md`,
-  `CHANGELOG.md`.
-
-**Kept when.** Gate cases, no model, with the stand-in: a ticket at the cap gets one `stuck` question and no
-drop or wait before its answer; each answer does what the table says; a second cap drops an AUTO ticket and
-makes a PERSON ticket wait. In use, over the first 20 diagnosed tickets: kept when at least five merged
-afterwards, themselves or through the tickets that replaced them; otherwise the type is removed.
-
-**Waits for.** **The triage step** and **A PERSON ticket takes one act**. The wording of the brief is not tested
-with a model until the owner restarts the model tests.
-
-**Open decision.** None. The issue of a ticket that was split stays open until the last of the tickets that
-replace it merges (owner, 2026-11-27).
-
-**Assumed, not verified.**
+Assumed, not verified:
 
 - That a fresh run can tell a wrong contract from a wrong approach from the journal and the change. Not
   measured.

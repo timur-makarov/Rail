@@ -415,7 +415,7 @@ class Responsibility(RailTest):
         a.add(ticket())
         a.rail("next")
         fail_twice(a)
-        self.assertEqual(a.rail("next", "--ticket", "1")["state"], "dropped")  # the engine, at the retry cap
+        self.assertEqual(a.undiagnosed()["state"], "dropped")  # the engine, at the retry cap, after the diagnosis
         a.add(ticket(title="Other", scope=("api/**",), check="grep -q 201 api/handlers.py"))
         a.rail("drop", "2", "--reason", "not needed")
         a.add(ticket(title="Third", scope=("docs/**",), check="grep -q sum docs/guide.md"))
@@ -424,6 +424,7 @@ class Responsibility(RailTest):
         b.rail("status")  # another clone, which never had the branches
         answer = b.rail("stats")
         self.assertEqual(answer["stats"]["drops"], {"total": 3, "by": {"agent": 1, "engine": 1, "person": 1},
-                                                    "stuck_steps": {"checks": 1}, "person_refused": {}, "cost_usd": 0.0})
-        self.assertIn("Dropped: 3. By the engine at the retry cap 1, by an agent 1, by a person 1. The engine's drops,"
-                      " by the step that kept failing: checks 1.", answer["text"])
+                                                    "stuck_steps": {"checks": 1}, "person_refused": {},
+                                                    "cost_usd": 0.01})  # what the diagnosis run reported
+        self.assertIn("Dropped: 3. By the engine at the retry cap 1, by an agent 1, by a person 1. Their runs reported"
+                      " $0.01. The engine's drops, by the step that kept failing: checks 1.", answer["text"])

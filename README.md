@@ -47,7 +47,10 @@ fields of a migration ticket (`reversibility` and `rollback`), size, the archite
 table in `ARCHITECTURE.md`), the project's own `verify` command (tests, lint, scans), each `Check:` line, and any
 sensor the project has set up (a tool whose findings fail only on the lines the change adds). A failure sends the ticket back with the output. A failure counts as stuck only when it
 repeats: when a step fails the same way twice in a row, a second opinion (`rail consult`) advises once, and
-after one more failure the ticket is stuck. Five failures at one step are stuck whatever they were. A stuck AUTO
+after one more failure the ticket is stuck. Five failures at one step are stuck whatever they were. A stuck
+ticket gets one diagnosis from a run that did not write the change: the contract is wrong (the contract writer
+amends it), the work is too large (it is split), the attempts share a mistake (the branch starts again), or the
+machine is at fault (a person mends it). When the diagnosis can't tell, a stuck AUTO
 ticket is dropped with a record (nothing merged, so nothing needs undoing), and its issue says why; label the issue
 again to retry. A stuck PERSON ticket waits for a person.
 

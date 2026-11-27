@@ -338,6 +338,8 @@ class Retry(RailTest):
         self.assertIn("retry_cap at 'checks', change", advice)
         p.write("src/calc.py", "def add(a, b):\n    return a ** b\n", base=p.worktree("1"))
         capped = p.rail("advance", "1", expect=3)
+        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("agent", "DIAGNOSE"))  # one diagnosis comes first
+        capped = p.undiagnosed()
         self.assertEqual((capped["owner"], capped["reason"]["code"]), ("person", "RETRY_CAP"))
         self.assertEqual(p.rail("next")["reason"]["code"], "WAITING_PERSON")
         p.rail("accept", "1", "the check wants plain addition")
@@ -393,6 +395,8 @@ class Retry(RailTest):
             self.assertEqual(p.rail("advance", "1", expect=3)["reason"]["code"], "STEP_FAILED", n)
         self.calc(p, "return a - b")
         capped = p.rail("advance", "1", expect=3)  # 5: never the same twice in a row, and still a person looks
+        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("agent", "DIAGNOSE"))  # one diagnosis comes first
+        capped = p.undiagnosed()
         self.assertEqual((capped["owner"], capped["reason"]["code"]), ("person", "RETRY_CAP"))
         self.assertIn("'checks' failed 5 times since it last passed, whatever the output ([retry] cap)",
                       capped["action"]["brief"])
