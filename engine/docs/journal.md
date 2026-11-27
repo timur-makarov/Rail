@@ -98,7 +98,7 @@ reason. Ticket lint refuses a `VERIFIED: decided, not checked:` row with nothing
 | `review`, `security` | `advance` | The run leaves a blocking finding open. A run past `timeout_secs` fails with `detail: "timeout"`, and a run whose output is invalid with `detail: "invalid output: ..."`, both with `counted: false`. No run and no step when the change needs no review |
 | `refuter` | `advance`; `rail answer` | The refuter upholds the finding. A pass means it dismissed it. On an AUTO ticket, `rail answer` writes a failed `refuter` step, with no run, when the author disputes a finding a refuter already upheld: the verdict stands, and the dispute counts toward the retry cap |
 | `sweep` | `rail sweep` | Never |
-| `harvest` | `rail sweep`, when nothing merged without a review: no review run | Never. `detail: "nothing to file"` when the sweep found nothing, and its ticket then merges with no task |
+| `harvest` | `rail sweep`, when no review pass ran (nothing merged without a review, and no area to read), and after a pass when the sweep found nothing | Never. `detail: "nothing to file"` when the sweep found nothing, and its ticket then merges with no task |
 | `merge` | `advance`, with no remote | The base branch moved during the merge |
 
 **The retry budget.** A step's attempts are its `step` events with `result: "fail"` and `counted` not false

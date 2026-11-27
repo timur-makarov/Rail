@@ -191,83 +191,49 @@ Assumed, not verified:
 
 ### 8. The sweep reads more
 
-Two features, built in this order. Both make the sweep read what it skips today.
+Built (`rail docs sweep`): the sweep reads what it skipped before.
 
-#### The sweep reads reviewed merges
+- **Reviewed merges.** Once `[sweep] every` tickets merged, the sweep's review pass reads the current code of
+  each `## Areas` row those tickets changed. The brief names the areas, the tickets that changed each, and the
+  ids of all the merged tickets. The reason: each ticket's own review sees one change, and duplication and
+  logic in the wrong area show up across tickets.
+- **What tickets leave behind.** Five collections from the journals and the base branch, each a section of the
+  summary with one way to close: the `Noticed:` and `not tested:` lines; the findings an author declined, by
+  kind; every note a person gave with `rail accept`; the failure signatures two or more merged tickets share;
+  and the `TODO(NN)` and `FIXME(NN)` comments whose ticket NN merged or was dropped, for a removal ticket.
 
-Size: S.
+Settled while building, and not on this page before:
 
-**What it does.** Today the sweep runs a reviewer pass only over changes that merged with no review. This adds
-a second trigger: every `[sweep] every` merged tickets (20), whatever their review, the sweep's reviewer pass
-reads the current code of the areas that changed since the last sweep. The reason is that duplication and
-logic in the wrong area show up across tickets, and each ticket's own review sees one change.
+- A sweep run by hand before `every` tickets merged gathers and reads no area: the pass costs one model run,
+  and `every` is what the page ties it to.
+- A pass that reports no finding, with nothing else gathered, answers `SWEEP_EMPTY`. Before, any pass gave
+  the agent the task of filing tickets, and with a pass on every sweep that task would often have had nothing
+  to file.
+- A file a ticket changed that is in no `## Areas` row does not bring a pass by itself; the brief lists such
+  files under the areas when a pass runs.
+- A kind of declined finding is one claim, spacing and case aside, as the proposed checks are grouped. The
+  agent that files the tickets groups further.
+- A repeated failure is a signature in two merged tickets. Failed review runs are left out, because they all
+  share one signature.
+- A removal ticket carries `external_id = "todo#NN"`, and while it is open later sweeps leave NN out. A
+  removal ticket that was dropped does not stop the next sweep from naming NN again.
 
-**How.**
-- In `engine/rail/sweep.py`, `run` calls `review.run` only when `commits` (the unreviewed ones) is non-empty;
-  with nothing unreviewed it records a `harvest` step and runs no model. Change this so a sweep that is due by
-  `every` always runs the reviewer pass.
-- The pass reads the current code of each area (rows of `## Areas` in `ARCHITECTURE.md`) that a ticket merged
-  since the last sweep changed. The sweep brief (`brief` in `sweep.py`) gains the list of those areas and the
-  merged ticket ids.
-- Cost: one model run per 20 tickets.
-- A sweep with no parked finding, pattern or flaky check and no changed area still answers `SWEEP_EMPTY`.
-- Files that change: `engine/rail/sweep.py`, `engine/docs/sweep.md` (its first bullet and "Review part"), the
-  sweep brief text, `CHANGELOG.md`.
+Left:
 
-**Kept when.** Gate case, no model: a sweep due by `every` with every merged ticket reviewed starts a reviewer
-pass, and the brief names the changed areas; a sweep with nothing merged runs none. In use: the pass's
-findings that become tickets are counted over five sweeps; a pass that leads to no ticket in five sweeps is
-removed.
+- **The wording** of the brief's section on the areas and of its two new openings, and of the five new
+  summary sections, is a first wording, marked as not tested where it is written. It waits for the owner to
+  restart the model tests.
+- **The counts that decide what is kept.** Over five sweeps: the pass's findings that became tickets, and for
+  each collection how many items ended as a merged ticket or check. A pass or a collection that leads to
+  nothing in five sweeps is removed. Nothing counts these yet; the summaries and the tickets filed from them
+  hold the numbers.
 
-**Waits for.** Nothing.
+Assumed, not verified:
 
-**Assumed, not verified.**
-- The cost of the design sweep's model run over the areas that changed in 20 tickets.
-
-#### The sweep gathers what tickets leave behind
-
-Size: M.
-
-**What it does.** The sweep collects what each ticket wrote down and nothing reads today, and turns it into
-tickets. Information is kept when it is written outside any context window, in one known place, sent by the
-engine to the next agent that needs it, marked confirmed, inferred or decided, and closed (done, a ticket, a
-check, or dropped). A free-form reasoning log is left out on purpose: each change below has one reader and one
-way to close.
-
-**How.** Five collections, all read from the journals and the base branch for tickets merged since the last
-sweep (`sweep.py`, next to `history` and `patterns`):
-- **Out-of-scope problems.** The `Noticed:` lines under `## Look at` that the brief asks workers to write, and
-  the "not tested" lines. Each becomes a candidate ticket in the summary.
-- **Declined findings, grouped by kind.** `history` today gathers parked findings, advisory findings left
-  open, and the checks of fixed findings. Add findings the author declined, grouped by kind.
-- **A person's word.** Every `rail accept` note since the last sweep. The summary lists them. A note that
-  reads as a standing rule gets a ticket (a line in the project's part of `AGENTS.md`, a check or a rule).
-  Today these notes reach the briefs only until the next ship (`state.py`).
-- **Repeated failures.** A failure signature (numbers, hashes and paths left out, as the flaky-check matching
-  does) that recurs across tickets is flagged, and the sweep files a check or an `AGENTS.md` line. Today
-  signatures are counted only within one ticket.
-- **Work left for later.** A structure rule requires each `TODO` and `FIXME` to name the open ticket that will
-  do it, `TODO(NN)`. The sweep files a removal ticket when ticket NN merged or was dropped and the comment is
-  still in the tree. Fresh text matters because stale TODOs sent agents on detours of about 70% more steps
-  (reported).
-- Each collected item has one closing path: a ticket, a check, or dropped. The summary page in
-  `.rail/journal/NN-summary.md` gains a section per collection; `engine/docs/sweep.md` is updated.
-
-Worker-run patterns across tickets (commands that failed before the right one, commands not found, denied
-calls, files re-read, in the `worked` event, a pattern in three or more tickets) are built: `patterns` in
-`engine/rail/sweep.py` and "Patterns in the worker runs" in `engine/docs/sweep.md`. Flaky checks are built
-too.
-
-**Kept when.** From the journals, before and after, over the same number of merged tickets: failure signatures
-that recur across tickets, and how many collected items ended as a merged ticket or check. A collection that
-leads to nothing in five sweeps is removed. Gate case, no model: a `TODO(NN)` whose ticket merged gets a
-removal ticket; a `TODO` with no number fails its structure rule.
-
-**Waits for.** **The sweep reads reviewed merges** is not required, but both change the same summary and
-brief, so build them in the same pass.
-
-**Assumed, not verified.**
-- The implement brief stays short with `## Why`, the decided rows and five tickets of history added.
+- The cost of the sweep's model run over the areas that changed in 20 tickets.
+- That a claim is worded alike often enough for the grouping of declined findings to find a kind. Two
+  reviewers' wordings of one problem are two kinds until the filing agent joins them.
+- That the implement brief stays short with `## Why`, the decided rows and five tickets of history added.
 
 ### 9. Driving the real product
 
@@ -1308,8 +1274,8 @@ kept on the same rule, and when it adds no more scope amends or split offers tha
 
 **Waits for.** **Complexity and duplication sensors on by default**, which is built first and reports the
 numbers this wording has to move; **Sensor sets per language** (arm C); the owner restarting the paused model
-tests; and replay for replay arms (set aside by the owner, to be written up as its own feature). For the arm E
-part, **The sweep gathers what tickets leave behind**.
+tests; and replay for replay arms (set aside by the owner, to be written up as its own feature). The arm E
+part reads what the sweep gathers from merged tickets, which is built (`rail docs sweep`).
 
 #### Findability probe
 
@@ -1636,7 +1602,8 @@ and a `Check:` that fails before the refactor and passes after.
 **Kept when.** From the journals: refactor tickets that merge, and whether the kind's trend number falls over
 the next sweeps. No other rule is set.
 
-**Waits for.** **The sweep reads reviewed merges** and **Trend numbers**.
+**Waits for.** **Trend numbers**. The sweep's pass over the areas reviewed tickets changed is built
+(`rail docs sweep`).
 
 **Open decision.** The cap as "open at once" (`max_refactor_open`, proposed) or "per sweep".
 

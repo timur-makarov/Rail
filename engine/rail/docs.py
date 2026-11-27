@@ -89,7 +89,7 @@ READERS = {
     "sweep.after": "next: changes merged with no review (tickets inside review.skip_paths, and commits with no"
                    " ticket) since the last sweep before one is offered",
     "sweep.every": "next: tickets merged since the last sweep, reviewed or not, before one is offered; it then"
-                   " gathers the findings reviewers parked and the checks they proposed. 0 switches this off",
+                   " reads the areas they changed and gathers what the tickets left behind. 0 switches this off",
     "stats.held_days": "stats: the days a merged ticket must have been on the base branch before it can count as"
                        " held (not reverted, and named in no later ticket's caused_by)",
     "map.depth": "doc-lint: the directory depth ## Areas must cover",

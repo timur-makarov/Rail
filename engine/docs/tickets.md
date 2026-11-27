@@ -93,7 +93,8 @@ another ticket months later. So the engine puts what was learned into the brief,
 - **Work left for later names its ticket.** The seed rule `todo-names-its-ticket` refuses a new `TODO:` or
   `FIXME:` with no number: file the work with `rail add`, then write `TODO(NN): what is left`. `SHORTCUT(NN)`
   names the ticket that cut the corner; `TODO(NN)` names the one that will do the work. The rule is a text
-  match (`rail docs rules`): it doesn't check that ticket NN exists.
+  match (`rail docs rules`): it doesn't check that ticket NN exists. When ticket NN merged or was dropped and
+  the comment still stands, the sweep lists it for a removal ticket (`rail docs sweep`).
 
 ## A revert is a ticket
 

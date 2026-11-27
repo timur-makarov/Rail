@@ -107,8 +107,9 @@ the next ticket.
 table of every step that ran, and a `Review:` trailer that says who reviewed it. `rail status` lists every
 ticket and what it waits for. `rail stats` counts, over the merged tickets, how many needed a person, how
 many were reverted, which steps failed, what the reviewer cost and how often its findings ended in a fix, and how the grilling went. Every 20
-merged tickets, a sweep gathers the findings reviewers parked and the checks they proposed, reads any changes
-that merged with no review, and turns what it finds into tickets. A source does the same for any other
+merged tickets, a sweep reads the areas those tickets changed and any changes that merged with no review,
+gathers what the tickets left behind (parked findings, proposed checks, the problems workers noticed, a
+person's notes, stale `TODO` comments), and turns what it finds into tickets. A source does the same for any other
 signal, such as failed CI runs or last week's merges: a prompt in `.rail/sources/` that files tickets and
 never edits.
 
