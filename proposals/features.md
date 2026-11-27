@@ -60,206 +60,30 @@ Whether `facts` lowers misreadings has no model test until a layout change is pr
 
 ### 4. A triage step for the questions the engine raises
 
-Four features, built in this order. The first is the step itself. The other three are the questions it answers
-first.
+Built (`rail docs triage`): the step, and the four question types `old-test`, `sensor-exempt`, `decided` and
+`secret`. The reason for the step: wherever the worker judged its own case, a run with no stake in the answer
+judges it instead. The owner decided this on 2026-11-27.
 
-The reason for the step: wherever the worker judges its own case today, a run with no stake in the answer judges
-it instead. The engine states a fact, a fresh run answers one closed question about it, and the engine acts on
-the answer. The owner decided this on 2026-11-27.
+Left, all of it waiting for the owner to restart the model tests:
 
-#### The triage step
+- **The step's prompt and every type's brief** are a first wording, marked as not tested where they are written.
+- **`old-test`, model test.** The triage brief on the hand-sorted results of the test on real history
+  (`tests/history/old-test.json`: 35 red results, sorted `contract` 26, `moved` 5, `lost` 4), at least six of
+  them, with each of the three answers among them, two runs each. Kept when it gives the hand-sorted answer in
+  at least three quarters of the runs, and answers `contract` or `moved` in no more than one run in eight on
+  the cases sorted as `lost`.
+- **The three exemption types, in use.** Over the first 20 questions of a type, a type answered the same way 19
+  times is turned into a rule or removed; the sweep names such a type.
 
-Size: M.
+Assumed, not verified:
 
-**What it does.** The engine raises a question from a fact it produced itself, such as a test that fails or a
-line the change added. A fresh run that did not write the change answers it with one of a few fixed answers, and
-the engine does what that answer means. The refuter already works this way for one question, whether a finding
-holds. This makes it one step with a list of question types, so that a new question costs a table entry and its
-test.
-
-**How.**
-
-- **One table of question types**, `QUESTIONS` in a new `engine/rail/triage.py`. Each entry holds: the type's
-  id; the fact that raises it; what the brief shows; the two to four answers allowed, each with one line on what
-  it means; what the engine does on each answer; and for an answer that lets the change through, the evidence it
-  must name and how the engine checks it.
-- **Events.** `question`, with the type, the `patch_id` and the fact; `answered`, with the answer, its evidence,
-  whether the evidence passed its check, and the run's cost. A question is open while its patch has no
-  `answered` event.
-- **One row.** `TRIAGE` in `engine/rail/table.py` fires for a shipped ticket with an open question, before any
-  review, so that no review is spent on a patch that is about to change.
-- **The run.** The engine starts it as it starts a review: a fresh session with tools that read and run and
-  never push, a brief that holds only what the type says to show, and a JSON answer checked against a schema.
-  `[triage] command` and `[triage] model` in `.rail/config.toml`; empty means the review seat's.
-- **Evidence.** An answer that lets the change through names its evidence, and the engine checks what it can: a
-  quoted contract line is in the ticket, a named file is in the change. An answer whose evidence fails its check
-  is invalid output: the run is repeated once, and a second invalid answer is the wait an invalid review already
-  has (`STUCK_REVIEW`).
-- **An answer that stops the change** fails a step named `triage`. The worker gets the fact and the answer in
-  its brief, and the failure counts toward the retry budget like any failed step. The next patch raises the
-  question again only if the fact still holds. Nothing goes to the refuter: a second run on the first one's
-  answer is not added.
-- **Numbers.** `rail stats` counts, for each type, the questions, each answer's share and the cost. The sweep
-  names a type that got the same answer in 19 of its last 20 questions: such a type is a rule the engine can
-  apply with no run.
-- **Only closed questions.** Whether a change is good stays the reviewer's question.
-- Files that change: `engine/rail/triage.py` (new), `engine/rail/table.py`, `engine/rail/steps.py`,
-  `engine/rail/config.py`, `engine/rail/stats.py`, `engine/rail/sweep.py`, `seed/config.toml`, a new page
-  `engine/docs/triage.md`, `engine/docs/journal.md`, `engine/docs/loop.md`, `CHANGELOG.md`.
-
-**Kept when.** Gate cases, no model, with a stand-in for the run as `tests/fake_reviewer.py` is for the
-reviewer: a fact raises one question for a patch and no second one for the same patch; an answer that passes
-with checked evidence lets the ticket go on to review; an answer that stops fails `triage` and returns the
-ticket to the worker; evidence that fails its check repeats the run once and then waits; `rail stats` shows the
-counts on fixture journals. Kept when every case behaves as written.
-
-**Waits for.** Nothing. The wording of each brief is not tested with a model until the owner restarts the model
-tests.
-
-**Open decision.** None.
-
-**Assumed, not verified.**
-
-- That a run with a narrow brief answers a closed question better than the worker does about its own change. No
-  measurement from Rail; each type's own test decides whether it is kept.
+- That a run with a narrow brief answers a closed question better than the worker does about its own change.
+  Each type's own test decides whether it is kept.
 - That the review seat's model suits the step. `rail stats` shows the cost for each type once it runs.
+- That a redacted finding with the lines around it is enough to tell an example from a secret.
 
-#### Old tests run against the new code
-
-Size: M.
-
-**What it does.** When a ticket edits, deletes or renames a test file that existed on the base, Rail runs the
-checks again with the base version of that file. If a command that passed with the edited test fails with the
-old one, the engine raises the question `old-test`. Reason: about one in five benchmark patches that pass their
-tests fail stronger tests, and agents bend checks by editing tests until they pass. The `Check:` lines are
-frozen at acceptance, but the test files they run are not.
-
-**How.**
-
-- `[tests] paths` is read for the first time. It holds globs of the files that hold tests and their runner's
-  settings (such as `tests/**`, `**/*_test.go`, `**/conftest.py`, `vitest.config.*`). `rail init` already writes
-  it from the language profiles, and the agent adjusts the list. Empty switches this feature off, including the
-  brief section. `engine/rail/docs.py` drops "nothing yet" from the `tests.paths` line.
-- When a ship passes, and the change edits or deletes a file that existed on the base and matches `[tests]
-  paths`, the engine runs the checks once more with the base version of those files:
-  1. In the ticket's worktree, `git checkout <base> -- <files>` for each edited or deleted test file. A renamed
-     file counts under its old path. `changed_files` (`engine/rail/project.py`) runs `git diff --name-only`,
-     which with git's default rename detection lists only the new path, so this step reads `git diff
-     --name-status <base>...<ref>` and takes the old path of each `R` row. A rename to a path outside `[tests]
-     paths` counts too.
-  2. Run `verify` and each `Check:` line, as ship runs them.
-  3. Put the worktree back with `git reset --hard <head>` and `git clean -fdq`, as `base_checks` does after its
-     run (`engine/rail/steps.py`). `clean` without `-x` keeps ignored files such as installed dependencies.
-  4. Record a `base_tests` event: `patch_id`, the files, and per command `green` or `red` (the same values as
-     `base_checks`). It runs once per `patch_id`, so a clean rebase does not run it again.
-- It runs only at ship, not in `rail ci`: it fails no step by itself, and CI repeats only what can fail a ship
-  (`CHECKS` in `engine/rail/steps.py`). A new test file is the author's and is left alone.
-- **The question.** A command that was green with the edited tests and red with the base ones raises `old-test`.
-  The brief shows the old test, the test's diff, the command and the tail of its output, and the Done Contract
-  with its `## Why`. It does not show the rest of the change. The answers:
-
-  | Answer | Meaning | Evidence the engine checks | What the engine does |
-  |---|---|---|---|
-  | `contract` | The contract asks for this change in behaviour | The quoted Done Contract line or `## Why` sentence is in the ticket | Records it; the ticket goes on |
-  | `moved` | The behaviour is kept; the test was moved, renamed or rewritten | The named test file is in the change and matches `[tests] paths` | Records it; the ticket goes on |
-  | `lost` | Behaviour is lost that the contract does not ask for | None | Fails `triage`; the worker keeps the behaviour, or amends the contract |
-
-- The reviewer's brief gains a section, "Changes to what checks this change", listing: each changed file that
-  matches `[tests] paths`, with whether it existed on the base; each changed `REVIEW.md`; the `base_tests`
-  result; and the answer to each `old-test` question.
-- These items go to the reviewer only, not to a person's "Read these" list: a changed test can be undone. A
-  change to `.rail/config.toml`, where `verify` lives, is already PERSON through `person_paths`, and a change to
-  CI workflows is PERSON under the kind `runs-with-secrets` (`rail docs kinds`).
-- `REVIEW.md` stays out of `person_paths`: it is guidance, the look-for list is engine code, and the brief
-  section names a change to it to the reviewer of the ticket that makes it.
-- Files that change: `engine/rail/steps.py` (`base_tests` after a passing ship, `--name-status`);
-  `engine/rail/triage.py` (the type); `engine/rail/review.py` (the brief section); `engine/rail/config.py` and
-  `engine/rail/docs.py` (`[tests] paths` read); `engine/docs/review.md`; `engine/docs/triage.md`;
-  `engine/docs/journal.md` (the `base_tests` event); `CHANGELOG.md`.
-- Not covered: a test that runs real services or secrets the ticket's machine lacks (the base run then fails on
-  both versions and raises nothing). For Rust, unit tests live in `#[cfg(test)]` modules inside source files, so
-  this feature covers only integration tests there.
-- The paths of driving checks (see **Language fixtures checked on a machine with every toolchain** and the
-  per-surface recipes) join `[tests] paths`, so this covers driving checks too.
-
-**Kept when.**
-
-1. Gate cases, no model, with the stand-in for the triage run:
-   - a ticket that removes an assertion from an existing test gets a `base_tests` event with `red` and one
-     `old-test` question, and no review starts before it is answered;
-   - answered `lost`, the `triage` step fails and the worker's brief holds the command and the answer;
-   - answered `contract` with a line that is in the ticket, or `moved` with a test file that is in the change,
-     the ticket goes on to review; with a line or a file that is not there, the run is repeated;
-   - a ticket that edits a test and keeps its behaviour gets `green` and no question;
-   - a deleted test is restored for the run; a renamed test is restored under its old path;
-   - a new test file is not run in its base version; an empty `[tests] paths` runs nothing; a clean rebase does
-     not run it again; the worktree is unchanged afterwards;
-   - the review brief lists changed test files, `REVIEW.md` and the answers.
-   Kept when every case behaves as written.
-2. On real history, no model. On the history of three open-source repositories, one per language profile where
-   possible: every commit that edits an existing test file is run with the base version of those files. Each red
-   result is read by hand and sorted into the three answers. The share of commits that edit tests tells the time
-   this feature adds to ships, and the share of red results tells how many runs it costs. The sorted results are
-   kept: they are the answer key for the model test below. This test comes before the feature is built.
-3. Model test, once the owner restarts the model tests: the triage brief on the sorted results of test 2, at
-   least six of them, with each of the three answers among them, two runs each. Kept when it gives the
-   hand-sorted answer in at least three quarters of the runs, and answers `contract` or `moved` in no more than
-   one run in eight on the cases sorted as `lost`.
-
-**Waits for.** **The triage step**. The test on real history comes first and waits for nothing.
-
-**Open decision.** None. The owner chose the triage run over a finding the worker answers (2026-11-27).
-
-**Assumed, not verified.**
-
-- That the base version of an edited test usually still runs against the new code. A test that imports a renamed
-  helper fails for that reason, and `moved` is its answer; test 2 measures how often.
-- That `git checkout <base> -- <file>` followed by `reset --hard` and `clean -fdq` leaves the worktree as it
-  was, ignored files included, as `base_checks` already relies on.
-
-#### An exemption the worker writes is confirmed
-
-Size: M.
-
-**What it does.** Three things a worker writes today excuse its own change from a check, and the engine takes
-each at its word: a `SENSOR(NN): why` comment on a line a sensor flags, a `VERIFIED: decided, not checked:` row
-in the ticket, and, once the docs name it, a line in `.gitleaksignore`. Each now raises a question.
-
-**How.** Three question types, each raised at ship from the change's added lines:
-
-| Type | Raised when the change adds | Answers that let it through | Answers that stop it |
-|---|---|---|---|
-| `sensor-exempt` | a `SENSOR(NN): why` comment | `holds`: the sensor misreads the line, or the contract requires the line as it is (quotes the contract line) | `does-not-hold`: fails `triage`; the worker removes the comment and mends the line |
-| `decided` | a `VERIFIED: decided, not checked:` row | `choice`: nothing in the repository or its dependencies settles it, and no Done Contract item depends on it | `checkable` (names where it can be checked): fails `triage`, and the worker checks it. `contract` (quotes the item that depends on it): fails `triage`, and the worker amends the contract so that the choice stands where the reviewer reads it |
-| `secret` | a line in `.gitleaksignore` | `not-a-secret`: says what the string is, such as an example, a fixture or a public id | `secret`: a wait for a person, who rotates it; the line may not stay |
-
-- **The secret scan's false finding gets its answer.** The scan reads every commit of the branch, and the guard
-  forbids rewriting a branch, so a false finding has no answer today: the line can be changed, and its first
-  commit still fails. `rail docs languages` gains the answer: put the finding's fingerprint, which the scan
-  prints, into `.gitleaksignore` and commit it. That line raises `secret`. The file does not join
-  `person_paths`: a person adds nothing to a string that is already pushed, unless it is a real secret, and then
-  the act is to rotate it.
-- **A real secret.** After the person's act the engine starts the ticket's branch again from the base under a
-  new name, because the scan would fail on the old branch's commits for good.
-- The `secret` brief shows the finding with its rule, file and line, and the string itself only as the scan
-  redacts it, with the lines around it.
-- Files that change: `engine/rail/triage.py`, `engine/rail/steps.py` (the added lines that raise each type),
-  `engine/docs/sensors.md`, `engine/docs/tickets.md`, `engine/docs/languages.md`, `engine/docs/triage.md`,
-  `CHANGELOG.md`.
-
-**Kept when.** Gate cases, no model, with the stand-in: each added line raises its question once for a patch;
-each answer does what the table says; a `SENSOR` comment that was on the base raises nothing. In use, over the
-first 20 questions of a type: a type answered the same way 19 times is turned into a rule or removed.
-
-**Waits for.** **The triage step**.
-
-**Open decision.** None.
-
-**Assumed, not verified.**
-
-- That gitleaks honours `.gitleaksignore` when it scans commits (`gitleaks git`), as its documentation says. Not
-  checked here.
-- That a redacted finding with its surrounding lines is enough to tell an example from a secret.
+The paths of driving checks (see **Driving the real product**) join `[tests] paths` when that step is built, so
+that `old-test` covers driving checks too.
 
 ### 5. A PERSON ticket takes one act
 

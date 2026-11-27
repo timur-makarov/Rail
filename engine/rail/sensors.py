@@ -66,7 +66,8 @@ def violations(output, cwd):
 
 
 def marked(cwd, path, start, end, cache):
-    """Whether a `SENSOR(NN): why` comment stands on one of the lines, or on the line above the first."""
+    """The first line that holds a `SENSOR(NN): why` comment among the violation's lines and the line above the
+    first, as (line number, its text), or None."""
     if path not in cache:
         try:
             with open(os.path.join(cwd, path), encoding="utf-8", errors="replace") as f:
@@ -74,12 +75,14 @@ def marked(cwd, path, start, end, cache):
         except OSError:
             cache[path] = []
     lines = cache[path]
-    return any(MARK.search(lines[n - 1]) for n in range(max(1, start - 1), end + 1) if n <= len(lines))
+    return next(((n, lines[n - 1].strip()) for n in range(max(1, start - 1), end + 1)
+                 if n <= len(lines) and MARK.search(lines[n - 1])), None)
 
 
-def new(project, found, added, cwd):
+def new(project, found, added, cwd, excused=None):
     """The violations that fail the step: on a line the change adds that git doesn't show as moved, in a file the
-    size count would count, with no SENSOR(NN) marker."""
+    size count would count, with no SENSOR(NN) marker. Those a marker answers go into `excused`, each as (path,
+    start, end, message, the marker's line number, the marker's line)."""
     kept, cache = [], {}
     for path, start, end, message in found:
         lines = added.get(path) or {}
@@ -87,7 +90,10 @@ def new(project, found, added, cwd):
             continue
         if os.path.basename(path) in rules.LOCKFILES or match_any(project.config["size"]["exclude"], path):
             continue
-        if marked(cwd, path, start, end, cache):
+        mark = marked(cwd, path, start, end, cache)
+        if mark:
+            if excused is not None:
+                excused.append((path, start, end, message, *mark))
             continue
         kept.append((path, start, end, message))
     return kept
@@ -126,7 +132,7 @@ def step(project, nn, ref, cwd, run, patch_id, changed):
     if not sensors:
         run.not_run("sensors")  # no receipt at all in a project with no sensor
         return True
-    added, kept, ms_all = None, [], 0
+    added, kept, excused, ms_all = None, [], [], 0
     with base_files(project) as env:
         for sensor in sensors:
             code, output, ms = run_shell(sensor["command"], cwd, dict(env, RAIL_TICKET=nn, RAIL_BASE=project.base_ref),
@@ -144,16 +150,22 @@ def step(project, nn, ref, cwd, run, patch_id, changed):
                                   output=shown if missing else f"{shown}\n\n{HELP}")
             if added is None:
                 added = added_lines(project, ref, cwd)
-            kept += [(sensor, v) for v in new(project, violations(output, cwd), added, cwd)]
+            held = []
+            kept += [(sensor, v) for v in new(project, violations(output, cwd), added, cwd, held)]
+            excused += [{"sensor": sensor["id"], "path": path, "line": start, "message": message, "marker_line": at,
+                         "marker": text} for path, start, end, message, at, text in held]
+    # What a SENSOR(NN) comment answered is kept with the step: the triage step asks about each (rail docs triage).
+    more = {"excused": excused} if excused else {}
     if not kept:
-        return run.record("sensors", True, patch_id, None, ms_all)
+        return run.record("sensors", True, patch_id, None, ms_all, **more)
     ids = list(dict.fromkeys(sensor["id"] for sensor, _ in kept))
     lines = [f"{path}:{start}{'' if end == start else f'-{end}'}: {message}. Sensor {sensor['id']}"
              + (f": {sensor['fix']}" if sensor.get("fix") else "") for sensor, (path, start, end, message) in kept]
     lines.append(f"Each is on a line this change adds. Where a sensor is wrong about a line, say why in a comment on"
-                 f" that line or the one above it: SENSOR({nn}): the reason. The reviewer judges the reason.")
+                 f" that line or the one above it: SENSOR({nn}): the reason. A run that did not write the change judges the reason"
+                 f" before the review, and a reason that does not hold comes back to you.")
     return run.record("sensors", False, patch_id, f"{len(kept)} violations: {', '.join(ids)}", ms_all,
-                      output="\n".join(lines))
+                      output="\n".join(lines), **more)
 
 
 def markers(project, ref, cwd=None):

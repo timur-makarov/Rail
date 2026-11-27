@@ -55,7 +55,16 @@ flake, or a race the change brought in (`rail docs retries`).
 
 **Sensor markers.** A `SENSOR(NN): why` comment tells a sensor that its violation on that line is wrong or
 accepted (`rail docs sensors`). The brief of the review and of the security seat lists each marker the change
-adds under "Sensor markers this change adds", and asks for the reason to be judged.
+adds under "Sensor markers this change adds", and asks for the reason to be judged. Before the review, the
+triage question `sensor-exempt` has already asked a fresh run whether each reason holds (`rail docs triage`).
+
+**Changes to what checks the change.** A change can edit the things that judge it. The brief of the review
+and of the security seat lists them under "Changes to what checks this change": each changed file that matches
+`[tests] paths`, with whether the base branch had it; each changed `REVIEW.md` (the guidance in the brief is
+the base's, so the reviewer of the ticket that changes it is the one who sees the change); what the checks did
+with the base's version of the edited tests (the `base_tests` event); and how the triage step's `old-test`
+question was answered (`rail docs triage`). These go to the reviewer and not to a person's "Read these" list: a
+changed test can be undone. The section's wording has not been tested with a model run.
 
 **When the checks can't show the work.** When every `Check:` line already passed on the base branch before
 the work began (the `base_checks` event, `rail docs loop`), the review run's brief says so, and asks the

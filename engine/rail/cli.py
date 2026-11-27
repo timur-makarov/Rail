@@ -11,7 +11,7 @@ import subprocess
 import sys
 
 from . import areas, gitx, guard, hooks, history, rules, steps, tools
-from .project import Project, event, events_path, ticket_path
+from .project import NON_PRODUCT, Project, event, events_path, started_again, ticket_path
 from .state import OPEN, derive, floor, ticket_kinds
 from .table import TRANSITIONS, WAIT_KINDS, adopted_line, end_with, first_match
 from .table import render as render_brief
@@ -283,6 +283,51 @@ def restart_on_base(project, f, run):
                              f" (git rebase --onto {project.base} {merged_head[:12]}), then run: rail next")
 
 
+def restart_branch(project, f, run):
+    """Start the ticket's branch again from the base branch, under a new name: the old branch's commits hold a secret,
+    and the secret scan reads every commit of a branch, so it would fail there for good. The new branch has one
+    commit on the base's tip, with the ticket and its journal as the old branch had them; none of the work comes
+    along, since the work is where the secret is. The old branch and its pull request are closed."""
+    t, q = f.t, f.restart_due
+    ensure_local(project, t)
+    root, old, old_remote = project.root, t.branch, t.remote_branch
+    old_tip, base_tip = gitx.rev(t.ref, root), gitx.rev(project.base_ref, root)
+    taken = {line.rsplit("/", 1)[-1] for line in gitx.out(["for-each-ref", "--format=%(refname)"], root).splitlines()}
+    name = started_again(old)
+    while name in taken:
+        name = started_again(name)
+    # What the branch added under .rail/tickets and .rail/journal, and nothing the base has changed since.
+    fork = gitx.out(["merge-base", base_tip, old_tip], root).strip()
+    kept = gitx.out(["diff", "--name-only", "--diff-filter=AM", fork, old_tip, "--", *NON_PRODUCT], root).splitlines()
+    blobs = gitx.read_blobs([f"{old_tip}:{path}" for path in kept], root)
+    commit = gitx.commit_files(root, base_tip, {path: blobs[f"{old_tip}:{path}"] or "" for path in kept},
+                               f"{t.id}: start again from {project.base}")
+    gitx.update_ref(root, f"refs/heads/{name}", commit, None)
+    if t.worktree:
+        if gitx.dirty(t.worktree):
+            # Work nobody committed stays on this machine, out of the new branch: it may hold the secret too.
+            gitx.git(["stash", "push", "--quiet", "--include-untracked", "-m",
+                      f"rail: ticket {t.id} before its branch was started again"], t.worktree, check=False)
+        gitx.git(["checkout", "--quiet", "--force", name], t.worktree)
+    gitx.git(["branch", "-D", old], root, check=False)
+    fact = q.get("fact") or {}
+    record = event(t.id, "restarted", question=q["id"], type=q["type"], branch=old, to=name,
+                   **{key: fact[key] for key in ("rule", "file") if fact.get(key)})
+    t.branch, t.ref, t.remote_branch = name, f"refs/heads/{name}", None
+    project.append_events(t, [record], f"start again from {project.base}")
+    if f.pr_open:
+        project.forge.comment(f.pr["number"], f"Ticket {t.id} goes on, on the branch `{name}`: this branch's commits hold"
+                                              f" a secret a person has rotated, so the work starts again from"
+                                              f" `{project.base}`.\n{ENGINE_MARK}")
+        project.forge.update_pr(f.pr["number"], state="closed")
+    if old_remote and project.remote and project.online and not cloud():
+        # Not from a cloud session, whose git access can't delete a branch: there the old branch stays on the
+        # remote, closed, and the engine reads the new one.
+        gitx.push(root, project.remote, f":refs/heads/{old_remote}")
+    run.steps.append({"step": "restart", "status": "ran", "result": "pass", "detail": f"{old} -> {name}"})
+    return True
+
+
 def ensure_pr(project, f, receipts):
     """Every wait after add has a PR to label: a contract PR at add for a PERSON ticket, and a PR at claim for
     an AUTO one."""
@@ -382,6 +427,8 @@ def transition(project, f, code):
                     " should the agent proceed, change its approach, or stop and ask a person?")
         consult.ask(project, f, "retry_cap", f.consult_due, question, last[-1].get("detail", "") if last else "", run)
         commit(project, f, run, "consult")
+    elif code == "RESTART":
+        restart_branch(project, f, run)
     elif code == "CLAIM":
         if not claim(project, t):
             return False, run
@@ -1452,7 +1499,8 @@ def commit_work(project, f, run):
     if not changes:
         return True
     product = [c for c in changes if c != ticket_path(t.id)]  # another ticket's file is not this ticket's to change
-    outside = [c for c in product if not match_any(f.ticket.scope, c)]
+    from .triage import IGNORED  # in every ticket's scope: its lines raise a question of their own
+    outside = [c for c in product if not match_any(f.ticket.scope, c) and c != IGNORED]
     if outside:
         run.record("scope", False, f.patch_id, f"outside scope: {', '.join(outside)}",
                    output=f"These changes are outside scope_paths ({', '.join(f.ticket.scope)}):\n" + "\n".join(outside)
@@ -1915,7 +1963,8 @@ def save_work(project, f, via):
     ticket moved a moment ago."""
     t = f.t
     changes = gitx.dirty(t.worktree, exclude=[".rail/journal"])
-    inside = [c for c in changes if c == ticket_path(t.id) or match_any(f.ticket.scope, c)]
+    from .triage import IGNORED
+    inside = [c for c in changes if c in (ticket_path(t.id), IGNORED) or match_any(f.ticket.scope, c)]
     secret = [c for c in inside if guard.holds_secrets(c)]
     inside = [c for c in inside if c not in secret]
     outside = [c for c in changes if c not in inside and c not in secret]

@@ -38,6 +38,21 @@ def event(ticket_id, name, **fields):
     return record
 
 
+AGAIN = re.compile(r"--(\d+)$")   # a ticket branch started again from the base: NN-title--2, then --3
+
+
+def times_started(name):
+    """1 for a ticket's first branch, 2 for the branch that replaced it, and so on."""
+    m = AGAIN.search(name)
+    return int(m.group(1)) if m else 1
+
+
+def started_again(name):
+    """The name of the branch that replaces `name`. A title never gives two hyphens in a row, so the ending is the
+    engine's alone."""
+    return f"{AGAIN.sub('', name)}--{times_started(name) + 1}"
+
+
 def parse_events(text):
     events = []
     for line in (text or "").splitlines():
@@ -132,11 +147,18 @@ class Project:
         prefixes = ["refs/heads"] + ([f"refs/remotes/{self.remote}"] if self.remote else [])
         heads = gitx.out(["for-each-ref", "--format=%(objectname) %(refname)", *prefixes], self.root).splitlines()
         tips = {ref: sha for sha, ref in (line.split(" ", 1) for line in heads)}
+        names = {}
         for ref in sorted(tips):
             if m := re.match(r"refs/heads/((\d+)-.+)$", ref):
-                info(m.group(2)).branch = info(m.group(2)).branch or m.group(1)
+                names.setdefault(m.group(2), ([], []))[0].append(m.group(1))
             elif self.remote and (m := re.match(rf"refs/remotes/{self.remote}/((\d+)-.+)$", ref)):
-                info(m.group(2)).remote_branch = info(m.group(2)).remote_branch or m.group(1)
+                names.setdefault(m.group(2), ([], []))[1].append(m.group(1))
+        for nn, (local, remote) in names.items():
+            # A branch the engine started again from the base replaces the one before it, which may still be on the
+            # remote where this machine could not delete it.
+            last = max(times_started(name) for name in local + remote)
+            info(nn).branch = next((name for name in local if times_started(name) == last), None)
+            info(nn).remote_branch = next((name for name in remote if times_started(name) == last), None)
         for nn, label in self.counter()[2].items():
             info(nn).id_taken = True
             info(nn).label = label

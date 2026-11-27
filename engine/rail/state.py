@@ -125,6 +125,11 @@ class Facts:
         self.tools_missing = project.tools_missing()
         self.revert = self._revert(project)
         self._needs_review = None
+        # A triage answer that holds the ticket for a person, and after the person's act the engine's part of it.
+        from .triage import waiting
+        held, where = waiting(t.events)
+        self.triage_wait = held if where == "wait" else None
+        self.restart_due = held if where == "restart" else None
         self.state = self._state()
 
     def _revert(self, project):

@@ -63,10 +63,10 @@ class Brief(RailTest):
 
 
 class Earlier(RailTest):
-    def merged(self, p, nn, code, more=LOOK_AT):
+    def merged(self, p, nn, code, more=LOOK_AT, first=()):
         write_ticket(p, nn, more)
         p.write("src/calc.py", code, base=p.worktree(nn))
-        p.queue_reviews(CLEAN)
+        p.queue_reviews(*first, CLEAN)
         p.rail("advance", nn)
         self.assertEqual(p.rail("advance", nn)["state"], "merged")
 
@@ -74,7 +74,9 @@ class Earlier(RailTest):
         p = self.fixture()
         p.add(ticket(body=DECIDED))
         p.rail("next")
-        self.merged(p, "1", "def add(a, b):\n    return a + b  # SHORTCUT(1): ints only; use Decimal for money\n")
+        # The row its author decided is asked about first (rail docs triage), and stands as a choice.
+        self.merged(p, "1", "def add(a, b):\n    return a + b  # SHORTCUT(1): ints only; use Decimal for money\n",
+                    first=({"answer": "choice", "reason": "Nothing in the repository says what callers pass."},))
         p.add(ticket(title="Subtract", check="grep subtract src/calc.py"))
         p.add(ticket(title="Created", scope=("api/**",), check="grep 201 api/handlers.py"))
         brief = p.rail("next", "--ticket", "2")["action"]["brief"]

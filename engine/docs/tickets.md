@@ -42,7 +42,9 @@ kind = ""                          # "revert" on a ticket that takes another one
   (`rail docs loop`). That is only recorded, and never stops the ticket.
 - **ASSUMED rows** are verified after the claim: change `ASSUMED:` to `VERIFIED:` and say how. A row
   nobody can check in the code or the docs is a choice: the worker decides it and writes `VERIFIED: decided,
-  not checked:`, the reason, and what it costs if wrong. An open row blocks ship.
+  not checked:`, the reason, and what it costs if wrong. An open row blocks ship. At ship each such row raises
+  the triage question `decided`: a run that did not write the row says whether it is a choice, can be checked,
+  or belongs in the contract (`rail docs triage`).
 - **Look at** is written before ship: what a reader of the change should check. Two kinds of line there are
   read by the engine: `not tested: X, because Y`, and `Noticed:` for a problem seen outside the ticket and left
   alone.

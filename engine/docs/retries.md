@@ -140,7 +140,9 @@ Each entry of `rail next`'s `waits` list has `kind`, what the wait asks of the p
 
 - `approval`: something a revert doesn't undo, money included (`APPROVE_CONTRACT`, `APPROVE_AMEND`,
   `MERGE_BY_PERSON`, `BUDGET`, and on a PERSON ticket `RETRY_CAP`, `FINDING_UPHELD` and `AFTER_DROPPED`).
-- `grant`: the machine lacks something a person gives once, or a setting needs repair (`TOOL_MISSING`,
-  `TOOL_DOWN`, `STUCK_REVIEW`, `MERGE_FAILED`). `STUCK_REVIEW` is also the wait of a triage run that gave no
-  answer twice in a row (`rail docs triage`).
+- `grant`: the machine lacks something a person gives once, a setting needs repair, or something outside the
+  repository is a person's to do (`TOOL_MISSING`, `TOOL_DOWN`, `STUCK_REVIEW`, `MERGE_FAILED`, `SECRET_FOUND`).
+  `STUCK_REVIEW` is also the wait of a triage run that gave no answer twice in a row, and `SECRET_FOUND` is
+  the wait of a triage answer: a real secret is in the branch's commits, and a person rotates it (`rail docs
+  triage`).
 - `hold`: the person's own brake (`HOLD`, `STOPPED`).

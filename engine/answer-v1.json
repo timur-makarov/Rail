@@ -998,6 +998,29 @@
           },
           "person_note": {
             "$ref": "#/$defs/person_note"
+          },
+          "restarted": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "branch": {
+                    "type": "string"
+                  },
+                  "rule": {
+                    "type": "string"
+                  },
+                  "file": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Until the next ship: the branch the engine replaced with this one, started again from the base, and the scan's rule and file of the secret its commits held."
           }
         }
       }
@@ -1305,6 +1328,15 @@
         }
       }
     },
+    "RESTART": {
+      "says": "A person has rotated the secret: next starts the ticket's branch again from the base, under a new name.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
     "RESUME": {
       "says": "Work an ended session left: next resumes it here.",
       "owners": [
@@ -1460,6 +1492,61 @@
       "kinds": [
         "rest"
       ]
+    },
+    "SECRET_FOUND": {
+      "says": "A triage run judged that a line the change adds to .gitleaksignore covers a real secret: a person rotates it, and the engine then starts the ticket's branch again from the base.",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "question",
+          "reason",
+          "finding",
+          "pr",
+          "wait"
+        ],
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "The question's id in the journal."
+          },
+          "reason": {
+            "type": "string",
+            "description": "The triage run's reason."
+          },
+          "finding": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "rule": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer"
+              },
+              "commit": {
+                "type": "string"
+              }
+            },
+            "description": "What the line's fingerprint names: the scan's rule, the file and line, the commit. Empty for a line in another form."
+          },
+          "pr": {
+            "$ref": "#/$defs/pr"
+          },
+          "wait": {
+            "$ref": "#/$defs/wait"
+          }
+        }
+      }
     },
     "SETUP_FAILED": {
       "says": "The setup command failed in the ticket's worktree.",
@@ -2117,7 +2204,7 @@
             "grant",
             "hold"
           ],
-          "description": "approval: of something a revert doesn't undo, money included. grant: the machine lacks something a person gives once. hold: the person's own brake."
+          "description": "approval: of something a revert doesn't undo, money included. grant: the machine lacks something a person gives once, or something outside the repository is a person's to do. hold: the person's own brake."
         },
         "accept": {
           "type": "string",

@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 from . import config as configmod, doclint, flakes, gitx, rules, tools
-from .project import event, events_path, ticket_path
+from .project import PRODUCT_SPEC, event, events_path, ticket_path
 from .state import raised_tier
 from .util import cloud
 from .ticket import Ticket, lint, rank
@@ -186,6 +186,67 @@ def run_checks(project, commands, cwd, nn):
     return results
 
 
+def test_changes(project, ref):
+    """What the change does to files matching [tests] paths, and to REVIEW.md files, which are what checks it:
+    [(status, the path the base has it under or None, the path the change has it under or None)], with status M
+    (edited), A (new), D (deleted) or R (renamed). `git diff --name-only` lists only a renamed file's new path, so
+    this reads the status rows. [] when nothing of the kind changed."""
+    globs = project.config["tests"]["paths"]
+    rows = gitx.out(["diff", "--name-status", "-M", f"{project.base_ref}...{ref}", *PRODUCT_SPEC], project.root)
+    found = []
+    for row in rows.splitlines():
+        status, *paths = row.split("\t")
+        kind = {"T": "M", "C": "A"}.get(status[:1], status[:1])
+        old, new = (None if kind == "A" else paths[0]), (None if kind == "D" else paths[-1])
+        if any(path and (match_any(globs, path) or os.path.basename(path) == "REVIEW.md") for path in (old, new)):
+            found.append((kind, old, new))
+    return found
+
+
+def base_test_files(project, ref):
+    """The test files the base has that the change edits, deletes or renames, by the path the base has them under:
+    the files whose base version still says what the code did before the change. A file the change adds is the
+    author's own and is left out. A renamed file counts under its old path, wherever it went."""
+    globs = project.config["tests"]["paths"]
+    return [old for kind, old, _ in test_changes(project, ref) if old and match_any(globs, old)] if globs else []
+
+
+def base_tests(project, t, ticket, ref, patch_id):
+    """Run verify and each Check: line once more with the base's version of the test files the change edits, and
+    return the base_tests event: per command, green, red, could_not_run or timed_out, with the output's tail of a red
+    one. The Check: lines are frozen at acceptance, and the test files they run are not: a command that passed with
+    the edited tests and fails with the old ones is a fact the triage step asks about (rail docs triage). It runs
+    after a ship's steps have passed, once for a patch, and fails no step by itself. None when [tests] paths is
+    empty, the change edits no test file of the base, the patch already has its event, or something went wrong."""
+    if any(e.get("event") == "base_tests" and e.get("patch_id") == patch_id for e in t.events):
+        return None
+    files = base_test_files(project, ref)
+    if not files:
+        return None
+    keep_alive(project, t)  # it may commit an event: before the head the worktree is put back to is read
+    wt, env = t.worktree, {"RAIL_TICKET": t.id, "RAIL_BASE": project.base_ref}
+    head, base = gitx.rev(ref, project.root), gitx.rev(project.base_ref, project.root)
+    verify = project.config["commands"]["verify"]
+    commands = ([("verify", verify, configmod.timeout(project.config, "verify"))] if verify else []) \
+        + [("checks", command, project.config["commands"]["timeout_secs"]) for command in ticket.checks()]
+    try:
+        gitx.git(["checkout", "--quiet", base, "--", *files], wt)
+        results = []
+        for step, command, timeout in commands:
+            code, output, _ = run_shell(command, wt, env, timeout)
+            result = "timed_out" if code is None else "could_not_run" if could_not_run(code) else \
+                "green" if code == 0 else "red"
+            results.append({"step": step, "command": command, "result": result,
+                            **({"output": tail(output, 40)} if result == "red" else {})})
+        return event(t.id, "base_tests", patch_id=patch_id, base=base[:12], files=files, commands=results)
+    except Exception:
+        return None  # a fact the engine couldn't gather: the ship goes on without it
+    finally:
+        # The worktree goes back to the change, as after base_checks: ignored files such as installed dependencies stay.
+        gitx.git(["reset", "--quiet", "--hard", head], wt, check=False)
+        gitx.git(["clean", "-fdq"], wt, check=False)
+
+
 @contextlib.contextmanager
 def scratch(project, commit):
     """A throwaway worktree at `commit`, detached, with the files .worktreeinclude lists. Removed afterwards."""
@@ -233,7 +294,10 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
         return _stop(run, "assumptions")
 
     changed = project.changed_files(ref)
-    outside = [p for p in changed + project.other_tickets(ref, nn) if not match_any(ticket.scope, p)]
+    # A line in .gitleaksignore answers the secret scan's false finding in any ticket, and raises a question of its
+    # own (rail docs triage), so the file is in every ticket's scope.
+    from .triage import IGNORED
+    outside = [p for p in changed + project.other_tickets(ref, nn) if not match_any(ticket.scope, p) and p != IGNORED]
     if not run.record("scope", not outside, patch_id, f"outside scope: {', '.join(outside)}" if outside else None,
                       output=f"These files are outside scope_paths ({', '.join(ticket.scope)}):\n" + "\n".join(outside)):
         return _stop(run, "scope")
@@ -383,6 +447,9 @@ def ship(project, f, run):
     # Every check passed: the facts of this patch that raise a question for the triage step. An answer that stopped
     # this same patch still stands, and fails the step again.
     from . import triage
+    held = base_tests(project, t, Ticket(text or ""), ref, patch_id)
+    if held:
+        run.events.append(held)
     if not triage.raise_at_ship(project, f, run, ref, patch_id):
         return run
     head = gitx.rev(ref, project.root)

@@ -32,7 +32,8 @@ rail next --json -> do action.brief -> rail advance --json -> repeat
   `DROP_PENDING`, `CI_WAIT`, `GITHUB_LIMIT` (GitHub's rate limit is used up: sleep as the script says, or come
   back at the time the brief names), `NO_WORK`. A person's turn is `APPROVE_CONTRACT`, `APPROVE_AMEND`,
   `MERGE_BY_PERSON`, and on a PERSON ticket `RETRY_CAP` (the retry budget or the cap), `FINDING_UPHELD` and
-  `AFTER_DROPPED`; `STUCK_REVIEW`, `HOLD` or `MERGE_FAILED`; and `BUDGET` (the ticket's runs cost more than
+  `AFTER_DROPPED`; `STUCK_REVIEW`, `HOLD` or `MERGE_FAILED`; `SECRET_FOUND` (a triage run judged that the
+  branch's commits hold a real secret, and a person rotates it: `rail docs triage`); and `BUDGET` (the ticket's runs cost more than
   `[worker] ticket_usd` since a person last acted); and `TOOL_MISSING` (a declared tool's credential isn't set on
   this machine, so no ticket is claimed there: `rail docs tools`) and `TOOL_DOWN` (a step failed twice in a row for
   the machine's own reason, a program that can't start or a declared tool out of reach: `rail docs retries`). `STOPPED` is a person's brake: an issue labelled `rail:stop`
@@ -117,7 +118,10 @@ also takes in issues labelled `rail`, and every command that meets a wait labels
 
 In the ticket's worktree, `advance` commits your in-scope changes and ships: it rebases onto a moved base,
 then runs ticket lint, the ASSUMED rows, scope, structure rules, the migration fields, size, doc-lint,
-`verify`, each `Check:` line, and the sensors the change touches (`rail docs sensors`). Then it runs the review, unless every changed file is in
+`verify`, each `Check:` line, and the sensors the change touches (`rail docs sensors`). When all pass and the
+change edits test files the base branch has, it runs `verify` and the `Check:` lines once more with the base's
+version of those files, and then has a fresh run answer each question that or another fact of the patch raises
+(`rail docs triage`). Then it runs the review, unless every changed file is in
 `[review] skip_paths` (see [review](review.md)).
 
 **Over the size cap, a split is offered.** When an AUTO ticket's change is over `[size] cap` and no file on a

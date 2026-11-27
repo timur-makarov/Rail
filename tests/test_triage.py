@@ -19,7 +19,7 @@ from rail import triage  # noqa: E402
 # A type of the test's own: a line the change adds that says ASK raises it.
 PLANTED = '''
 
-def _find_marked(project, f, ref, patch_id):
+def _find_marked(project, f, ref, patch_id, run):
     from .readthese import numbered
     return [{"key": f"{path}:{text.strip()}", "said": f"{path}:{n} says {text.strip()}", "file": path, "line": n}
             for path, lines in sorted(numbered(project, ref).items()) for n, text in lines if "ASK" in text]

@@ -17,7 +17,8 @@ from .review import describe_finding
 from .ticket import Ticket
 from .util import MISSING_HELP, NOT_COUNTED, tried_help
 
-TRANSITIONS = {"ACCEPT_AUTO", "CLAIM", "RESUME", "CONSULT", "GO", "REBASE_BEHIND", "CONTRACT_MERGED", "STUCK"}
+TRANSITIONS = {"ACCEPT_AUTO", "CLAIM", "RESUME", "CONSULT", "GO", "REBASE_BEHIND", "CONTRACT_MERGED", "STUCK",
+               "RESTART"}
 MERGE_PATIENCE = 600  # seconds a requested merge may take before a person looks
 OPEN = ("implementing", "reviewing", "in-ci", "merge-ready")
 
@@ -27,6 +28,7 @@ WAIT_KINDS = {
     "APPROVE_CONTRACT": "approval", "APPROVE_AMEND": "approval", "MERGE_BY_PERSON": "approval", "RETRY_CAP": "approval",
     "FINDING_UPHELD": "approval", "AFTER_DROPPED": "approval", "BUDGET": "approval",
     "TOOL_MISSING": "grant", "TOOL_DOWN": "grant", "STUCK_REVIEW": "grant", "MERGE_FAILED": "grant",
+    "SECRET_FOUND": "grant",
     "HOLD": "hold", "STOPPED": "hold",
 }
 
@@ -218,6 +220,24 @@ def _facts_stuck_review(f):
     return {**_shared(f), "run": f.stuck_run, "pr": _pr_fact(f), "wait": _wait("STUCK_REVIEW", f)}
 
 
+def _facts_secret(f):
+    q = f.triage_wait
+    fact = q.get("fact") or {}
+    return {**_shared(f), "question": q["id"], "reason": q["answer"].get("reason") or "",
+            "finding": {key: fact[key] for key in ("rule", "file", "line", "commit") if fact.get(key)},
+            "pr": _pr_fact(f), "wait": _wait("SECRET_FOUND", f)}
+
+
+def _restarted(f):
+    """The branch the engine started again from the base, until the ticket ships on the new one: the old branch's
+    name and what the scan found there."""
+    last = max((i for i, e in enumerate(f.t.events) if e.get("event") == "restarted"), default=-1)
+    if last < 0 or any(e.get("event") == "shipped" for e in f.t.events[last:]):
+        return None
+    e = f.t.events[last]
+    return {key: e[key] for key in ("branch", "rule", "file") if e.get(key)}
+
+
 def _facts_upheld(f):
     return {**_shared(f), "disputed": f.ledger.disputed_again(),
             "wait": _wait("FINDING_UPHELD", f, answer=f'rail answer {f.id} F1 declined "why" --owner')}
@@ -289,7 +309,7 @@ def _facts_implement(f):
             "out_of_scope": f.ticket.sections.get("Out of scope", ""), "size": _size(f), "migration": _migration(f),
             "tools": tools.declared(f.project), "tried": _ticket_now(f).tried(),
             "history": history.of(f.project, f.ticket.scope, skip=f.id), "save_note": _save_note(f),
-            "findings": _finding_facts(f), "person_note": f.person_note}
+            "findings": _finding_facts(f), "person_note": f.person_note, "restarted": _restarted(f)}
 
 
 def _facts_answer(f):
@@ -486,6 +506,17 @@ def _render_stuck_review(x):
             f" that can't return review/v1, then continues it: {x['wait']['accept']}." + _go(x))
 
 
+def _render_secret(x):
+    found = x["finding"]
+    where = (f"rule {found.get('rule')}, {found.get('file')} line {found.get('line')}, commit"
+             f" {str(found.get('commit'))[:12]}" if found.get("file") else "the finding its .gitleaksignore line names")
+    return (f"A triage run judged that the commits of ticket {x['ticket']} hold a real secret ({where}): {x['reason']}"
+            f" The branch is pushed, so the secret counts as leaked. A person rotates it where it was issued, then"
+            f" continues: {x['wait']['accept']}. The engine then starts the ticket's branch again from the base branch"
+            f" under a new name and closes the old one, because the secret scan fails on the old commits for good; the"
+            f" work is done again there." + _go(x))
+
+
 def _render_upheld(x):
     nn = x["ticket"]
     return (f"The refuter upheld {_join(x['disputed'])} on ticket {nn}, and the agent still disputes it."
@@ -635,6 +666,13 @@ def _render_implement(x):
                   f" from not done. A new test in a file these checks already run does not change the contract. Add a Check:"
                   f" line that fails now and passes once the work is done, such as one that runs your new test by name: edit"
                   f" the Done Contract in {x['ticket_file']}, then run rail amend {nn} \"why\".", ""]
+    again = x.get("restarted")
+    if again:
+        lines += [f"The engine started this ticket's branch again from the base branch: the commits of the branch before"
+                  f" it ({again.get('branch')}) held a secret"
+                  + (f" ({again['rule']} in {again['file']})" if again.get("file") else "") +
+                  ", and a person has rotated it. None of that work is here. Do it again, and write no credential into"
+                  " any file: read it from the environment, and use a made-up value in tests and examples.", ""]
     lines += [
         f"Change only paths inside scope_paths: {_join(x['scope_paths'])}.",
     ]
@@ -693,7 +731,8 @@ RENDER = {
     "STOPPED": _render_stopped, "REBASING": _render_rebasing, "BUDGET": _render_budget, "TICKET_LINT": _render_lint,
     "APPROVE_CONTRACT": _render_approve_contract, "AFTER_DROPPED": _render_after_dropped,
     "TOOL_MISSING": _render_tool_missing, "APPROVE_AMEND": _render_approve_amend, "RETRY_CAP": _render_capped,
-    "TOOL_DOWN": _render_tool_down, "STUCK_REVIEW": _render_stuck_review, "FINDING_UPHELD": _render_upheld,
+    "TOOL_DOWN": _render_tool_down, "STUCK_REVIEW": _render_stuck_review, "SECRET_FOUND": _render_secret,
+    "FINDING_UPHELD": _render_upheld,
     "MERGE_FAILED": _render_merge_failed, "HOLD": _render_hold, "STUCK": _next_ticket,
     "SWEEP_TICKETS": _render_sweep_tickets, "SETUP_FAILED": _render_setup_failed,
     "VERIFY_ASSUMPTIONS": _render_assumptions, "CONFLICT": _render_conflict, "RED_CHECK": _render_red_check,
@@ -814,6 +853,9 @@ ROWS = [
      _facts_tool_down),
     ("STUCK_REVIEW",       "person", "person_wait",  lambda f: f.state == "reviewing" and f.stuck_review,
      _facts_stuck_review),
+    # A triage run judged a line of .gitleaksignore to cover a real secret: a person rotates it.
+    ("SECRET_FOUND",       "person", "person_wait",  lambda f: f.state in OPEN and f.triage_wait,
+     _facts_secret),
     ("FINDING_UPHELD",     "person", "person_wait",  lambda f: f.ledger.disputed_again(),
      _facts_upheld),
     ("MERGE_FAILED",       "person", "person_wait",  lambda f: f.state == "merge-ready" and _merge_stale(f),
@@ -824,6 +866,9 @@ ROWS = [
     # merge) needs no claim: the rows below move it from whichever session looks.
     ("CLAIMED_ELSEWHERE",  "none",  "rest",        lambda f: f.held and not f.explicit,
      _held),
+    # The person has rotated the secret: the branch starts again from the base, under a new name.
+    ("RESTART",            "agent", "script",      lambda f: f.state in OPEN and f.restart_due,
+     lambda f: f"rail next --ticket {f.id}"),
     # An AUTO ticket at the retry cap: nothing merged, so nothing needs undoing, and the engine drops it with a
     # record instead of asking a person. A PERSON ticket waits (RETRY_CAP).
     ("STUCK",              "agent", "script",      lambda f: f.state in OPEN and f.capped and f.auto,

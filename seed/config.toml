@@ -35,8 +35,10 @@ base_checks = true                        # reader: next, at a ticket's first cl
 cap = 600                                 # an AUTO change over this is offered a split once; size raises no tier
 exclude = []
 
-[tests]                                   # reader: nothing yet. Globs of the files that hold tests and their runner's
-                                          # settings; rail init fills it from the language profiles (rail docs languages)
+[tests]                                   # reader: ship and the review. Globs of the files that hold tests and their
+                                          # runner's settings; rail init fills it from the language profiles. When a
+                                          # change edits one the base has, ship runs the checks once more with the
+                                          # base's version (rail docs triage). Empty switches that off
 paths = []
 
 [retry]

@@ -106,7 +106,9 @@ class Sensors(RailTest):
         work = p.worktree("1")
         p.write("src/calc.py", FIXED + "\n\n# SENSOR(1): the word is the name of the upstream field\nFIXME_FIELD = 'x'\n"
                                "OTHER = 'FIXME'  # SENSOR(1): quoted from the vendor's file\n", base=work)
-        p.queue_reviews(CLEAN)
+        # Each comment's reason is judged before the review, by a run that did not write the change.
+        holds = {"answer": "holds", "reason": "The word is a name here, not a note."}
+        p.queue_reviews(holds, holds, CLEAN)
         shipped = p.rail("advance", "1")
         self.assertEqual(step(shipped, "sensors")["result"], "pass")
         brief = p.briefs()[-1]["brief"]

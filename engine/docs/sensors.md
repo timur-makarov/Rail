@@ -48,7 +48,10 @@ or on the line above it, makes the engine drop that line's violations:
 ```
 
 No suppression of the tool itself is needed, so `no-new-suppressions` stays as it is. The seed's rule
-`sensor-marker-names-its-ticket` refuses the marker without a number. The briefs of the review and of the
+`sensor-marker-names-its-ticket` refuses the marker without a number. The `sensors` step keeps what each
+comment excused (`excused` in its event), and a comment the change adds raises the triage question
+`sensor-exempt`: a run that did not write the change judges the reason before any review, and a reason that
+does not hold comes back to the worker (`rail docs triage`). The briefs of the review and of the
 security seat list each marker a change adds, and ask for the reason to be judged: a marker with no reason
 that holds is a finding.
 

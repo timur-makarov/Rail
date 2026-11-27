@@ -266,6 +266,33 @@ def first_contract(project, t):
             f"scope_paths: {', '.join(accepted.get('scope_paths') or [])}.", ""]
 
 
+STATUS_SAID = {"M": "edited", "A": "new in this change", "D": "deleted"}
+
+
+def checks_changed(project, t, ref, patch_id):
+    """The lines of the brief's section on what the change does to the things that check it: each changed file
+    under [tests] paths, with whether the base had it; each changed REVIEW.md; what the checks did with the base's
+    version of the tests (the base_tests event); and each answer the triage step got about them. [] when there is
+    nothing of the kind."""
+    from . import triage
+    from .steps import test_changes
+    lines = []
+    for kind, old, new in test_changes(project, ref):
+        what = "review guidance" if os.path.basename(new or old) == "REVIEW.md" else "a test file"
+        lines.append(f"- {new or old}: {what}, " + (f"renamed from {old}, which the base had" if kind == "R" else
+                                                    STATUS_SAID[kind] + (", and the base had it" if kind == "M" else "")))
+    ran = triage.base_tests_of(t.events, patch_id)
+    if ran:
+        results = ", ".join(f"`{c['command']}` {c['result']}" for c in ran.get("commands") or [])
+        lines.append(f"- With the base branch's version of {', '.join(ran.get('files') or [])} in place: {results}.")
+    for q in triage.asked(t.events):
+        if q.get("patch_id") == patch_id and q.get("type") == "old-test" and q["answer"]:
+            a = q["answer"]
+            lines.append(f"- A triage run was asked about that ({q['id']}) and answered `{a.get('answer')}`: {a.get('reason')}"
+                         + (f" It named: {a['evidence']}" if a.get("evidence") else ""))
+    return lines
+
+
 def brief(project, f, role, ledger, disputed=None):
     t, ref = f.t, f.t.ref
     ticket_text = gitx.read_blobs([f"{ref}:{ticket_path(t.id)}"], project.root)[f"{ref}:{ticket_path(t.id)}"] or ""
@@ -292,6 +319,7 @@ def brief(project, f, role, ledger, disputed=None):
     marked = sensors.markers(project, ref)
     from . import tools
     reviewer_tools = tools.lines(tools.declared(project, review=True), review=True)
+    checked = checks_changed(project, t, ref, patch)
     parts = [
         f"# Review brief: ticket {t.id}, {f.tier}", "", f"This run's job: {job}", "",
         "## The ticket", ticket_text.strip(), "",
@@ -305,6 +333,11 @@ def brief(project, f, role, ledger, disputed=None):
            "Each line below tells a sensor that its violation there is wrong or accepted. Judge the reason: a marker"
            " with no reason that holds is a finding.", *[f"- {line}" for line in marked], ""]
           if marked and role in ("review", "security") else []),
+        # Not tested with a model run: the wording of this section.
+        *(["## Changes to what checks this change",
+           "The change edits these itself. A test that was weakened until it passed, or guidance that was loosened, is"
+           " a finding unless the contract asks for the new behaviour.", *checked, ""]
+          if checked and role in ("review", "security") else []),
         *(["## Tools", *reviewer_tools, ""] if reviewer_tools else []),
         "## The diff", "```diff", diff, "```", "",
         "## Areas this change touches", "| Area | Paths | Holds |", "|---|---|---|", rows, "",

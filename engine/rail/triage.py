@@ -17,26 +17,34 @@ from . import gitx, schema
 from .project import event
 from .util import could_not_run, run_shell, tail
 
-GO, STOP = "go", "stop"   # what the engine does on an answer: the ticket goes on, or the step `triage` fails
+# What the engine does on an answer: the ticket goes on, the step `triage` fails and the worker mends the change,
+# or the ticket waits for a person.
+GO, STOP, WAIT = "go", "stop", "wait"
 
 QUESTIONS = {}
 
 
-def question(id, raised, ask, answers, find, show):
+def question(id, raised, ask, answers, find, show, once=False):
     """Add a type to the table.
 
     `raised`: the fact that raises it, in a sentence for the docs. `ask`: the question the run answers. `answers`:
-    {name: {means, then, evidence, check, told}}: what the answer means; GO or STOP; for an answer that lets the change
-    through, what its evidence must be (text for the brief) and `check(project, f, fact, evidence)`, which returns
-    what is wrong with it or None; for an answer that stops, what the worker is told to do. `find(project, f, ref,
-    patch_id)`: the facts that raise it for this patch at ship, each a dict of plain values with a `key`, which tells
-    one fact from another, and `said`, the fact in one line. `show(project, f, fact)`: the lines of the brief that
-    show the fact, and nothing else of the change."""
+    {name: {means, then, evidence, check, optional, told, wait}}: what the answer means; GO, STOP or WAIT; for an
+    answer that lets the change through, what its evidence must be (text for the brief) and `check(project, f, fact,
+    evidence)`, which returns what is wrong with it or None (`optional`: the answer may come with no evidence, and
+    what it gives is still checked); for an answer that stops, what the worker is told to do, where `{nn}` stands for
+    the ticket; for an answer that waits, `wait`, the reason code of the wait for a person. `find(project, f, ref,
+    patch_id, run)`: the facts that raise it for this patch at ship, each a dict of plain values with a `key`, which
+    tells one fact from another, and `said`, the fact in one line; `run` is the ship's receipt, whose events are not
+    in the journal yet. `show(project, f, fact)`: the lines of the brief that show the fact, and nothing else of the
+    change. `once`: the fact is a line the author wrote, not what the patch does, so an answer that lets it through
+    stands for the ticket's later patches too, until the contract is amended."""
     assert 2 <= len(answers) <= 4, id
     for name, a in answers.items():
-        assert a["then"] in (GO, STOP) and a["means"], (id, name)
-        assert a["then"] == STOP or not a.get("evidence") or a.get("check"), (id, name)
-    QUESTIONS[id] = {"id": id, "raised": raised, "ask": ask, "answers": answers, "find": find, "show": show}
+        assert a["then"] in (GO, STOP, WAIT) and a["means"], (id, name)
+        assert a["then"] != GO or not a.get("evidence") or a.get("check"), (id, name)
+        assert (a["then"] == WAIT) == bool(a.get("wait")), (id, name)
+    QUESTIONS[id] = {"id": id, "raised": raised, "ask": ask, "answers": answers, "find": find, "show": show,
+                     "once": once}
 
 
 # --- what the journal holds -------------------------------------------------------------------
@@ -64,7 +72,7 @@ def open_questions(events, patch_id):
 
 
 def then(q):
-    """GO or STOP for an answered question, None for an open one or a type this engine no longer has."""
+    """GO, STOP or WAIT for an answered question, None for an open one or a type this engine no longer has."""
     kind = QUESTIONS.get(q.get("type"))
     if not q["answer"] or not kind or q["answer"].get("answer") not in kind["answers"]:
         return None
@@ -72,8 +80,25 @@ def then(q):
 
 
 def stopped(events, patch_id):
-    """The questions about this patch whose answer stops the change."""
-    return [q for q in asked(events) if q.get("patch_id") == patch_id and then(q) == STOP]
+    """The questions about this patch whose answer stops the change, or holds it for a person."""
+    return [q for q in asked(events) if q.get("patch_id") == patch_id and then(q) in (STOP, WAIT)]
+
+
+def waiting(events):
+    """(question, where it stands) for the last question whose answer waits for a person, or (None, None). It stands
+    at "wait" until a person continues that wait, then at "restart" until the engine has started the ticket's branch
+    again from the base, then at None."""
+    for q in reversed(asked(events)):
+        if then(q) != WAIT:
+            continue
+        code = QUESTIONS[q["type"]]["answers"][q["answer"]["answer"]]["wait"]
+        after = events[q["answer"]["at_index"] + 1:]
+        if not any(e.get("event") == "continued" and e.get("wait") == code for e in after):
+            return q, "wait"
+        if not any(e.get("event") == "restarted" and e.get("question") == q["id"] for e in after):
+            return q, "restart"
+        return q, None
+    return None, None
 
 
 def stop_facts(events, qid):
@@ -87,7 +112,8 @@ def stop_facts(events, qid):
     return {key: value for key, value in {
         "question": q["id"], "type": q["type"], "ask": kind["ask"], "fact": (q.get("fact") or {}).get("said"),
         "answer": q["answer"].get("answer"), "means": a.get("means"), "reason": q["answer"].get("reason"),
-        "evidence": q["answer"].get("evidence"), "told": a.get("told")}.items() if value}
+        "evidence": q["answer"].get("evidence"),
+        "told": (a.get("told") or "").replace("{nn}", str(q.get("ticket") or ""))}.items() if value}
 
 
 def stop_said(x):
@@ -158,16 +184,19 @@ def raise_at_ship(project, f, run, ref, patch_id):
     amended = max((i for i, e in enumerate(t.events) if e.get("event") == "amended"), default=-1)
     number = len(before)
     for kind in QUESTIONS.values():
-        for fact in kind["find"](project, f, ref, patch_id):
-            same = [q for q in before if (q.get("type"), q.get("patch_id"), q.get("key")) == (kind["id"], patch_id, fact["key"])]
+        for fact in kind["find"](project, f, ref, patch_id, run):
+            every = [q for q in before if (q.get("type"), q.get("key")) == (kind["id"], fact["key"])]
+            same = [q for q in every if q.get("patch_id") == patch_id]
             last = same[-1] if same else None
-            if last and then(last) == STOP and last["answer"]["at_index"] > amended:
+            if last and then(last) in (STOP, WAIT) and last["answer"]["at_index"] > amended:
                 x = stop_facts(t.events, last["id"])
                 run.record("triage", False, patch_id, f"{last['id']} {kind['id']}: {x['answer']}", output=stop_said(x),
                            signed=f"{kind['id']}: {x['answer']}", question=last["id"], type=kind["id"])
                 return False
             if last and (not last["answer"] or then(last) == GO):
                 continue  # asked about this patch already: open, or let through
+            if kind["once"] and any(then(q) == GO and q["answer"]["at_index"] > amended for q in every):
+                continue  # the same line was let through on an earlier patch, under the contract as it stands
             number += 1
             run.events.append(event(t.id, "question", id=f"Q{number}", type=kind["id"], patch_id=patch_id,
                                     key=fact["key"], fact={k: v for k, v in fact.items() if k != "key"}))
@@ -209,6 +238,8 @@ def brief(project, f, q):
     """What the run reads: the question, its answers, the fact, and only what the type says to show."""
     kind = QUESTIONS[q["type"]]
     answers = [f"- `{name}`: {a['means']}" + (f" Evidence: {a['evidence']}" if a.get("evidence") else "")
+               + (" It lets the change through." if a["then"] == GO else " It stops the change." if a["then"] == STOP
+                  else " It holds the ticket for a person.")
                for name, a in kind["answers"].items()]
     return "\n".join([
         f"# One question about ticket {f.id} ({q['id']}, {q['type']})", "",
@@ -287,8 +318,10 @@ def run(project, f, receipt):
         fields["model"] = meta["model"]
     wrong = None
     if a["then"] == GO and a.get("check"):
-        wrong = (a["check"](project, f, dict(q.get("fact") or {}, key=q.get("key")), data.get("evidence") or "")
-                 if data.get("evidence") else "the answer names no evidence")
+        if data.get("evidence"):
+            wrong = a["check"](project, f, dict(q.get("fact") or {}, key=q.get("key")), data["evidence"])
+        else:
+            wrong = None if a.get("optional") else "the answer names no evidence"
         fields["evidence_ok"] = not wrong
     receipt.events.append(event(t.id, "answered", **fields))
     detail = f"{q['id']} {q['type']}: {data['answer']}"
@@ -298,7 +331,7 @@ def run(project, f, receipt):
         receipt.record("triage", False, f.patch_id, f"invalid output: {wrong}", ms, counted=False,
                        output=f"The triage run answered `{data['answer']}`, and its evidence did not pass the engine's"
                               f" check: {wrong}", cost_usd=meta.get("cost_usd"), **named)
-    elif a["then"] == STOP:
+    elif a["then"] in (STOP, WAIT):
         x = stop_facts([*t.events, *receipt.events], q["id"])
         receipt.record("triage", False, f.patch_id, detail, ms, output=stop_said(x), cost_usd=meta.get("cost_usd"),
                        signed=f"{q['type']}: {data['answer']}", **named)
@@ -322,3 +355,273 @@ def quoted_in_ticket(project, f, fact, evidence):
     if len(quoted) < 8:
         return "the quoted line is too short to be looked up"
     return None if quoted in held else "the quoted line is in neither the Done Contract nor ## Why of the ticket"
+
+
+def file_in_change(globs_of):
+    """A check of evidence: it names a file the change touches that matches the globs `globs_of(project)` gives."""
+    def check(project, f, fact, evidence):
+        from .util import match_any
+        named = evidence.strip().strip("`").strip()
+        if named not in project.changed_files(f.t.ref):
+            return f"'{named}' is not a file the change touches"
+        return None if match_any(globs_of(project), named) else f"'{named}' is not under [tests] paths"
+    return check
+
+
+# --- the question types -----------------------------------------------------------------------
+
+SHOWN = 30000  # characters of a diff a brief shows
+
+
+def base_tests_of(events, patch_id):
+    """The base_tests event of a patch, or None."""
+    return next((e for e in reversed(events) if e.get("event") == "base_tests" and e.get("patch_id") == patch_id), None)
+
+
+def _find_old_test(project, f, ref, patch_id, run):
+    found = base_tests_of([*f.t.events, *run.events], patch_id)
+    red = [c["command"] for c in (found or {}).get("commands") or [] if c.get("result") == "red"]
+    if not red:
+        return []
+    files = found["files"]
+    return [{"key": " ".join(files), "files": files, "base": found.get("base"), "commands": red,
+             "said": f"{', '.join(f'`{command}`' for command in red)} passed with the change's tests and failed with"
+                     f" the base branch's version of {', '.join(files)}."}]
+
+
+def _show_old_test(project, f, fact):
+    from .steps import test_changes
+    base, files = fact.get("base") or project.base_ref, fact["files"]
+    # A renamed file's new path too, so that the diff shows the rename and not a deletion.
+    now = [new for _, old, new in test_changes(project, f.t.ref) if old in files and new and new != old]
+    diff = gitx.out(["diff", "--no-color", "--no-ext-diff", "-U10", "-M", f"{project.base_ref}...{f.t.ref}", "--",
+                     *files, *now], project.root)
+    if len(diff) > SHOWN:
+        diff = diff[:SHOWN] + f"\n(cut at {SHOWN} characters)"
+    lines = ["## What the change does to the tests the base had", "```diff", diff.rstrip(), "```",
+             "The old version of each file, whole: " + "; ".join(f"`git show {base}:{path}`" for path in files), ""]
+    ran = {c["command"]: c for c in (base_tests_of(f.t.events, f.patch_id) or {}).get("commands") or []}
+    for command in fact["commands"]:
+        lines += ["## The command, with the old tests in place", f"$ {command}",
+                  (ran.get(command) or {}).get("output") or "(no output)", ""]
+    ticket = f.ticket
+    return [*lines, "## The ticket's Why", ticket.sections.get("Why", "").strip() or "(none)", "",
+            "## The ticket's Done Contract", ticket.sections.get("Done Contract", "").strip() or "(none)"]
+
+
+question(
+    "old-test",
+    "A command that passed at ship fails once the test files the change edited, deleted or renamed are put back as"
+    " the base branch has them.",
+    "The change edits tests the base branch had, and a command that passes with the edited tests fails with the old"
+    " ones. Does the contract ask for what the old tests no longer accept?",
+    {"contract": {"means": "the contract asks for this change in behaviour.", "then": GO,
+                  "evidence": "the Done Contract line or the sentence of ## Why that asks for it, word for word.",
+                  "check": quoted_in_ticket},
+     "moved": {"means": "the behaviour is kept; the test was moved, renamed or rewritten, and the old one fails for"
+                        " that reason alone.", "then": GO,
+               "evidence": "the path of the test file in the change that tests the behaviour now.",
+               "check": file_in_change(lambda project: project.config["tests"]["paths"])},
+     "lost": {"means": "behaviour is lost that the contract does not ask for.", "then": STOP,
+              "told": "Keep the behaviour the old tests check: put back what the change took out of them and make it"
+                      " pass. If the contract should ask for the new behaviour, amend it so that it says so (rail"
+                      " amend {nn} \"why\"), and the question is asked again."}},
+    _find_old_test, _show_old_test)
+
+
+# --- an exemption the author writes ---------------------------------------------------------------
+#
+# Three lines an author can write excuse the change from a check. Each raises a question, and each is `once`: the
+# line is what is asked about, so an answer that lets it through stands while the line and the contract do.
+
+
+def _contract(f):
+    ticket = f.ticket
+    return ["## The ticket's Why", ticket.sections.get("Why", "").strip() or "(none)", "",
+            "## The ticket's Done Contract", ticket.sections.get("Done Contract", "").strip() or "(none)"]
+
+
+def _numbered(text, first, last):
+    """The lines first..last of a file's text, each with its number."""
+    rows = text.splitlines()
+    return [f"{n:>5}  {rows[n - 1]}" for n in range(max(1, first), min(len(rows), last) + 1)]
+
+
+def _find_sensor_exempt(project, f, ref, patch_id, run):
+    from . import sensors
+    step = next((e for e in reversed(run.events) if e.get("event") == "step" and e.get("step") == "sensors"), None)
+    excused = (step or {}).get("excused") or []
+    if not excused:
+        return []
+    added = sensors.added_lines(project, ref, f.t.worktree or project.root)
+    found = {}
+    for x in excused:
+        # A comment the base already had, or one git shows as moved, is not this change's.
+        if (added.get(x["path"]) or {}).get(x["marker_line"]) is not False:
+            continue
+        key = f"{x['path']}: {x['marker']}"
+        fact = found.setdefault(key, {"key": key, "path": x["path"], "line": x["marker_line"], "marker": x["marker"],
+                                      "violations": []})
+        said = f"{x['path']}:{x['line']}: {x['message']} (sensor {x['sensor']})"
+        if said not in fact["violations"]:
+            fact["violations"].append(said)
+    for fact in found.values():
+        fact["said"] = (f"The change adds the comment `{fact['marker']}` at {fact['path']}:{fact['line']}, and it"
+                        f" excuses {len(fact['violations'])} violation(s) of a sensor.")
+    return list(found.values())
+
+
+def _show_sensor_exempt(project, f, fact):
+    ref = f"{f.t.ref}:{fact['path']}"
+    text = gitx.read_blobs([ref], project.root).get(ref) or ""
+    fixes = {s["id"]: s.get("fix") for s in project.config["sensors"] if s.get("fix")}
+    named = sorted({v.rsplit("(sensor ", 1)[-1].rstrip(")") for v in fact["violations"]})
+    return ["## What the sensor reported, and the comment excuses", *[f"- {v}" for v in fact["violations"]],
+            *[f"What sensor {name} asks for: {fixes[name]}" for name in named if name in fixes], "",
+            f"## {fact['path']}, around line {fact['line']}", "```", *_numbered(text, fact["line"] - 8, fact["line"] + 12),
+            "```", "", *_contract(f)]
+
+
+question(
+    "sensor-exempt",
+    "The change adds a `SENSOR(NN): why` comment, and the comment excuses a sensor's violation on a line the change"
+    " adds.",
+    "A sensor reported the line, and the author's comment says the sensor is wrong about it. Does the comment's"
+    " reason hold?",
+    {"holds": {"means": "the sensor misreads the line, or the contract requires the line as it is.", "then": GO,
+               "evidence": "where the contract requires the line, the Done Contract line or the sentence of ## Why"
+                           " that requires it, word for word; none where the sensor misreads the line.",
+               "check": quoted_in_ticket, "optional": True},
+     "does-not-hold": {"means": "the sensor is right about the line, and the contract does not require it.",
+                       "then": STOP,
+                       "told": "Take the comment out and mend the line so that the sensor passes."}},
+    _find_sensor_exempt, _show_sensor_exempt, once=True)
+
+
+def _find_decided(project, f, ref, patch_id, run):
+    from .project import ticket_path
+    from .ticket import Ticket
+    now, base = f"{ref}:{ticket_path(f.id)}", f"{project.base_ref}:{ticket_path(f.id)}"
+    held = gitx.read_blobs([now, base], project.root)
+    if not held.get(now):
+        return []
+    # A row the base branch's copy of the ticket has came with a contract a person merged: it is not this change's.
+    before = set(Ticket(held[base]).decided()) if held.get(base) else set()
+    return [{"key": row, "row": row,
+             "said": f"The ticket's ## Assumptions holds a row its author decided and did not check: {row}"}
+            for row in dict.fromkeys(Ticket(held[now]).decided()) if row not in before]
+
+
+def _show_decided(project, f, fact):
+    return ["## The row", f"VERIFIED: decided, not checked: {fact['row']}", "", *_contract(f), "",
+            "## Where the ticket may change", ", ".join(f.ticket.scope) or "(no scope)"]
+
+
+question(
+    "decided",
+    "The ticket gains a `VERIFIED: decided, not checked:` row in `## Assumptions`.",
+    "The author wrote that this was a choice nobody could check. Is it one?",
+    {"choice": {"means": "nothing in the repository or its dependencies settles it, and no Done Contract item"
+                         " depends on it.", "then": GO},
+     "checkable": {"means": "it can be checked.", "then": STOP,
+                   "evidence": "where: the file, the command or the document that settles it.",
+                   "told": "Check it where the answer names, then write in the row how you checked: `VERIFIED:` and"
+                           " what you ran or read, without `decided, not checked:`."},
+     "contract": {"means": "a Done Contract item depends on it, so the choice belongs in the contract.", "then": STOP,
+                  "evidence": "the Done Contract item that depends on it, word for word.",
+                  "told": "Amend the contract so that the choice stands where the reviewer reads it: state it in the"
+                          " Done Contract item that depends on it, take the row out of ## Assumptions, and run rail"
+                          " amend {nn} \"why\"."}},
+    _find_decided, _show_decided, once=True)
+
+
+IGNORED = ".gitleaksignore"   # one fingerprint a line: a finding the secret scan no longer reports
+
+
+def fingerprint(line):
+    """A line of .gitleaksignore as {commit, file, rule, line}: `commit:file:rule:line` from a scan of commits. An
+    empty dict for a line in another form."""
+    parts = line.strip().split(":")
+    if len(parts) < 4 or not parts[-1].isdigit() or not all(c in "0123456789abcdef" for c in parts[0].lower()):
+        return {}
+    return {"commit": parts[0], "file": ":".join(parts[1:-2]), "rule": parts[-2], "line": int(parts[-1])}
+
+
+def _ignored(text):
+    return [row.strip() for row in (text or "").splitlines() if row.strip() and not row.strip().startswith("#")]
+
+
+def _find_secret(project, f, ref, patch_id, run):
+    now, base = f"{ref}:{IGNORED}", f"{project.base_ref}:{IGNORED}"
+    held = gitx.read_blobs([now, base], project.root)
+    before = set(_ignored(held.get(base)))
+    return [{"key": row, **fingerprint(row),
+             "said": f"The change adds `{row}` to {IGNORED}, so the secret scan no longer reports that finding."}
+            for row in dict.fromkeys(_ignored(held.get(now))) if row not in before]
+
+
+def _scanned(project, fact):
+    """The finding as gitleaks reports it with the string redacted: {match, start, end}, or None when gitleaks is not
+    on the machine or reports no such finding. It reads the one commit from the project's root, whose checkout does
+    not have the ticket's new line in .gitleaksignore."""
+    import shutil
+    import subprocess
+    if not fact.get("commit") or not shutil.which("gitleaks"):
+        return None
+    with tempfile.TemporaryDirectory(prefix="rail-scan-") as held:
+        report = os.path.join(held, "report.json")
+        try:
+            subprocess.run(["gitleaks", "git", "--no-banner", "--redact", f"--log-opts=-1 {fact['commit']}",
+                            "--report-format", "json", "--report-path", report, project.root], cwd=project.root,
+                           capture_output=True, text=True, timeout=120, check=False)
+            with open(report) as fh:
+                found = json.load(fh)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return None
+    for x in found if isinstance(found, list) else []:
+        if isinstance(x, dict) and x.get("Fingerprint") == fact["key"]:
+            return {"match": str(x.get("Match") or ""), "start": int(x.get("StartLine") or fact["line"]),
+                    "end": int(x.get("EndLine") or x.get("StartLine") or fact["line"])}
+    return None
+
+
+def _show_secret(project, f, fact):
+    if not fact.get("commit"):
+        return ["## The line", fact["key"], "",
+                "It is not a fingerprint of a scan of commits (`commit:file:rule:line`), so the engine can't show the"
+                " finding. Run the project's secret scan without the line to see what it takes out."]
+    lines = ["## The finding the line takes out of the secret scan", f"Rule: {fact['rule']}",
+             f"File: {fact['file']}, line {fact['line']}", f"Commit: {fact['commit']}", ""]
+    ref = f"{fact['commit']}:{fact['file']}"
+    text = gitx.read_blobs([ref], project.root).get(ref) or ""
+    seen = _scanned(project, fact)
+    # The string is shown only as the scan redacts it. Without the scan's own report the engine can't tell where the
+    # string ends, so it shows the lines above the finding and nothing from its first line on.
+    start = seen["start"] if seen else fact["line"]
+    lines += [f"## {fact['file']} at that commit", "```", *_numbered(text, start - 5, start - 1)]
+    if seen:
+        lines += [f"{start:>5}  {seen['match']}", *_numbered(text, seen["end"] + 1, seen["end"] + 5), "```",
+                  "The scan's own redaction stands in for the string."]
+    else:
+        lines += [f"{start:>5}  (the line the scan reported is not shown)", "```",
+                  "The scan's report could not be read here, so the string and the lines after it are left out."]
+    return lines
+
+
+def _said(project, f, fact, evidence):
+    return None if len(evidence.strip()) >= 3 else "the answer does not say what the string is"
+
+
+question(
+    "secret",
+    f"The change adds a line to `{IGNORED}`, which takes one finding out of the secret scan.",
+    "The secret scan reported a string in this branch's commits, and the author's line says it is no secret. Is the"
+    " string a credential that works, or worked, anywhere?",
+    {"not-a-secret": {"means": "the string is no credential: an example, a fixture, a public id.", "then": GO,
+                      "evidence": "what the string is, in a few words.", "check": _said},
+     "secret": {"means": "the string is, or may be, a real credential. It is pushed, so it counts as leaked.",
+                "then": WAIT, "wait": "SECRET_FOUND",
+                "told": "Stop here: a person rotates the secret. Don't take the string or the line out yourself. Once"
+                        " the person has acted, the engine starts the ticket's branch again from the base branch,"
+                        " because the scan fails on this branch's commits for good."}},
+    _find_secret, _show_secret, once=True)

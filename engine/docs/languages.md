@@ -93,6 +93,12 @@ together:
 - One secret scan over the branch's commits ends `verify`, whatever the languages:
   `gitleaks git --no-banner --redact -v --log-opts="$RAIL_BASE..HEAD"`. `-v` makes a finding name its file and line,
   and `--redact` keeps the secret itself out of the output.
+- A false finding of that scan has one answer. The scan reads every commit of the branch, and a branch is never
+  rewritten, so changing the line it found does not help: its first commit still fails. Put the finding's
+  `Fingerprint:`, which the scan prints, on a line of `.gitleaksignore` at the repository's root and ship. The
+  file is in every ticket's scope. The line raises the triage question `secret`: a run that did not write the
+  change says whether the string is a credential, and a real one waits for a person, who rotates it (`rail docs
+  triage`).
 - ruff leaves out `.rail` and `.claude`: Rail's engine and the agent's files are tracked in the project,
   and they are not its code.
 - An install runs no dependency's lifecycle scripts where the manager can turn them off (`--ignore-scripts`).

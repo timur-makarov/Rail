@@ -93,8 +93,11 @@ READERS = {
                       " path of the schema its JSON answer must match) and RAIL_TRIAGE (the question's type) set."
                       " Empty: review.command (rail docs triage)",
     "triage.model": "advance: the model a triage run is on. Empty: review.model",
-    "tests.paths": "nothing yet: globs of the files that hold tests and their runner's settings, which rail init"
-                   " writes from the language profiles it finds (rail docs languages)",
+    "tests.paths": "ship and the review: globs of the files that hold tests and their runner's settings, which rail"
+                   " init writes from the language profiles it finds (rail docs languages). When a change edits,"
+                   " deletes or renames one the base branch has, ship runs verify and each Check: line once more"
+                   " with the base's version, and a command that then fails raises the old-test question (rail docs"
+                   " triage). The reviewer's brief lists the changed ones. Empty switches both off",
     "rules": "ship and CI: structure rules on added lines and files (rail docs rules)",
     "sensors": "ship and CI, last: each entry runs a tool when the change touches its paths, and a line of its output"
                " on a line the change adds fails the step (rail docs sensors)",
