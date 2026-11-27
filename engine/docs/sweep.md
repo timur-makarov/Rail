@@ -81,6 +81,13 @@ next sweep starts. The first sweep starts where Rail was set up.
   whose coverage ticket is open is left out: that ticket adds the path (`rail docs languages`). The agent opens
   one ticket that adds the path under its kind in `[kinds]`. The summary's wording for this has not been tested
   with a model run.
+- **What the machine lacks to drive the product:** the lines of `rail doctor` about the product that fail
+  with `kind: ticket` on the base branch (`rail docs product`): a surface with no driving check, a product
+  nothing starts or seeds. A project whose config names no surface gets none: not every repository holds a
+  product. A line is new when the summary of the sweep before this one does not name it and
+  no open ticket carries its id; the agent opens one ticket for it, with `external_id = "bar#NAME"`. A line
+  an earlier sweep listed is named as known, and gets no second ticket. The summary's wording for this has
+  not been tested with a model run.
 - **Output:** tickets, never edits, and a summary in `.rail/journal/NN-summary.md` with a section for each
   part above. A section the agent files from says under its heading what gets a ticket; that wording has not
   been tested with a model run for the five sections from "Findings an author declined" to "Work left for

@@ -30,6 +30,11 @@ Read the request's small words before you draft. "Just", "only" and "quick" set 
 symptom. When the request names a mechanism ("add a retry"), work out the problem it is meant to solve and
 write the check for that problem; if the mechanism does not fit it, say so in your first question.
 
+<!-- Not tested with a model run: the paragraph below. -->
+When the project has a surface of kind `agent` (a `[[surfaces]]` entry in `.rail/config.toml`: what the
+product has that is built for agents) and the request adds behaviour users get, the draft says whether that
+behaviour is exposed there. If it is, a `Check:` line drives it there.
+
 ## 3. Ask only what changes the contract
 
 A question is worth asking when its answer changes a `Check:` line, `scope_paths`, the tier, or what is out

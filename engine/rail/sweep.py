@@ -10,6 +10,7 @@ import re
 from collections import defaultdict
 
 from . import doclint, flakes, gitx, stats, triage
+from .product import bar_key
 from .project import events_path, parse_events, ticket_path
 from .util import globmatch, match_any
 
@@ -311,6 +312,37 @@ def flaky(project, merged):
             for key, where in sorted(seen.items(), key=lambda x: (-len(x[1]), x[0])) if len(where) >= FLAKE_TICKETS]
 
 
+LACKS = "What the machine lacks to drive the product"  # the summary section the next sweep reads back
+
+
+def lacking(project, start):
+    """([(name, detail)], [name]): the pieces the machine can build that the project lacks before the product can be
+    started and driven with no person (rail docs product), read on the base branch. First the new ones, then the
+    names an earlier sweep listed already: a piece is listed for a ticket once. A piece is new when the summary of
+    the sweep before this one does not name it and no open ticket carries its `bar#` id. Nothing is listed for a
+    project whose config names no surface."""
+    from . import product
+
+    if not project.config["surfaces"]:
+        return [], []  # a project that names no surface is asked nothing: not every repository holds a product
+    lines = product.bar(project, set(project.layout(project.base_ref).tree.names))
+    failing = [(name, detail) for name, passed, detail, kind in lines if passed is False and kind == "ticket"]
+    if not failing:
+        return [], []
+    before = set()
+    last = re.search(r"^Ticket: (\d+)", gitx.out(["log", "-1", "--format=%B", start], project.root), re.M) if start else None
+    if last:
+        path = f"{project.base_ref}:.rail/journal/{last.group(1)}-summary.md"
+        text = gitx.read_blobs([path], project.root).get(path) or ""
+        if f"## {LACKS}\n" in text:
+            section = text.split(f"## {LACKS}\n", 1)[1].split("\n## ", 1)[0]
+            before = set(re.findall(r"^- `([^`]+)`", section, re.M))
+    filed = {(t.ticket.get("external_id") or "") for t in project.tickets().values()
+             if t.ticket and not t.merged and not t.last("dropped") and not t.dropped_mark}
+    old = [name for name, _ in failing if name in before or product.bar_key(name) in filed]
+    return [(name, detail) for name, detail in failing if name not in old], old
+
+
 def brief(project, commits, parked, checks, merged=(), areas=(), loose=()):
     from .review import DO_NOT_REPORT, SECURITY, project_conventions
 
@@ -347,7 +379,8 @@ def brief(project, commits, parked, checks, merged=(), areas=(), loose=()):
 
 
 def summary(nn, start, commits, merged, problems, counts, entry, parked, checks, recurring=(), flaked=(),
-            settled=(), refused=(), kinds=(), areas=(), declined=None, noticed=(), words=(), repeated=(), stale=()):
+            settled=(), refused=(), kinds=(), areas=(), declined=None, noticed=(), words=(), repeated=(), stale=(),
+            lacks=((), ())):
     review = (entry["summary"] if entry else "(the review run failed)") if commits or areas else \
         "(no review run: nothing merged without a review, and the areas the merged tickets changed are read once" \
         " [sweep] every tickets merged)"
@@ -419,7 +452,13 @@ def summary(nn, start, commits, merged, problems, counts, entry, parked, checks,
               *([f"- `{kind}`: a reviewer named this kind on `{path}` (ticket {where}), and no path of that kind in"
                  f" `.rail/config.toml` matches the file, so a later change to it is `{kind}` only if a reviewer says"
                  f" so again. Open one ticket that adds its path under `[kinds]` `{kind}`."
-                 for kind, path, where in kinds] or ["(none)"])]
+                 for kind, path, where in kinds] or ["(none)"]),
+              # Not tested with a model run: the wording of the lines below, as above.
+              "", f"## {LACKS}",
+              *([f"- `{name}`: {detail}. Open that ticket, with `external_id = \"{bar_key(name)}\"`."
+                 for name, detail in lacks[0]]
+                + [f"- `{name}`: listed by an earlier sweep, and still lacking. No ticket." for name in lacks[1]]
+                or ["(none)"])]
     return "\n".join(lines) + "\n"
 
 
@@ -436,12 +475,13 @@ def run(project, f, receipt):
     parked, checks, declined = history(project, merged)
     noticed, words, repeated = left_behind(project, merged)
     stale = stale_markers(project)
+    lacks = lacking(project, start)
     recurring, flaked = patterns(project, merged), flaky(project, merged)
     settled = triage.settled(project)
     refused = stats.refused_kinds(project, project.tickets())
     areas, loose = changed_areas(project) if 0 < project.config["sweep"]["every"] <= len(merged) else ([], [])
     gathered = (problems or parked or checks or recurring or flaked or settled or refused or kinds or declined
-                or noticed or words or repeated or stale)
+                or noticed or words or repeated or stale or lacks[0])
     entry = None
     if commits or areas:
         entry = review.run(project, f, "sweep", receipt,
@@ -452,12 +492,13 @@ def run(project, f, receipt):
         more = ((len(settled), "question types with one answer"), (len(refused), "kinds a person refuses at the merge"),
                 (len(kinds), "kind paths reviewers found"), (len(declined), "kinds of declined findings"),
                 (len(noticed), "lines workers left"), (len(words), "notes a person gave"),
-                (len(repeated), "repeated failures"), (len(stale), "tickets with comments left behind"))
+                (len(repeated), "repeated failures"), (len(stale), "tickets with comments left behind"),
+                (len(lacks[0]), "pieces the machine lacks to drive the product"))
         receipt.record("harvest", True, f.patch_id, NOTHING if not gathered
                        else f"no review run: {len(parked)} parked findings, {len(checks)} proposed checks,"
                             f" {len(recurring)} patterns in the worker runs, {len(flaked)} flaky checks"
                             + "".join(f", {n} {what}" for n, what in more if n))
     receipt.files[f".rail/journal/{f.id}-summary.md"] = summary(
         f.id, start, commits, merged, problems, counts, entry, parked, checks, recurring, flaked, settled, refused,
-        kinds, areas, declined, noticed, words, repeated, stale)
+        kinds, areas, declined, noticed, words, repeated, stale, lacks)
     return entry

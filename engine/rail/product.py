@@ -301,3 +301,98 @@ def brief_lines(found):
         for name in found[surface].get("left") or []:
             lines.append(f"- `{surface}` / `{name}`: not text, so it was not kept in the journal")
     return lines
+
+
+# --- what the machine lacks ---------------------------------------------------------
+
+def bar_key(name):
+    """The external id of the ticket that builds a missing piece: `bar#` and the line's name with hyphens."""
+    return "bar#" + name.replace(" ", "-")
+
+
+def bar(project, names, executable=None, machine=None):
+    """What the project has of the pieces the machine needs to start, seed and drive the product with no person:
+    [(name, passed, detail, kind)]. On a line that fails, `kind` says whose act the piece is: `ticket` for work the
+    machine can do, `grant` for a person's one-time act. `names` are the tracked files; `executable(path)` says
+    whether one can be run, where the files are on disk. It runs no command of the project's."""
+    import sys
+    config, surfaces = project.config["product"], project.config["surfaces"]
+    # Not tested with a model run: the wording of the lines below, which the agent that files their tickets reads.
+    if not surfaces:
+        return [("surfaces", False,
+                 "the config names no way users reach the product, so nothing drives it. If users reach what this"
+                 " repository holds, one ticket adds a [[surfaces]] entry for each way, with a script that drives it,"
+                 " and [product] start and ready where the product has to run first", "ticket")]
+    lines = []
+    kinds = [s["kind"] for s in surfaces]
+    if config["start"] and config["ready"]:
+        lines.append(("product start", True, "[product] start and ready are set", None))
+    elif all(kind in NEEDS_NO_START for kind in kinds):
+        lines.append(("product start", True, "every surface is cli or data: a check runs the built program itself", None))
+    else:
+        lacks = " and ".join(key for key in ("start", "ready") if not config[key])
+        lines.append(("product start", False,
+                      f"[product] {lacks} is not set, so nothing starts the product before"
+                      f" {', '.join(s['name'] for s in surfaces if s['kind'] not in NEEDS_NO_START)} is driven. One"
+                      f" ticket writes the script that starts it and returns, and the one that exits 0 once it"
+                      f" answers", "ticket"))
+    signed = [s["name"] for s in surfaces if s["kind"] in NEEDS_IDENTITY]
+    if signed:
+        lines.append(("product seed", True, "[product] seed is set", None) if config["seed"] else
+                     ("product seed", False,
+                      f"[product] seed is not set, and {', '.join(signed)} needs a test identity to sign in with. One"
+                      f" ticket adds the seed files and the command that loads them. A test account at a third party"
+                      f" is a person's act: name it in the ticket", "ticket"))
+    for s in surfaces:
+        path = check_path(s)
+        wrong = ("it names no check" if not path else
+                 f"its check {path} is not a tracked file" if path not in names else
+                 f"its check {path} is not executable" if executable and not executable(path) else "")
+        lines.append((f"surface {s['name']}", not wrong,
+                      f"{s['kind']}, driven by {path}" if not wrong else
+                      f"{wrong}, so nothing drives this {s['kind']} surface. One ticket writes the script: it uses the"
+                      f" surface as a user would, writes what it saw into $RAIL_EVIDENCE, and exits 0 only when the"
+                      f" surface works", None if not wrong else "ticket"))
+    if "mobile" in kinds:
+        here = machine or {"kvm": os.path.exists("/dev/kvm"), "mac": sys.platform == "darwin"}
+        can = here["kvm"] or here["mac"]
+        lines.append(("product machine", bool(can),
+                      "this machine can run a device emulator" if can else
+                      "a mobile surface needs a machine that can run a device emulator, and this one has no hardware"
+                      " acceleration (/dev/kvm) and is no Mac. A person gives the work a runner with hardware"
+                      " acceleration, or a Mac", None if can else "grant"))
+    return lines
+
+
+def try_base(project):
+    """`rail doctor --product`: on the base branch, in a throwaway worktree, run setup, then start, ready and seed,
+    each surface's driving check, and stop, once. Returns [(name, passed or None, detail)]."""
+    from .steps import folder_of, scratch
+    surfaces = project.config["surfaces"]
+    if not surfaces and not project.config["product"]["start"]:
+        return [("product", None, "nothing to run: the config names no product")]
+    lines, env = [], _env(project, "")
+    with scratch(project, gitx.rev(project.base_ref, project.root)) as path:
+        commands = [(p["setup"], folder_of(path, p)) for p in project.layout(project.base_ref).projects if p["setup"]]
+        if project.config["commands"]["setup"]:
+            commands.append((project.config["commands"]["setup"], path))
+        for command, where in commands:
+            code, output, _ = run_shell(command, where, env, configmod.timeout(project.config, "setup"))
+            if code != 0:
+                lines.append(("product setup", False, f"`{command}` failed on the base branch: {tail(output, 5)}"))
+        with tempfile.TemporaryDirectory(prefix="rail-product-") as held:
+            began = Started(project, path, "", os.path.join(held, "start.log"))
+            try:
+                ok, _, detail, output, ms = began.start()
+                lines.append(("product", ok, f"start, ready and seed passed on the base branch in {ms / 1000:.1f}s"
+                              if ok else f"{detail}\n{output}".strip()))
+                for surface in surfaces if ok else []:
+                    folder = os.path.join(held, surface["name"])
+                    code, output, _ = drive(project, path, "", surface, folder)
+                    status = could_not_run(code) or ("timeout" if code is None else f"exit {code}")
+                    lines.append((f"product:{surface['name']}", code == 0, said(collect(folder, {})) if code == 0
+                                  else f"{status}\n{tail(output, 20)}"))
+            finally:
+                failed = began.stop()
+            lines.append(("product stop", not failed, "the product was stopped" if not failed else failed))
+    return lines

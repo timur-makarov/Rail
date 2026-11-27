@@ -97,3 +97,42 @@ command with its output and exit code, and for a web page screenshots or a trace
 - **The reviewer's brief** carries the text evidence of the patch it reviews, up to 16 KB a surface, so that
   what the change says it does can be held against what the product did. The reviewer can also run a check
   itself. The brief's wording for this has not been tested with a model run.
+
+## What the machine still lacks
+
+`rail doctor` says which pieces the project lacks before the machine can start, seed and drive the product
+with no person. Each line that fails carries `kind`: `ticket` for a piece the machine can build, and `grant`
+for a person's one-time act, named exactly. A `ticket` line is no wait for a person: doctor lists those apart,
+under "The machine can build these", and they do not make it answer that something is to be fixed.
+
+| Line | Passes when | When it fails |
+|---|---|---|
+| `surfaces` | Shown only when the config has no `[[surfaces]]` entry | `ticket`: one ticket adds the surfaces and their driving checks |
+| `product start` | `[product] start` and `ready` are set, or every surface is `cli` or `data` | `ticket`: the scripts that start the product and say when it answers |
+| `product seed` | `[product] seed` is set. Shown when a `web`, `api`, `agent` or `mobile` surface exists | `ticket`: the seed files and the command that loads them. A test account at a third party is a person's act, which the ticket names |
+| `surface NAME` | The surface's `check` is a tracked file that can be run | `ticket`: the script that drives the surface |
+| `product machine` | The machine can run a device emulator: it has `/dev/kvm`, or is a Mac. Shown when a `mobile` surface exists | `grant`: a runner with hardware acceleration, or a Mac |
+
+Two more pieces need no line here. Each declared tool has a line of its own with its probe's result, which
+tells a broken machine from broken code (`rail docs tools`). The way back is the `rail:revert` label, which
+`rail init` creates (`rail docs tickets`).
+
+Plain `rail doctor` runs no command of the project's. **`rail doctor --product`** goes further: on the base
+branch, in a throwaway worktree, it runs each project's `setup` and `[commands] setup`, then `start`, `ready`
+and `seed`, each surface's driving check, and `stop`, once, and reports each as passed or failed.
+
+**At setup.** The init task asks for `[product]`, the surfaces, and what the product has that is built for
+agents (a command line, an API, an MCP server, markdown docs), which is a surface of kind `agent`. It asks for
+one ticket for each `ticket` line, with the external id `bar#` and the line's name with hyphens, as
+`bar#product-seed`, and for each `grant` line to be told to the person. The task's wording for this has not
+been tested with a model run.
+
+**Later.** The sweep reads the same lines on the base branch and lists each `ticket` line once, for a ticket
+with that external id (`rail docs sweep`). A line an earlier sweep listed, or one whose ticket is open, is
+named as known and gets no second ticket.
+
+## What the numbers say
+
+`rail stats` has a `DRIVING CHECKS` table, with the runs and the failures of each surface's check on the
+merged tickets, and splits the outcomes `BY SURFACE` (`rail docs stats`). A failure of a driving check is one
+that `verify`, every `Check:` line and the sensors did not catch, since the step runs after them.

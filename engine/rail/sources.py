@@ -13,7 +13,8 @@ from .util import RailError
 
 DIR = os.path.join(".rail", "sources")
 NAME = re.compile(r"^[a-z0-9-]+$")
-RESERVED = ("sweep", "red-base", "github", "coverage")  # external_id prefixes the engine writes itself
+# external_id prefixes the engine writes itself, and the two it asks the sweep's tickets to carry
+RESERVED = ("sweep", "red-base", "github", "coverage", "todo", "bar")
 KEYS = {"fetch": str, "max_open": int}
 SIGNAL_LIMIT = 20000  # characters of the fetch's output in a brief: the tail, where a log's news usually is
 ENDED = ("merged", "dropped")

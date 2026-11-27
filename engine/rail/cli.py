@@ -2381,8 +2381,15 @@ def cmd_doctor(project, args):
     from . import doctor
 
     found = doctor.checks(project)
-    missing = [f"- {name}: {detail}" for name, passed, detail in found if passed is False]
+    if getattr(args, "product", False):
+        from . import product
+        found += product.try_base(project)
+    missing = [f"- {line[0]}: {line[2]}" for line in found if line[1] is False and doctor.kind_of(line) != "ticket"]
+    # A piece the machine can build is no wait for a person: it is a ticket.
+    buildable = [f"- {line[0]}: {line[2]}" for line in found if doctor.kind_of(line) == "ticket"]
     brief = "Everything Rail needs is in place." if not missing else "Fix these:\n" + "\n".join(missing)
+    if buildable:
+        brief += "\nThe machine can build these, each as one ticket (rail add):\n" + "\n".join(buildable)
     return answer(code="DOCTOR", action={"kind": "rest" if not missing else "person_wait", "brief": brief},
                   owner="none" if not missing else "person", steps_=doctor.as_steps(found))
 
@@ -2577,7 +2584,9 @@ def parser():
     init_.add_argument("--skills", action="append", metavar="DIR",
                        help="a folder for the SKILL.md files, from the repository root; repeat it for several. The"
                             " default is [init] skill_dirs")
-    verb("doctor", "check the setup and print what's missing", ticket=False)
+    doctor_ = verb("doctor", "check the setup and print what's missing", ticket=False)
+    doctor_.add_argument("--product", action="store_true",
+                         help="also start the product on the base branch, drive each surface once, and stop it")
     verb("ci", "the rail check: the ship checks again on a pull request's head", ticket=False)
     hook = sub.add_parser("hook")  # internal: Claude Code hooks call it; not a verb
     hook.add_argument("name", choices=sorted(hooks.HOOKS))

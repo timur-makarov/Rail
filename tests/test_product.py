@@ -318,6 +318,168 @@ class Evidence(ProductTest):
         self.assertLess(sizes["pages/c.txt"], product.FILE_BYTES)
         self.assertEqual(sum(sizes.values()), product.SURFACE_BYTES + len(product.CUT))
 
+
+def bar(answer):
+    """The lines of a doctor answer about the product: {name: (result, kind)}."""
+    return {x["step"]: (x.get("result"), x.get("kind")) for x in answer["steps"]
+            if x["step"].split()[0] in ("product", "surface", "surfaces") or x["step"].startswith("product:")}
+
+
+class Bar(ProductTest):
+    def test_doctor_names_each_missing_piece_and_whose_act_it_is(self):
+        p = self.product()
+        self.assertEqual(bar(p.rail("doctor", expect=None)), {
+            "product start": ("pass", None), "product seed": ("pass", None),
+            "surface api": ("pass", None), "surface cli": ("pass", None)})
+
+        # Surfaces and nothing that starts the product or seeds it; one check that is not there, one that cannot run.
+        os.chmod(p.path("cli", "checks", "cli.py"), 0o644)
+        p.write(".rail/config.toml", BASE + SURFACES.replace("server/checks/api.py", "server/checks/gone.py"))
+        said = p.rail("doctor", expect=None)
+        self.assertEqual(bar(said), {
+            "product start": ("fail", "ticket"), "product seed": ("fail", "ticket"),
+            "surface api": ("fail", "ticket"), "surface cli": ("fail", "ticket")})
+        lines = {x["step"]: x["detail"] for x in said["steps"]}
+        self.assertIn("[product] start and ready is not set, so nothing starts the product before api is driven", lines["product start"])
+        self.assertIn("api needs a test identity to sign in with", lines["product seed"])
+        self.assertIn("its check server/checks/gone.py is not a tracked file", lines["surface api"])
+        self.assertIn("its check cli/checks/cli.py is not executable", lines["surface cli"])
+        # A piece the machine can build is a ticket, not a wait for a person.
+        self.assertIn("The machine can build these, each as one ticket (rail add):\n- product start:", said["action"]["brief"])
+        self.assertNotIn("- product start", said["action"]["brief"].split("The machine can build these")[0])
+
+        # A command line alone needs nothing started and nobody signed in.
+        os.chmod(p.path("cli", "checks", "cli.py"), 0o755)
+        p.write(".rail/config.toml", BASE + SURFACES.split("[[surfaces]]")[2].join(["\n[[surfaces]]", ""]))
+        self.assertEqual(bar(p.rail("doctor", expect=None)), {"product start": ("pass", None), "surface cli": ("pass", None)})
+
+        # No surface at all is one line.
+        p.write(".rail/config.toml", BASE)
+        said = p.rail("doctor", expect=None)
+        self.assertEqual(bar(said), {"surfaces": ("fail", "ticket")})
+        self.assertIn("the config names no way users reach the product", said["action"]["brief"])
+
+    def test_a_mobile_surface_on_a_machine_that_cannot_run_an_emulator_is_a_grant(self):
+        p = self.product(config=BASE + STARTS + SURFACES.replace('kind = "cli"', 'kind = "mobile"'))
+        engine()
+        from rail import product
+        from rail.project import Project
+        project = Project(p.root)
+        names = set(p.git("ls-files").split())
+        found = {name: (passed, kind) for name, passed, _, kind in
+                 product.bar(project, names, machine={"kvm": False, "mac": False})}
+        self.assertEqual(found["product machine"], (False, "grant"))
+        for machine in ({"kvm": True, "mac": False}, {"kvm": False, "mac": True}):
+            found = {name: (passed, kind) for name, passed, _, kind in product.bar(project, names, machine=machine)}
+            self.assertEqual(found["product machine"], (True, None))
+        # A grant is a person's act, so doctor's brief lists it under what to fix.
+        said = p.rail("doctor", expect=None)
+        if bar(said)["product machine"] == ("fail", "grant"):
+            self.assertIn("- product machine: a mobile surface needs a machine",
+                          said["action"]["brief"].split("The machine can build these")[0])
+
+    def test_doctor_product_runs_each_command_once_on_the_base_branch(self):
+        p = self.product()
+        found = {x["step"]: (x.get("result"), x["detail"]) for x in p.rail("doctor", "--product", expect=None)["steps"]}
+        self.assertEqual(found["product"][0], "pass")
+        self.assertIn("start, ready and seed passed on the base branch", found["product"][1])
+        self.assertEqual(found["product:api"], ("pass", "1 evidence file, 1 more left on the machine"))
+        self.assertEqual(found["product:cli"], ("pass", "1 evidence file"))
+        self.assertEqual(found["product stop"], ("pass", "the product was stopped"))
+        self.assertFalse(os.path.exists(p.path("server", ".run")))  # a throwaway worktree, not this checkout
+        self.assertEqual(p.git("worktree", "list").count("\n"), 1)
+        # Plain doctor runs none of them.
+        self.assertNotIn("product stop", {x["step"] for x in p.rail("doctor", expect=None)["steps"]})
+        # With the fault on, the surface's line fails and says what the check printed.
+        found = {x["step"]: (x.get("result"), x["detail"])
+                 for x in p.rail("doctor", "--product", expect=None, env_extra={"CALC_FAULT": "1"})["steps"]}
+        self.assertEqual(found["product:cli"][0], "fail")
+        self.assertIn("cli: calc.py add 2 3 printed '6', wanted '5'", found["product:cli"][1])
+
+    def test_the_init_task_asks_for_the_product_its_surfaces_and_what_is_built_for_agents(self):
+        for cloud in (False, True):
+            p = self.fixture("cloud" if cloud else "local", init=False, tree=PRODUCT)
+            p.git("add", "-A")
+            p.git("commit", "--quiet", "-m", "start")
+            p.rail("init")
+            brief = p.rail("next", cloud=cloud)["action"]["brief"]
+            self.assertIn("The product. When users reach what this repository holds, say in .rail/config.toml how", brief)
+            self.assertIn("one [[surfaces]] entry for each way users", brief)
+            self.assertIn("Ask what the product has that is built for\n   agents", brief)
+            self.assertIn("that is a surface of kind\n   `agent` with its own check", brief)
+            self.assertIn("file one ticket for each `ticket` line with rail add", brief)
+            self.assertIn("list each `grant` line in the pull request" if cloud else "tell the person each `grant` line", brief)
+
+    def test_the_sweep_lists_a_missing_piece_for_a_ticket_once(self):
+        p = self.product(config=BASE + SURFACES + "\n[sweep]\nevery = 0\n")
+        seed = card("Seed a test user", ("server/**",)).replace('tier = "AUTO"', 'tier = "AUTO"\nexternal_id = "bar#product-seed"')
+        p.add(seed)  # as the init task files it: the sweep leaves a piece with an open ticket alone
+        nn = self.change(p, "Say what it is", "docs/guide.md", "A calculator", "A small calculator")
+        p.queue_reviews(CLEAN)
+        p.rail("advance", nn)
+        self.assertEqual(p.rail("advance", nn)["state"], "merged")
+        swept = p.rail("sweep")
+        self.assertEqual(swept["reason"]["code"], "SWEEP_TICKETS")
+        self.assertIn("1 pieces the machine lacks to drive the product", swept["steps"][-1]["detail"])
+        with open(os.path.join(p.worktree(swept["ticket"]), ".rail", "journal", f"{swept['ticket']}-summary.md")) as f:
+            section = f.read().split("## What the machine lacks to drive the product\n")[1]
+        self.assertIn("- `product start`: [product] start and ready is not set", section)
+        self.assertIn('Open that ticket, with `external_id = "bar#product-start"`.', section)
+        self.assertIn("- `product seed`: listed by an earlier sweep, and still lacking. No ticket.", section)
+        p.rail("advance", swept["ticket"])
+        self.assertEqual(p.rail("advance", swept["ticket"])["state"], "merged")
+
+        # Nobody filed the ticket. The next sweep names the piece as an old one, and has nothing to file.
+        nn = self.change(p, "Say it again", "docs/guide.md", "A small calculator", "A very small calculator")
+        p.queue_reviews(CLEAN)
+        p.rail("advance", nn)
+        self.assertEqual(p.rail("advance", nn)["state"], "merged")
+        again = p.rail("sweep")
+        self.assertEqual(again["reason"]["code"], "SWEEP_EMPTY")
+        with open(os.path.join(p.worktree(again["ticket"]), ".rail", "journal", f"{again['ticket']}-summary.md")) as f:
+            section = f.read().split("## What the machine lacks to drive the product\n")[1]
+        self.assertEqual(section.strip().splitlines(), [
+            "- `product start`: listed by an earlier sweep, and still lacking. No ticket.",
+            "- `product seed`: listed by an earlier sweep, and still lacking. No ticket."])
+
+
+
+class Stats(ProductTest):
+    GUIDE = '\n[[surfaces]]\nname = "guide"\nkind = "data"\nprojects = ["docs"]\ncheck = "docs/checks/guide.py"\n'
+
+    def test_stats_counts_each_surfaces_driving_check_and_splits_the_outcomes_by_surface(self):
+        p = self.product(config=CONFIG + self.GUIDE)
+        for n in range(1, 6):  # five tickets that reach the server and the command line
+            nn = p.add(card(f"Say more, part {n}", ("server/**", "cli/**")))["ticket"]
+            p.rail("next", "--ticket", nn)
+            for path in ("server/server.py", "cli/calc.py"):
+                with open(os.path.join(p.worktree(nn), path), "a") as f:
+                    f.write(f"# part {n}\n")
+            if n == 1:  # one ship with the fault switched on: the server's check fails, and nothing before it did
+                failed = p.rail("advance", nn, expect=3, env_extra={"CALC_FAULT": "1"})
+                self.assertEqual(steps(failed)[-2][:2], ("product:api", "fail"))
+            p.queue_reviews(CLEAN)
+            p.rail("advance", nn)
+            self.assertEqual(p.rail("advance", nn)["state"], "merged")
+        nn = self.change(p, "Say what it is", "docs/guide.md", "A calculator", "A small calculator")
+        p.queue_reviews(CLEAN)
+        p.rail("advance", nn)
+        self.assertEqual(p.rail("advance", nn)["state"], "merged")
+
+        out = p.rail("stats")["stats"]
+        self.assertEqual(out["driving"], {
+            "api": {"tickets": 5, "runs": 6, "failed": 1, "share": 0.167},
+            "cli": {"tickets": 5, "runs": 5, "failed": 0, "share": 0.0},
+            "guide": {"tickets": 1, "runs": 1, "failed": 0, "share": 0.0}})
+        # Two surfaces with five tickets each, and the small one summed into `other`.
+        self.assertEqual({name: row["merged"] for name, row in out["outcomes"]["by_surface"].items()},
+                         {"api": 5, "cli": 5, "other": 1})
+        text = p.rail("stats", raw=True).stdout
+        self.assertIn("BY SURFACE", text)
+        self.assertIn("DRIVING CHECKS", text)
+        self.assertIn("A driving check runs after verify, every Check: line and the sensors passed", text)
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main()

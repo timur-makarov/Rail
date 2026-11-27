@@ -33,7 +33,7 @@ sys.exit(main())
 
 # Not tested with a model run: the clause "so a person merges it" in step 3 of both tasks below, which said before
 # that a person also approves the contract; and step 1 of both, which said before that rail init wrote each
-# language's commands into [commands].
+# language's commands into [commands]. Not tested with a model run: the step on the product, in both.
 INIT_TASK = """Rail is installed, and this project isn't set up for it yet: .rail/config.toml isn't on {base}.
 {projects}Read the repository to learn its stack, then propose each of these to the person and make the changes they confirm:
 1. The checks. Rail works the repository's projects out from its tracked manifests each time it needs them, and for
@@ -70,6 +70,16 @@ INIT_TASK = """Rail is installed, and this project isn't set up for it yet: .rai
    variables it needs, never a value; `probe`, a fast command that changes nothing and fails when the tool is out
    of reach; `ci = true` only for a test or dev key that a pull request's run may be given, with its line in
    .github/workflows/rail.yml.{tools} Leave it out when the work reaches nothing.
+7. The product. When users reach what this repository holds, say in .rail/config.toml how: [product] `start`
+   (starts the product in the checkout and returns), `ready` (exits 0 once it answers), `seed` (loads test data
+   and a test identity from files in the repository) and `stop`; and one [[surfaces]] entry for each way users
+   reach it, with its `name`, its `kind` (web, api, cli, agent, data, integration or mobile), the `projects`
+   whose change reaches it, and `check`, the path of a script that uses the surface as a user would, writes what
+   it saw into $RAIL_EVIDENCE and exits 0 only when the surface works. Ask what the product has that is built for
+   agents (a command line, an API, an MCP server, markdown docs): when it has one, that is a surface of kind
+   `agent` with its own check. A ship then starts the product, drives each surface the change reaches and stops
+   it. Write what is quick to write now. `rail doctor` lists what is still missing, each line marked `ticket` or
+   `grant`: file one ticket for each `ticket` line with rail add, giving it the external_id `bar#` and the line's name\n   with hyphens for spaces, and tell the person each `grant` line, which is theirs to do once.
 If the project already has its own agent workflow, hooks, guards, CI gates or repo map, list them and ask the
 person whether to keep, merge or retire each one; until they decide, both run, and a hook of theirs may block a
 step below. Then ask the person to make that commit.
@@ -114,6 +124,16 @@ once by reading and merging one pull request. {projects}Read the repository to l
    variables it needs, never a value; `probe`, a fast command that changes nothing and fails when the tool is out
    of reach; `ci = true` only for a test or dev key that a pull request's run may be given, with its line in
    .github/workflows/rail.yml.{tools} Leave it out when the work reaches nothing.
+6. The product. When users reach what this repository holds, say in .rail/config.toml how: [product] `start`
+   (starts the product in the checkout and returns), `ready` (exits 0 once it answers), `seed` (loads test data
+   and a test identity from files in the repository) and `stop`; and one [[surfaces]] entry for each way users
+   reach it, with its `name`, its `kind` (web, api, cli, agent, data, integration or mobile), the `projects`
+   whose change reaches it, and `check`, the path of a script that uses the surface as a user would, writes what
+   it saw into $RAIL_EVIDENCE and exits 0 only when the surface works. Ask what the product has that is built for
+   agents (a command line, an API, an MCP server, markdown docs): when it has one, that is a surface of kind
+   `agent` with its own check. A ship then starts the product, drives each surface the change reaches and stops
+   it. Write what is quick to write now. `rail doctor` lists what is still missing, each line marked `ticket` or
+   `grant`: file one ticket for each `ticket` line with rail add, giving it the external_id `bar#` and the line's name\n   with hyphens for spaces, and list each `grant` line in the pull request, since it is the person's to do once.
 If the project already has its own agent workflow, hooks, guards, CI gates or repo map, leave them running and list
 them in the pull request for the person to decide: keep, merge or retire.
 Then commit what rail init added together with these changes to a new branch, push it, and open a pull request with

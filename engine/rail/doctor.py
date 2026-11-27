@@ -138,6 +138,9 @@ def checks(project):
                   if not loose else "inside no project, and not answered about yet: "
                   + "; ".join(f"{folder}/ ({', '.join(types)})" for folder, types in loose.items())
                   + ". No check reads these files. The next ship, or rail next, asks what each folder holds"))
+    # What the machine needs to start and drive the product with no person (rail docs product).
+    from . import product
+    found += product.bar(project, set(here.tree.names), lambda path: os.access(os.path.join(root, path), os.X_OK))
     from . import sources
     if sources.names(project):
         bad = sources.problems(project)
@@ -207,11 +210,19 @@ def project_line(p):
             + f"; setup: {p['setup'] or '(none)'}; verify: {p['verify'] or '(none)'}")
 
 
+def kind_of(line):
+    """Whose act a failed line is: `ticket` (the machine can build it), `grant` (a person's one-time act), or None
+    for a line that says neither, which a person fixes."""
+    return line[3] if len(line) > 3 and line[1] is False else None
+
+
 def as_steps(found):
     steps = []
-    for name, passed, detail in found:
+    for line in found:
+        name, passed, detail = line[:3]
         if passed is None:
             steps.append({"step": name, "status": "unavailable", "detail": detail})
         else:
-            steps.append({"step": name, "status": "ran", "result": "pass" if passed else "fail", "detail": detail})
+            steps.append({"step": name, "status": "ran", "result": "pass" if passed else "fail", "detail": detail,
+                          **({"kind": kind_of(line)} if kind_of(line) else {})})
     return steps

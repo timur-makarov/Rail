@@ -82,8 +82,8 @@ Assumed, not verified:
 - That the review seat's model suits the step. `rail stats` shows the cost for each type once it runs.
 - That a redacted finding with the lines around it is enough to tell an example from a secret.
 
-The paths of driving checks (see **Driving the real product**) join `[tests] paths` when that step is built, so
-that `old-test` covers driving checks too.
+The path of a surface's driving check counts as one of `[tests] paths` (`rail docs product`), so `old-test`
+covers driving checks too.
 
 ### 5. A PERSON ticket takes one act
 
@@ -237,271 +237,68 @@ Assumed, not verified:
 
 ### 9. Driving the real product
 
-A ticket's checks pass on code that may still not work when the product is started and used. These features
-make Rail start the product and drive it, at ship and in CI, and keep what it saw. They are built in the order
-they stand in.
+Built (`rail docs product`): a project says in `.rail/config.toml` how its product is started (`[product]`)
+and how users reach it (`[[surfaces]]`, each with the script that drives it). Ship and CI start the product,
+drive each surface the change reaches and stop it, as the last of their checks; what each driving check saw is
+kept in the journal, shown to the reviewer and named in the pull request. `rail doctor` says which pieces the
+machine still lacks and whose act each is, `rail doctor --product` runs the whole path once on the base
+branch, the init task and the sweep ask for the missing pieces as tickets, and `rail stats` counts each
+surface's driving check and splits the outcomes by surface. The reason: a change can pass `verify` and every
+`Check:` line and still not work once the product is started and used.
 
-#### Product surfaces in the config
+Settled while building, and not on this page before:
 
-Size: M.
+- The steps are named `product` (start, ready, seed) and `product:NAME`, as `setup:NAME` and `verify:NAME`
+  are. The step runs after the sensors, so every cheaper check has passed first.
+- A surface's `check` counts as one of `[tests] paths` while the surface names it. Nothing is written by
+  `rail init`, as with the profiles' test paths.
+- A surface with no `projects` is reached by every change.
+- `start` runs with its output in a file, so a product left running does not hold the step, and the engine
+  ends whatever `start` left running after `stop`.
+- A driving check that fails is not run a second time to tell a flake from a failure.
+- The journal keeps the evidence of the last shipped patch only; earlier patches are in the branch's history.
+- The reviewer's brief carries up to 16 KB of a surface's evidence.
+- A doctor line of kind `ticket` does not make doctor answer that a person has something to fix.
+- A project with no surface gets one doctor line, `surfaces`, and not one for each missing piece. The sweep
+  lists nothing for such a project.
+- The sweep reads what an earlier sweep listed from that sweep's summary, and a missing piece's ticket carries
+  `external_id = "bar#NAME"`. No source may be named `bar` or `todo`.
+- In `rail stats`, the count of failures that came after `verify` and every `Check:` line had passed is the
+  count of failures: the step runs only after them, so the table has one number.
+- The stats split by surface groups a ticket under the surfaces a ship drove for it (its `product:NAME` step
+  events), which is what the journal holds.
 
-**What it does.** A project can describe its product in `.rail/config.toml`: how to start it, and each way
-users reach it (a surface) with the command that drives that surface. Nothing runs these yet; this feature is
-the config and its checks, which the other product features read. Today ship runs `verify` and `Check:` lines,
-and nothing tells Rail how the product is reached.
+Left:
 
-**How.**
+- **The surface key `preview` and `RAIL_URL`.** Both belong to **Preview environments**. Until then a check
+  finds the product where `start` put it, and the config refuses `preview`. Doctor's line for a place to run
+  the product waits for the same feature: the local machine always is one.
+- **The pull request's link to the uploaded evidence.** The seed workflow uploads `$RAIL_EVIDENCE` as the
+  artifact `rail-evidence`; the Evidence table does not link it, because the table is written at ship, before
+  CI ran. The upload step was not run on GitHub.
+- **Whether a mobile surface is Android or iOS.** Doctor's `product machine` line passes on a machine with
+  `/dev/kvm` or on a Mac, whichever the surface is. The platform comes with **Mobile surfaces**.
+- **The wording** of the reviewer's section on what the product did, of the init task's step on the product,
+  of the doctor lines, of the sweep's section, and of the grill's paragraph on the `agent` surface is a first
+  wording, marked as not tested where it is written. It waits for the owner to restart the model tests.
+- **The recipes.** What a driving check for each kind of surface looks like, the MCP Inspector's CLI for an
+  `agent` surface, and the eval of tasks a model should finish with the tools are in **Per-surface recipes and
+  the project's run skill**.
+- **In use.** Over the first 50 tickets of a surface: when its check caught nothing and its tickets show no
+  revert or `caused_by` either, its recipe is looked at again. The 64 KB and 256 KB caps are revised from the
+  sizes seen.
 
-- `engine/rail/config.py` (`DEFAULTS`, a check for `[[surfaces]]`), `engine/rail/docs.py` (`rail docs config`)
-  and `seed/config.toml` gain `[product]` and `[[surfaces]]`. The `[preview]` table belongs to **Preview
-  environments**. Each key names its reader, as the seed config does.
-- `[product]` (readers: ship and CI for the product step, `rail doctor`):
-  - `start = ""`: starts the product in the ticket's worktree and returns. `RAIL_TICKET` is set, so parallel
-    tickets pick their own ports and databases.
-  - `ready = ""`: exits 0 once the product answers; changes nothing.
-  - `seed = ""`: loads test data and the test identity from files in the repository.
-  - `stop = ""`: stops what `start` started.
-  - `ready_secs = 120`: how long `ready` may take before the product counts as not started.
-- `[[surfaces]]` (readers: ship and CI), one table per surface:
-  - `name = "web"`.
-  - `kind = "web"`: one of `web`, `api`, `cli`, `agent`, `data`, `integration`, `mobile`.
-  - `projects = ["frontend", "backend"]`: a ticket whose change reaches one of these projects runs this
-    surface's check (**Projects within a repository**).
-  - `check = ".rail/checks/web.sh"`: the driving check; it writes evidence into `$RAIL_EVIDENCE`.
-  - `preview = false`: true means the check runs against a hosted preview (**Preview environments**).
-- `kind` decides which recipe `rail-verify` uses (**Per-surface recipes and the project's run skill**) and
-  which `rail doctor` bar lines apply (**The machine-operable bar in `rail doctor`**). The engine reads no
-  other meaning into it.
-- A project with no `[product] start` and no surfaces works as today. A `cli` or `data` surface often needs no
-  `start`: its check runs the built program itself.
-- The config check refuses an unknown key or an unknown kind, as it refuses unknown keys today. `[[surfaces]]`
-  is checked like `[[rules]]` and `[[sensors]]`.
-- Driving-check scripts live in the repository and count as tests. `rail init` adds each surface's `check`
-  path to `[tests] paths` (`rail docs languages` describes the key), so that a ticket that edits a check
-  script is held against the base's version of it once **Old tests run against the new code** (step 4) is
-  built.
-- **A surface added later.** Nothing here depends on `rail init`. The ticket that covers a new folder
-  (**Projects within a repository**) says whether users reach what the folder holds, and if they do, it adds
-  the surface and its driving check. The sweep files a ticket for a bar line that is new (**The
-  machine-operable bar in `rail doctor`**).
-- A new docs page, `engine/docs/product.md`, describes the tables.
+Assumed, not verified:
 
-**Kept when.** Gate cases, no model, on a fixture product in `tests/` (a small HTTP server and a CLI written
-with Python's standard library, each with a driving check script and a planted-fault switch): `[product]` and
-`[[surfaces]]` load; an unknown kind or key is refused; `rail init` adds each surface's `check` to `[tests]
-paths`. Kept when every case behaves as written.
+- That a cloud session can start the product's dependencies (a database, a browser) with `provision`. A
+  service that needs Docker may not run there.
+- That a workflow artifact is reachable from the pull request for the length of a review.
+- That replacing declared values catches the secrets evidence can hold. A secret the project never declared
+  is not caught.
+- That `/dev/kvm` is a fair test for Android emulator acceleration on Linux.
+- That the surface split shows something the language and project splits do not.
 
-**Waits for.** Nothing. The `[tests] paths` base-version rule is a separate feature; this one only adds the
-paths.
-
-#### The product step
-
-Size: L.
-
-**What it does.** Ship and CI run the real product for every ticket that touches a surface: they start it,
-seed it, run the surface's driving check, and stop it. A failed driving check counts like a failed `Check:`
-line. Today the product is driven once, at setup, and nothing requires it again. About one in five benchmark
-patches counted as solved fails stronger tests (TestSuiteBench, reported), so passing tests is a weak signal
-that software works.
-
-**How.**
-
-- A new ship step, `product`, is added to `CHECKS` and `check()` in `engine/rail/steps.py`, after the `Check:`
-  lines. `check()` is shared by ship and CI (`engine/rail/cli.py`). It runs when the change touches the
-  projects of at least one surface:
-  1. `start`, then `ready` until it exits 0 or `ready_secs` pass, then `seed`. When a touched surface has
-     `preview = true`, **Preview environments** runs first and the check gets its URL.
-  2. For each touched surface, its `check`, with `RAIL_EVIDENCE` set to an empty folder for that surface and
-     `RAIL_URL` set to the local or preview address. Each is recorded as a `step` event named `product: NAME`,
-     with its duration, as `Check:` lines are recorded today.
-  3. `stop`, always, including after a failed check.
-- A failed driving check counts like a failed `Check:` line: it moves the retry budget and cap as any step
-  does (`rail docs retries`).
-- **When the product does not start.** When `start` or `ready` fails, the engine runs them once on the base
-  branch, as it does for a `verify` that fails. If the base fails as well, the attempt does not count and a
-  fix ticket for the base comes first, with the same wording as the red-base `verify` case. If only the
-  ticket's branch fails, the failure is the ticket's.
-  - A command the shell cannot find (exit 127) is `could_not_run`, as today.
-  - A missing tool is a `TOOL_MISSING` wait that costs no attempt; a failed probe afterwards is `TOOL_DOWN`
-    (`rail docs tools`, built).
-- Run in CI as well as at ship (open decision below): `provision` installs what the step needs on the runner.
-- Files: `engine/rail/steps.py` (the step, the red-base rule), `engine/rail/cli.py`, `engine/docs/journal.md`
-  (the `product` step), `engine/docs/loop.md` (the product step), `engine/docs/product.md`.
-
-**Kept when.** Gate cases, no model, on the fixture product:
-- A ticket whose change reaches a surface's project runs `start`, `ready`, `seed`, that surface's check and
-  `stop`; one that reaches no surface's project runs none; `stop` runs after a failed check.
-- With the planted fault on, the product step fails and counts against the retry budget; with it off, it
-  passes. The same in `rail ci`.
-- A `ready` that never exits 0 on the branch but does on the base fails the ticket; one that fails on both
-  costs no attempt and gives the red-base answer.
-
-Kept when every case behaves as written. In use, over the first 50 tickets per surface, count driving-check
-failures on patches where `verify` and every `Check:` line passed. If a surface's step caught nothing in 50
-tickets and its tickets show no revert or `caused_by` either, its recipe is revisited; the step is not removed
-on that alone, since a quiet surface may simply be healthy.
-
-**Waits for.** **Product surfaces in the config**. A host for the product's dependencies: a cloud session may
-not be able to start a database or a browser (see Assumed).
-
-**Open decision.** Does the product step run in CI as well as at ship? Proposed: yes. It is in `check()`,
-which both run, and `provision` installs what it needs on the runner.
-
-**Assumed, not verified.**
-- That a cloud session can start the product's dependencies (a database, a browser) with `provision`. The
-  machine is the session's to change (`engine/rail/init.py`), but a service that needs Docker may not run
-  there.
-
-#### Evidence from the product step
-
-Size: M.
-
-**What it does.** What each driving check saw is kept, so the reviewer and any later reader can see what the
-product did. Today a step event keeps only the step, status, result, patch id, detail, duration and a failure
-signature (a hash of the output); the output goes into the failure brief cut to 60 lines; the pull request's
-Evidence table says "ran, pass" per step.
-
-**How.**
-
-- Each driving check writes what it saw into `$RAIL_EVIDENCE`: the steps it took, requests and responses, the
-  command, output and exit code, and for a web page screenshots or a trace.
-- **Text evidence**: files under 64 KB each, 256 KB per surface in all (files over a cap are cut at it). It is
-  committed with the step events in a new journal file, `NN-evidence.json`: per surface, per file, its name
-  and contents, keyed by `patch_id`. Only the engine writes the journal (`rail docs journal`), so the worker
-  cannot rewrite it.
-- **Redaction**: before anything is committed, for each environment name a `[tools.NAME]` declares (`env`) and
-  for each `.env` value the worktree holds, its value becomes `[NAME]`. Evidence holds test identities and
-  test-mode responses, and a committed secret cannot be taken out of history. A secret the project never
-  declared is not caught.
-- **Binary evidence** (screenshots, traces, recordings) is never committed (open decision below). On a
-  session's machine it stays in the local cache (`.git/rail/cache/`, `engine/rail/project.py`). In CI the rail
-  workflow uploads `$RAIL_EVIDENCE` as a workflow artifact, so every pull request has it. `seed/rail.yml`
-  gains the upload step.
-- **The pull request's Evidence table** gains one row per surface, such as `product: web | ran, pass | 6
-  steps, 2 screenshots`, and the artifact's link when CI uploaded one. Rows come from step events today
-  (`engine/rail/steps.py`).
-- **The reviewer's brief** (`engine/rail/review.py`) gets the text evidence of the patch it reviews, so a
-  claim in the change can be held against what the product did. The reviewer can also run the check itself, as
-  it can run any command now.
-- Files: `engine/rail/steps.py` (`NN-evidence.json`, the Evidence rows), `engine/rail/review.py`,
-  `engine/docs/journal.md` (`NN-evidence.json`), `seed/rail.yml`.
-
-**Kept when.** Gate cases, no model: text lands in `NN-evidence.json`, cut at its caps; a value of a declared
-environment name and of a `.env` entry is replaced by its name; a binary file is never committed; the Evidence
-table has the surface's row; the reviewer's brief holds the text. Kept when every case behaves as written. The
-64 KB and 256 KB caps are revised from the numbers seen in use.
-
-**Waits for.** **The product step**.
-
-**Open decision.** Where does binary evidence live? Proposed: a workflow artifact in CI and the local cache on
-a session's machine; never the repository.
-
-**Assumed, not verified.**
-- That a GitHub Actions workflow artifact is reachable from the pull request for the length of a review
-  (artifacts expire under the repository's retention setting).
-- That 64 KB per file and 256 KB per surface keep the journal small enough; the in-use numbers set them.
-- That replacing declared values catches the secrets evidence can hold. The project's secret scan in `verify`
-  runs over the branch's commits, journal included (inferred: it scans `$RAIL_BASE..HEAD`, per
-  `engine/rail/init.py`).
-
-#### The machine-operable bar in `rail doctor`
-
-Size: M.
-
-**What it does.** `rail doctor` says which pieces a project lacks before the machine can start, seed and drive
-the product with no person, and whether each is a person's one-time act (`grant`) or work the machine can do
-(`ticket`). Today doctor says nothing about whether the product can be started, seeded or driven. The owner's
-basis (2026-11-24) is that a person's one-time act grants the machine a capability.
-
-**How.**
-
-- A project is machine-operable when it has each piece below. Plain `rail doctor` reports each and stays fast:
-  it runs no project command, only version commands and, with a remote, GitHub calls through `gh`.
-
-| Piece | What `rail doctor` checks | Missing: whose act |
-|---|---|---|
-| One command starts the product | `[product] start` and `ready` are set, or every surface is `cli` or `data` | A ticket: the machine writes the script |
-| A seeded test identity | `[product] seed` is set when a `web`, `api`, `agent` or `mobile` surface exists | A ticket for the seed files. A third party's test account is a grant |
-| A driving check per surface | each `[[surfaces]]` has a `check` that exists at its path; at least one surface | A ticket |
-| A place to run it | local always; for a surface with `preview = true`, the `[preview]` commands are set and their tool's names are present | The preview host's token is a grant (`[tools.NAME]`, `rail docs tools`) |
-| Probes that tell a broken machine from broken code | `[product] ready`; each tool's `probe` (`rail docs tools`) | A ticket for `ready`; a failing tool probe is a grant |
-| A way back | the `rail:revert` label (`rail docs tickets`) | Rail sets the label up. Prod is the project's own CD gate (`rail docs environments`) |
-| A machine that can run the surface | `mobile` with Android: `/dev/kvm` exists; with iOS: the machine is macOS | A grant: a runner with hardware acceleration, or a Mac |
-
-- **Each failed bar line adds `kind`.** Today a doctor line is a name, a pass or fail, and a detail. `kind` is
-  `grant` (a person's one-time act, named exactly: which token, which account, which machine) or `ticket` (the
-  machine can build it). `grant` is the same kind as the wait kind of that name (`rail docs states`).
-- **`rail doctor --product`** goes further: it runs `start`, `ready`, `seed`, each surface's check and `stop`
-  once on the base branch in a temporary worktree, and reports each as passed or failed.
-- **Init briefs** (`engine/rail/init.py`, both): ask for `[product]`, the surfaces, the agent-facing surface
-  (**Agent-facing surfaces**), and one ticket per `ticket` line, filed with `rail add`. The agent lists the
-  `grant` lines in its pull request for the person, as it lists today the repository settings only a person
-  can change.
-- **Sweep tickets** (`engine/rail/sweep.py`): after setup the sweep runs plain `rail doctor` and files a
-  ticket for a `ticket` line that is new since the last sweep.
-- Files: `engine/rail/doctor.py`, `engine/rail/init.py`, `engine/rail/sweep.py`, `engine/docs/product.md`.
-
-**Kept when.** Gate cases, no model: `rail doctor` names each missing bar piece with its kind; a `mobile`
-Android surface on a machine without `/dev/kvm` gives a `grant` line; `--product` runs each command once on
-the base; the init briefs ask for the product, the surfaces and the agent-facing surface; the sweep files a
-ticket for a new `ticket` line and none for an old one. Kept when every case behaves as written.
-
-**Waits for.** **Product surfaces in the config**. The preview row waits for **Preview environments**; the
-mobile row for **Mobile surfaces**.
-
-**Assumed, not verified.**
-- That `/dev/kvm` is a fair test for Android emulator acceleration on Linux (inferred).
-
-#### Driving-check numbers in `rail stats`
-
-Size: S.
-
-**What it does.** `rail stats` shows how often the product step fails and how often it catches what nothing
-else did. That second number is the measure of whether the step earns its cost.
-
-**How.**
-- One new line in `engine/rail/stats.py` and `engine/docs/stats.md`: driving-check failures per surface, and
-  how many of them came after `verify` and every `Check:` line had passed on the same patch.
-- The data is the `product: NAME` step events in the journal.
-
-**Kept when.** A gate case on fixture history gives the per-surface failures and the count that followed a
-passing `verify` and passing `Check:` lines. The in-use rule is in **The product step**.
-
-**Waits for.** **The product step**.
-
-#### Agent-facing surfaces
-
-Size: S.
-
-**What it does.** When a project's product has a surface built for agents (a CLI, an API, an MCP server,
-markdown docs), Rail knows it, and the grill asks whether a new behaviour is exposed there. Agents are a
-growing share of users: about 70% of Stripe CLI requests and 4.5 million Salesforce MCP calls in six weeks
-(reported; both vendor numbers). Rail asks; it does not build one (decided by the owner, 2026-11-25). Whether
-the product should have an agent-facing surface is the project's decision, made where its tickets come from.
-
-**How.**
-- `rail init` asks what the product's agent-facing surface is. When there is one, it is a surface of kind
-  `agent` with its driving check.
-- `engine/docs/grill.md` gains one line in "Draft first": when the project has an `agent` surface and the
-  request adds behaviour users get, the draft says whether the behaviour is exposed there, and if so a
-  `Check:` line drives it. This changes the contract, so it passes the grill's own test for a question (`rail
-  docs grill`, "Ask only what changes the contract").
-- The recipe for the surface is in **Per-surface recipes and the project's run skill**: MCP Inspector's CLI
-  calls one method per run, `tools/list` or `tools/call`, with stable exit codes. A ticket that exposes
-  something as a tool gets a contract test for it. A small eval of tasks a model should finish with the tools
-  is recorded, not a gate (Decision below).
-- Files: `engine/rail/init.py`, `engine/docs/grill.md`.
-
-**Kept when.** Gate case, no model: the init briefs ask for the agent-facing surface. The grill line is text,
-so it is marked untested until model tests run. No measure beyond that.
-
-**Waits for.** **Product surfaces in the config** (the `agent` kind).
-
-**Open decision.** Is the agent-facing eval a recorded score or a gate? Proposed: a recorded score. It runs a
-model, so its result varies between runs.
-
-**Assumed, not verified.**
-- The Inspector CLI's flags and exit codes: its docs page is under `/docs/draft/` (reported).
+Not built, because it waits for a feature outside these steps:
 
 #### Node for web surfaces of Go and Rust projects
 
@@ -523,29 +320,6 @@ checked on a machine with every toolchain**).
 
 **Waits for.** **Provision lines and toolchain pins per language**, and the per-surface recipes in
 `rail-verify`.
-
-#### Stats split by surface
-
-Size: S.
-
-**What it does.** `rail stats` gets a third split of outcomes, by the surface a ticket changed, beside `BY
-WORKER` and `BY LANGUAGE`.
-
-**How.**
-- Group by the surfaces whose projects a ticket's change reached, with the same rule as the other splits: a
-  group under five tickets is summed into `other`.
-- What a surface is, and the paths that mark one, come from `[[surfaces]]` in the product feature that defines
-  it (not built). Name that feature here when it is written.
-- Files: `engine/rail/stats.py`, `engine/docs/stats.md`.
-
-**Kept when.** A fixture with tickets on two surfaces shows two rows and a small group in `other`. Not
-verified: whether such a split shows anything the language split does not; read it on real tickets before
-keeping it.
-
-**Waits for.** The feature that defines `[[surfaces]]` (not built).
-
-**Assumed, not verified.**
-- That the surface split shows something the language split does not.
 
 ### 10. Priority
 
@@ -1327,7 +1101,7 @@ Blender add-on and a video pipeline as examples. Those go: Rail is for software 
 | Web | A Playwright script against the running app, as the seeded user, with deterministic assertions on what the page shows. An agent clicking through found the same bug in some runs and missed it in others for 22-28% of scenarios (reported, Waterloo seminar abstract), so an agent's exploratory pass is extra and repeated, never the check | Screenshots or a trace, the steps | Claiming done without opening the page; calling the API instead of clicking |
 | HTTP or RPC API | Real requests with assertions (Hurl, curl, grpcurl); responses checked against the schema (Schemathesis, against a local or preview instance only, since it sends many invalid requests, reported). For a rewrite, the same requests to old and new, compared | Each request and response | Mocking the thing under test |
 | Command line | The built binary on real files in a temporary folder, error cases and exit codes included. Snapshot tools that an agent can rewrite in one command (`TRYCMD=overwrite`, reported) count as changed tests | Command, output, exit code | Testing the library and never the binary; accepting new snapshots of broken output |
-| Agent-facing | MCP Inspector's CLI (see **Agent-facing surfaces**). A ticket that exposes something as a tool gets a contract test for it. A small eval is recorded, not a gate | The calls and results; the eval score | Testing the handler and never the tool as an agent sees it |
+| Agent-facing | MCP Inspector's CLI, for a surface of kind `agent` (`rail docs product`). A ticket that exposes something as a tool gets a contract test for it. A small eval is recorded, not a gate | The calls and results; the eval score | Testing the handler and never the tool as an agent sees it |
 | Data job | The whole job on a real sample into a dev schema, with data-contract checks; then replayed with late, duplicate and out-of-order input, and run twice to show it is idempotent. Replaying found 7.0-79.2% of snapshot-certified pipelines silently wrong (ArrivalBench, arXiv 2610.02363, reported) | Row counts, sample rows, contract results | One clean run taken as proof |
 | Integration with a third party | The provider's test mode; a retry test and an idempotency test; secrets from the environment, tokens scoped | Requests, responses, the retry run | A mock of the provider standing in for its test mode |
 | Mobile | See **Mobile surfaces** | | |
@@ -1347,12 +1121,12 @@ fixture project with no driving check and a hidden fault the recipe's check shou
 fixture for each surface where one is cheap to write. Two runs for each fixture with the new skill and two
 with today's. Kept when the new skill's check catches the hidden fault in at least three quarters of the runs,
 its negative control was run in at least three quarters (seen in the transcript), and it does worse than
-today's on no surface. In use, per **The product step**: a quiet surface's recipe
+today's on no surface. In use, per the product step (`rail docs product`): a quiet surface's recipe
 is revisited after 50 tickets.
 
 **Waits for.** The owner restarting the paused model tests. Until then the recipes are built and their wording
 is marked untested (decided by the owner, 2026-11-26: a step that needs model runs builds its deterministic
-part and marks its wording untested). **Product surfaces in the config** for the generated skill. The skill's
+part and marks its wording untested). The surfaces in the config (`rail docs product`, built) for the generated skill. The skill's
 name waits on the pilot.
 
 **Open decision.** What is the project skill's file name? It must be one that Claude Code's `run` skill finds,
@@ -2128,7 +1902,7 @@ tool = ""                                 # the [tools.NAME] whose token the com
   `url`, `created`) with the step events, and reuses it for later patches of the same ticket, running `seed`
   again.
 - **Where the commands run.** `create`, `wait` and `seed` run where the product step runs: in the worker's
-  session at ship, and in pull-request CI when **The product step** keeps the step there (CI then reuses the
+  session at ship, and in pull-request CI, where the product step runs too (`rail docs product`) (CI then reuses the
   ticket's preview by the id in its journal, and creates one only when none is open). `destroy` and `list` run
   in the session that runs `cleanup()` or `rail next`, never in pull-request CI. Each place runs the ticket
   branch's own code, so nothing they hold may be a production secret or production data: `seed` loads only
@@ -2173,7 +1947,7 @@ in `RAIL_URL`, `seed` on each patch; `destroy` at merge, at `rail drop`, and for
 hand; `destroy` twice passes; with `list`, an orphan is destroyed; over `max_open`, the ticket rests; `rail
 doctor` reports a missing preview command or tool name. Kept when every case behaves as written.
 
-**Waits for.** **The product step**, **Product surfaces in the config**. A person's grant of the preview
+**Waits for.** Nothing built: the product step and the surfaces are (`rail docs product`). A person's grant of the preview
 host's token, and a preview host. In CI, the tool marked `ci = true` (built).
 
 **Open decision.**
@@ -2196,15 +1970,14 @@ session, runs Linux (reported).
   (reported).
 - The `rail doctor` bar line: for `mobile` with Android, `/dev/kvm` must exist; with iOS, the machine must be
   macOS. When it fails the line has `kind = grant`: a runner with hardware acceleration, or a Mac.
-- `mobile` is already a valid `kind` in the config (**Product surfaces in the config**), and a `mobile`
-  surface needs a seeded test identity (**The machine-operable bar in `rail doctor`**).
+- `mobile` is already a valid `kind` in the config, and a `mobile` surface needs a seeded test identity
+  (`rail docs product`).
 - Not covered: iOS in a Linux cloud session.
 
 **Kept when.** Gate case, no model: a `mobile` Android surface on a machine without `/dev/kvm` gives a `grant`
 line (the case is part of the bar's). The recipe has no model test of its own; it is marked untested.
 
-**Waits for.** **Per-surface recipes and the project's run skill**, **The machine-operable bar in `rail
-doctor`**. A machine with hardware acceleration or a Mac. Last in the order of the product features.
+**Waits for.** **Per-surface recipes and the project's run skill**. A machine with hardware acceleration or a Mac. Last in the order of the product features.
 
 **Assumed, not verified.**
 - That `/dev/kvm` is a fair test for Android emulator acceleration on Linux (inferred).

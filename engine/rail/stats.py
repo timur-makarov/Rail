@@ -154,6 +154,18 @@ def _worker_of(t):
     return ":".join(part for part in (last.get("model"), last.get("effort")) if part) or NO_MODEL
 
 
+def _driven(events):
+    """{surface: {'runs', 'failed'}}: how often a ship ran each surface's driving check on this ticket (the
+    `product:NAME` step events, rail docs product), and how often it failed. A check that could not run is neither."""
+    found = {}
+    for e in events:
+        if e.get("event") == "step" and (e.get("step") or "").startswith("product:") and e.get("status") == "ran":
+            row = found.setdefault(e["step"].split(":", 1)[1], {"runs": 0, "failed": 0})
+            row["runs"] += 1
+            row["failed"] += e.get("result") == "fail"
+    return found
+
+
 def _projects_of(project, t):
     """The projects whose paths the ticket's scope reaches, as the base branch has them now (rail docs languages)."""
     accepted = next((e for e in t.events if e.get("event") == "accepted"), {})
@@ -386,6 +398,7 @@ def collect(project, tickets, since=None, states=None, now=None):
     old = (now if now is not None else time.time()) - held_days * 86400
     outcomes = {tier: _outcome_row() for tier in TIERS}
     by_worker, by_profile, by_project, names_cause, counted = {}, {}, {}, 0, []
+    by_surface, driving = {}, {}
     fixed_by_person, under = _held_a_kind(tickets), {"tickets": 0, "kinds": Counter()}
     workers, acted = {}, {"tickets": 0, "cost_usd": 0.0}  # worker runs by model and effort; tickets a person acted on
     flaky = {}  # command -> the merged tickets it was flaky on, its flakes and its runs at ship
@@ -461,10 +474,17 @@ def collect(project, tickets, since=None, states=None, now=None):
                 w["resume_failed"] += bool(e.get("resume_failed"))
         names_cause += bool(t.ticket and t.ticket.get("caused_by"))
         mine = _projects_of(project, t)
+        driven = _driven(t.events)
+        for name, seen in driven.items():
+            total = driving.setdefault(name, {"tickets": 0, "runs": 0, "failed": 0})
+            total["tickets"] += 1
+            total["runs"] += seen["runs"]
+            total["failed"] += seen["failed"]
         for out in (outcomes[tier], by_worker.setdefault(_worker_of(t), _outcome_row()),
                     *[by_profile.setdefault(name, _outcome_row())
                       for name in dict.fromkeys(p["profile"] for p in mine if p["profile"])],
-                    *[by_project.setdefault(p["name"], _outcome_row()) for p in mine]):
+                    *[by_project.setdefault(p["name"], _outcome_row()) for p in mine],
+                    *[by_surface.setdefault(name, _outcome_row()) for name in driven]):
             out["merged"] += 1
             out["reverted"] += nn in reverted
             out["caused_fix"] += nn in caused
@@ -543,7 +563,11 @@ def collect(project, tickets, since=None, states=None, now=None):
         "since": since, "merged": merged, "left_out": len(tickets) - merged,
         "outcomes": {"held_days": held_days, "tiers": {tier: _outcome_done(row) for tier, row in outcomes.items()},
                      "names_cause": names_cause, "by_worker": _split(by_worker), "by_profile": _split(by_profile),
-                     "by_project": _split(by_project)},
+                     "by_project": _split(by_project), "by_surface": _split(by_surface)},
+        # Each surface's driving check on the merged tickets. The product step runs last, so a failure here came
+        # after verify, every Check: line and the sensors had passed on the same patch: nothing else caught it.
+        "driving": {name: dict(row, share=round(row["failed"] / row["runs"], 3) if row["runs"] else None)
+                    for name, row in sorted(driving.items())},
         "time": timing.collect(tickets, merged_at, counted),
         "dev_broken": dev_broken(tickets, merged_at, start),
         # Commands that both failed and passed on the same code, in the merged tickets: flakes of the runs counted.
@@ -701,6 +725,16 @@ def render_flakes(data):
         for name, r in rows.items()])]
 
 
+def render_driving(data):
+    rows = data.get("driving") or {}
+    if not rows:
+        return []
+    return ["", *_table(["DRIVING CHECKS", "tickets", "runs", "failed", "share"], [
+        [name, r["tickets"], r["runs"], r["failed"], _pct(r["share"])] for name, r in rows.items()]),
+        "A driving check runs after verify, every Check: line and the sensors passed, so nothing else caught a failure"
+        " here."]
+
+
 def render_worker(data):
     """What the worker runs of the merged tickets cost and how they ended, once rail work ran one."""
     runs = data["worker"]["runs"]
@@ -791,7 +825,7 @@ def render_outcomes(data):
                      f" from the smoke check's issue to the revert's merge.")
     head = ["merged", "reverted", "caused a fix", "first try", "cost each"]
     for title, split in (("BY WORKER", out["by_worker"]), ("BY LANGUAGE", out["by_profile"]),
-                         ("BY PROJECT", out.get("by_project") or {})):
+                         ("BY PROJECT", out.get("by_project") or {}), ("BY SURFACE", out.get("by_surface") or {})):
         if split:
             lines += ["", *_table([title, *head], [
                 [name, r["merged"], r["reverted"], r["caused_fix"], r["first_try"], _money(r["cost_per_ticket"])]
@@ -856,6 +890,7 @@ def render(data):
     lines += render_guides(data)
     lines += timing.render(data["time"], _table)
     lines += render_flakes(data)
+    lines += render_driving(data)
     lines += render_worker(data)
     lines += render_tools(data)
     lines += render_triage(data)
