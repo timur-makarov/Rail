@@ -1181,8 +1181,10 @@ in the order they would be built.
 These features write or run commands of tools a machine may lack: scanners, type checkers, linters, mutation
 tools. A line nobody ran is a guess, so each is built on a machine that has the tools and is checked there. A
 cloud session has them when its environment's setup script installs them; a session without that script may
-be refused the installs. The session of 2026-11-26 has gitleaks, pip-audit, basedpyright, govulncheck and
-cargo-deny, installed by hand at the owner's word, and lacks lizard, jscpd and the mutation tools.
+be refused the installs. For work on Rail itself the list of tools is `tests/tools.sh`, which an environment's
+setup script calls. Its lines for gitleaks, pip-audit, basedpyright, govulncheck and cargo-deny were run; its
+lines for oxlint, lizard, jscpd and the mutation tools were not, and the first session of an environment that
+calls the file shows which of them work.
 
 #### Provision lines and toolchain pins per language
 
