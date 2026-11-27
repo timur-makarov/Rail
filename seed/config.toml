@@ -163,6 +163,19 @@ setup = ".claude/skills/rail-verify/SKILL.md"
 # violations_exit = [1]                   # violations printed, one a line: path:line: message
 # fix = "Call the code that already does this, or move both copies into one function."
 
+# [product]                               # reader: ship and CI, the product step, and doctor (rail docs product)
+# start = "scripts/start.sh"              # starts the product in the ticket's worktree and returns; RAIL_TICKET is set
+# ready = "scripts/ready.sh"              # exits 0 once the product answers; changes nothing
+# seed = "scripts/seed.sh"                # loads test data and the test identity from files in the repository
+# stop = "scripts/stop.sh"                # stops what start started; run whatever failed
+# ready_secs = 120                        # how long ready may take before the product counts as not started
+
+# [[surfaces]]                            # reader: ship and CI, the product step, and doctor; one way users reach
+# name = "web"                            # the product, and the script that drives it
+# kind = "web"                            # web, api, cli, agent, data, integration or mobile
+# projects = ["frontend", "backend"]      # a change that reaches one of these projects runs this surface's check
+# check = ".rail/checks/web.sh"           # writes what it saw into $RAIL_EVIDENCE; counts as a test
+
 [[rules]]                                 # reader: ship and CI; structure rules on added lines (rail docs rules)
 id = "no-new-suppressions"
 forbid = ["eslint-disable", "@ts-ignore", "# noqa", ".skip("]

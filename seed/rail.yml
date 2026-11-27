@@ -17,7 +17,16 @@ jobs:
         run: .rail/bin/rail ci
         env:
           RAIL_BRANCH: ${{ github.head_ref }}
+          RAIL_EVIDENCE: ${{ runner.temp }}/rail-evidence
           # A check that needs a key: one line for each name of a tool declared `ci = true` in .rail/config.toml, as
           #   PAY_TEST_KEY: ${{ secrets.PAY_TEST_KEY }}
           # A ticket branch runs its own copy of this file, so pass test and dev keys only and never every secret at
           # once (rail docs tools). rail doctor checks these lines.
+      # What the product step's driving checks saw, screenshots and traces among them (rail docs product).
+      - name: keep the evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rail-evidence
+          path: ${{ runner.temp }}/rail-evidence
+          if-no-files-found: ignore

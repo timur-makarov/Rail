@@ -107,6 +107,19 @@ READERS = {
     "rules": "ship and CI: structure rules on added lines and files (rail docs rules)",
     "sensors": "ship and CI, last: each entry runs a tool when the change touches its paths, and a line of its output"
                " on a line the change adds fails the step (rail docs sensors)",
+    "product.start": "ship and CI, the product step, and doctor: starts the product in the ticket's worktree and"
+                     " returns, with RAIL_TICKET set so that two tickets take a port and a database each (rail docs"
+                     " product). Empty: nothing is started",
+    "product.ready": "ship and CI, the product step: exits 0 once the product answers, and changes nothing; run"
+                     " every half second until it does",
+    "product.seed": "ship and CI, the product step: loads test data and the test identity from files in the"
+                    " repository, once the product is ready",
+    "product.stop": "ship and CI, the product step: stops what start started; run whatever failed",
+    "product.ready_secs": "ship and CI, the product step: the seconds ready may take before the product counts as"
+                          " not started",
+    "surfaces": "ship and CI, the product step, and doctor: each [[surfaces]] entry is one way users reach the"
+                " product: its name, its kind, the projects whose change reaches it, and the script that drives it"
+                " (rail docs product)",
     "init.skill_dirs": "init: the folders, from the repository root, that rail init writes the skills to. An agent"
                        " other than Claude Code reads SKILL.md files from a folder of its own: add it, and run rail"
                        " init again. The [guides] pages that are skills name the first",

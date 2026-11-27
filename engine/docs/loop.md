@@ -127,7 +127,9 @@ also takes in issues labelled `rail`, and every command that meets a wait labels
 In the ticket's worktree, `advance` commits your in-scope changes and ships: it rebases onto a moved base,
 then runs ticket lint, the ASSUMED rows, scope, structure rules, the migration fields, size, doc-lint,
 `verify` (each project's that the change reaches, as a step `verify:NAME`, then `[commands] verify`; `rail docs
-languages`), each `Check:` line, and the sensors the change touches (`rail docs sensors`). When all pass and the
+languages`), each `Check:` line, the sensors the change touches (`rail docs sensors`), and, when the change
+reaches a surface of the product, the product step: it starts the product, drives each such surface and stops
+it (`rail docs product`). When all pass and the
 change edits test files the base branch has, it runs `verify` and the `Check:` lines once more with the base's
 version of those files, and then has a fresh run answer each question that or another fact of the patch raises
 (`rail docs triage`). Then it runs the review, unless every changed file is in

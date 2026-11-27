@@ -19,7 +19,7 @@ from .util import RailError, family, globs_overlap, parse_iso
 
 REVIEW_STEPS = ("review", "security", "refuter", "sweep")
 STEP_ORDER = ("setup", "rebase", "ticket-lint", "assumptions", "scope", "change", "rules", "migration", "size", "doc-lint",
-              "verify", "checks", "sensors", "triage", *REVIEW_STEPS, "merge")
+              "verify", "checks", "sensors", "product", "triage", *REVIEW_STEPS, "merge")
 NO_MODEL = "(not reported)"
 NO_RUNS = {"runs": 0, "cost_usd": 0.0, "blocking": 0, "fixed": 0}
 

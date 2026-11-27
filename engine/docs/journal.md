@@ -10,6 +10,7 @@ stores state. Never edit it by hand: the guard denies it.
 | `NN-review.json` | The review runs: each run's findings as the reviewer wrote them |
 | `NN-advice.md` | What consult advised, one section per consult |
 | `NN-summary.md` | A sweep ticket only: what the sweep found |
+| `NN-evidence.json` | Only where a ship drove the product: `{patch_id: {surface: {files: {name: text}, cut, left}}}` for the last shipped patch, with `cut` the files cut at a cap and `left` the files that are not text and stay on the machine (`rail docs product`) |
 | `NN-coverage.json` | Only where the ticket's ship was answered about a folder inside no project: `{folder: {types, answer, holds, covered_by}}` (`rail docs languages`) |
 
 ## Events: `NN-events.jsonl`
@@ -91,9 +92,11 @@ reason. Ticket lint refuses a `VERIFIED: decided, not checked:` row with nothing
 | `size` | Ship, CI | Never. On an AUTO ticket, a count over `[size] cap` writes `split_offered` at the first ship that meets it and stops there; after that the ship goes on. Size raises no tier |
 | `doc-lint` | Ship, CI | `ARCHITECTURE.md` no longer matches the tree |
 | `verify` | Ship, CI | The command fails. When it fails on the base branch too, the event has `counted: false` |
-| any ship step | Ship | A command that couldn't run has `counted: false`. A failed `verify`, `checks` or `sensors` with a declared tool out of reach has `counted: false` and `tools_down` (each tool and what its probe said): `rail docs retries` |
+| any ship step | Ship | A command that couldn't run has `counted: false`. A failed `verify`, `checks`, `sensors` or product step with a declared tool out of reach has `counted: false` and `tools_down` (each tool and what its probe said): `rail docs retries` |
 | `checks` | Ship, CI | A `Check:` line fails; `detail` names it |
 | `sensors` | Ship, CI, last, when the change touches a sensor's `paths` | A sensor reports a violation on a line the change adds; `detail` counts them and names the sensors. `could_not_run` when a sensor ends with an exit it doesn't declare (`rail docs sensors`). Passed or failed, the event has `excused` when a `SENSOR(NN)` comment answered a violation: for each, `sensor`, `path`, `line`, `message`, and the comment's `marker_line` and `marker` |
+| `product` | Ship, CI, last, when the change reaches a surface | `start`, `ready` or `seed` fails, and `detail` names which, as `ready: not ready after 120s`; or `stop` fails after everything else passed. When the product does not start on the base branch either, `detail` is `red base` and the event has `counted: false` (`rail docs product`) |
+| `product:NAME` | Ship, CI, after `product`, for each surface the change reaches | The surface's driving check fails. `detail` says what it left as evidence, as `2 evidence files, 1 more left on the machine` |
 | `triage` | `advance`, once for each open question, before any review; ship, with no run, when an answer that stopped this same patch still stands; CI | The answer stops the change or holds it for a person; `detail` is the question, its type and the answer, as `Q1 old-test: lost`, and the event has `question` and `type`. A run past `timeout_secs`, one whose output is invalid and one whose evidence fails the engine's check fail with `counted: false`. In CI: a question about the patch is open, or its answer stops the change |
 | `review`, `security` | `advance` | The run leaves a blocking finding open. A run past `timeout_secs` fails with `detail: "timeout"`, and a run whose output is invalid with `detail: "invalid output: ..."`, both with `counted: false`. No run and no step when the change needs no review |
 | `refuter` | `advance`; `rail answer` | The refuter upholds the finding. A pass means it dismissed it. On an AUTO ticket, `rail answer` writes a failed `refuter` step, with no run, when the author disputes a finding a refuter already upheld: the verdict stands, and the dispute counts toward the retry cap |

@@ -131,7 +131,7 @@ def family(step):
 def tried_help(step, ticket):
     """What a brief says after a failed attempt at the work itself: verify, a Check: line or a sensor. A failed lint
     or scope check is a slip, not an attempt."""
-    if family(step) not in ("verify", "checks", "sensors"):
+    if family(step) not in ("verify", "checks", "sensors", "product"):
         return ""
     return (f"Before you try again, write one line under \"## Tried\" in {ticket}: what you tried and how it failed."
             " The next attempt reads it, and it may start with none of what you know now.")

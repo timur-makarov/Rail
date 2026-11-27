@@ -1290,8 +1290,12 @@ def red_base_ticket(project, facts):
     output = project.cache_read("red-base", "output") or ""
     step = project.cache_read("red-base", "step") or "verify"  # a project's own verify:NAME, or the repository's
     request = f"{step} fails on {project.base} at {red[:12]}:\n\n```\n{output}\n```"
-    return intake_one(project, facts, f"Make {step} pass on {project.base} again", request, f"red-base#{red[:12]}",
-                      "engine")
+    title = f"Make {step} pass on {project.base} again"
+    if step == "product":
+        request = (f"The product does not start on {project.base} at {red[:12]} ([product] start and ready in"
+                   f" .rail/config.toml):\n\n```\n{output}\n```")
+        title = f"Make the product start on {project.base} again"
+    return intake_one(project, facts, title, request, f"red-base#{red[:12]}", "engine")
 
 
 def auto_intake(project, facts):

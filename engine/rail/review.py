@@ -324,6 +324,8 @@ def brief(project, f, role, ledger, disputed=None):
     reviewer_tools = tools.lines(tools.declared(project, review=True), review=True)
     checked = checks_changed(project, t, ref, patch)
     loose = unchecked(project, ref)
+    from . import product
+    driven = product.brief_lines(product.evidence_of(project, ref, t.id, patch))
     parts = [
         f"# Review brief: ticket {t.id}, {f.tier}", "", f"This run's job: {job}", "",
         "## The ticket", ticket_text.strip(), "",
@@ -348,6 +350,12 @@ def brief(project, f, role, ledger, disputed=None):
            " yours to read. When a file is of a kind a revert does not undo, such as infrastructure code or a schema,"
            " list it in `kinds`.", *[f"- {path}" for path in loose], ""]
           if loose and role in ("review", "security") else []),
+        # Not tested with a model run: the wording of this section.
+        *(["## What the product did",
+           "The product was started with this change in it, and the driving check of each surface the change reaches"
+           " ran against it and passed. Below is what each check wrote down. Hold what the change says it does against"
+           " it: a behaviour the ticket asks for that no line below shows was not driven.", *driven, ""]
+          if driven and role in ("review", "security") else []),
         *(["## Tools", *reviewer_tools, ""] if reviewer_tools else []),
         "## The diff", "```diff", diff, "```", "",
         "## Areas this change touches", "| Area | Paths | Holds |", "|---|---|---|", rows, "",

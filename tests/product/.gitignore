@@ -1,0 +1,4 @@
+.claude/worktrees/
+.run/
+.env
+__pycache__/

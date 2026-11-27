@@ -82,6 +82,8 @@ class Run:
         for name in names:
             if name == "sensors" and not self.project.config["sensors"]:
                 continue  # a project with no sensor has no such step
+            if name == "product" and not self.project.config["surfaces"]:
+                continue  # nor has a project with no surface
             self.steps.append({"step": name, "status": "not_run"})
 
     @property
@@ -321,7 +323,7 @@ def scratch(project, commit):
 # --- ship and CI -------------------------------------------------------------------
 
 CHECKS = ["ticket-lint", "assumptions", "scope", "rules", "migration", "size", "doc-lint", "verify", "checks",
-          "sensors"]
+          "sensors", "product"]
 
 
 def _stop(run, step):
@@ -414,9 +416,12 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
     for command in ticket.checks():
         if not run_command(project, cwd, nn, "checks", command, run, patch_id, label=command, again=again):
             return _stop(run, "checks")
-    # Last, so that verify and the Done Contract speak first.
-    from . import sensors
+    # After verify and the Done Contract, so that they speak first.
+    from . import product, sensors
     if not sensors.step(project, nn, ref, cwd, run, patch_id, changed):
+        return _stop(run, "sensors")
+    # Last: starting the product and driving it is the dearest check, so everything cheaper has passed.
+    if not product.step(project, nn, ref, cwd, run, patch_id, changed):
         return None
     return tier
 
@@ -500,18 +505,23 @@ def ship(project, f, run):
         # A failure that may be the machine's costs no attempt; the second in a row waits for a person (TOOL_DOWN).
         if last.get("status") == "could_not_run":
             last["counted"] = False  # the shell could not start the command: nothing was checked
-        elif family(run.failure[0]) in ("verify", "checks", "sensors"):
+        elif family(run.failure[0]) in ("verify", "checks", "sensors", "product"):
             down = tools.down(project)
             if down:  # a declared tool is out of reach: the check may have failed for that alone
                 last["counted"], last["tools_down"] = False, down
                 run.failure = (run.failure[0], f"{run.failure[1]}\n\nA tool the project declares is out of reach"
                                                f" ({tools.down_said(down)}). {tools.DOWN_HELP}")
-    if (tier is None and run.failure and family(run.failure[0]) == "verify" and last.get("status") != "could_not_run"
-            and not last.get("tools_down")):
+    failed = run.failure[0] if run.failure else ""
+    on_base = family(failed) == "verify" or (failed == "product" and last.get("detail") != "stop failed")
+    if tier is None and on_base and last.get("status") != "could_not_run" and not last.get("tools_down"):
         # A red base spends no budget: two tickets that each pass can break main together. A verify that could
-        # not start is the machine's lack, not the base's: it is never taken for a red base.
-        failed = run.failure[0]
-        red = base_fails_verify(project, failed)
+        # not start is the machine's lack, not the base's: it is never taken for a red base. A product that does
+        # not start is held against the base in the same way; a surface's failed check is the ticket's own.
+        if failed == "product":
+            from . import product
+            red = product.base_fails(project)
+        else:
+            red = base_fails_verify(project, failed)
         if red:
             run.events[-1]["counted"] = False
             run.events[-1]["detail"] = "red base"
@@ -519,7 +529,9 @@ def ship(project, f, run):
             project.cache_write("red-base", "base", gitx.rev(project.base_ref, project.root))
             project.cache_write("red-base", "output", red)
             project.cache_write("red-base", "step", failed)
-            run.failure = (failed, f"{failed} fails on the base branch too, so this attempt doesn't count. rail next"
+            what = "the product does not start on the base branch either" if failed == "product" else \
+                f"{failed} fails on the base branch too"
+            run.failure = (failed, f"{what}, so this attempt doesn't count. rail next"
                                    " opens one ticket that fixes the base; this ticket's ship waits until it merges.")
     if tier is None:
         return run
@@ -581,6 +593,8 @@ def describe(project, t, ticket, tier):
             continue
         name = f"check: {e.get('detail')}" if e.get("step") == "checks" else e.get("step")
         said = "could not run" if e.get("status") == "could_not_run" else f"{e.get('status')}, {e.get('result')}"
+        if (e.get("step") or "").startswith("product:") and e.get("detail"):
+            said += f": {e['detail']}"  # what the surface's driving check left as evidence
         rows.append(f"| {name} | {said} |")
     from .review import Ledger, load_doc, needs_review
     ledger = Ledger(t.events, load_doc(t.review_text, t.id))

@@ -56,6 +56,9 @@ DEFAULTS = {
     "sensors": [],
     "tools": {},
     "projects": [],
+    # How the product is started, and each way users reach it with the script that drives it (rail docs product).
+    "product": {"start": "", "ready": "", "seed": "", "stop": "", "ready_secs": 120},
+    "surfaces": [],
 }
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -63,8 +66,10 @@ RULE_KEYS = {"id": str, "files": str, "forbid": list, "only_in": str, "allow": l
              "flag": bool}
 PROJECT_KEYS = {"name": str, "paths": list, "setup": str, "verify": str, "uses": list}
 SENSOR_KEYS = {"id": str, "paths": list, "command": str, "ok_exit": list, "violations_exit": list, "fix": str}
+SURFACE_KEYS = {"name": str, "kind": str, "projects": list, "check": str}
 # Arrays of tables: each item's keys and types, and the key every item needs.
-TABLE_ARRAYS = {"rules": (RULE_KEYS, "id"), "projects": (PROJECT_KEYS, "name"), "sensors": (SENSOR_KEYS, "id")}
+TABLE_ARRAYS = {"rules": (RULE_KEYS, "id"), "projects": (PROJECT_KEYS, "name"), "sensors": (SENSOR_KEYS, "id"),
+                "surfaces": (SURFACE_KEYS, "name")}
 
 
 def _suggest(key, known):
@@ -171,4 +176,25 @@ def load(root):
                 raise RailError(f"config: sensors[{n}].{key} must be a list of exit codes")
         if not all(isinstance(path, str) for path in sensor.get("paths", [])):
             raise RailError(f"config: sensors[{n}].paths must be a list of strings")
+    from . import product
+    for n, surface in enumerate(config["surfaces"]):
+        if not surface["name"].strip() or ":" in surface["name"] or "/" in surface["name"] \
+                or surface["name"] in [s["name"] for s in config["surfaces"][:n]]:
+            raise RailError(f"config: surfaces[{n}] needs a name no other surface has, with no ':' or '/' in it;"
+                            f" got '{surface['name']}'")
+        if surface.get("kind") not in product.KINDS:
+            raise RailError(f"config: surfaces[{n}].kind is '{surface.get('kind', '')}', which is no kind of surface"
+                            f"{_suggest(surface.get('kind', ''), product.KINDS)}. The kinds: {', '.join(product.KINDS)}")
+        if not all(isinstance(name, str) for name in surface.get("projects", [])):
+            raise RailError(f"config: surfaces[{n}].projects must be a list of strings")
+        path = product.check_path(surface)
+        if path.startswith(("/", "..")):
+            raise RailError(f"config: surfaces[{n}].check is the path of a script in the repository; got"
+                            f" '{surface['check']}'")
+        # A driving check is a test: a change that edits one is held against the base's version of it (rail docs
+        # triage). Nothing is written: the path counts for as long as the surface names it.
+        if path and path not in config["tests"]["paths"]:
+            config["tests"]["paths"] = [*config["tests"]["paths"], path]
+    if config["product"]["ready_secs"] <= 0:
+        raise RailError("config: product.ready_secs must be above 0")
     return config

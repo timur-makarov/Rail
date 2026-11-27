@@ -963,8 +963,11 @@ ROWS = [
     ("VERIFY_ASSUMPTIONS", "agent", "agent_task",  lambda f: f.state == "implementing" and f.open_assumptions,
      _facts_assumptions),
     ("RED_BASE",           "none",  "rest",        lambda f: f.state == "implementing" and f.red_base and f.last_fail
-                                                   and (f.last_fail.get("step") or "").split(":")[0] == "verify" and not f.dirty,
-     lambda f: f"verify fails on the base branch too, so ticket {f.id} waits: a fix ticket for the base comes first."),
+                                                   and ((f.last_fail.get("step") or "").split(":")[0] == "verify"
+                                                        or f.last_fail.get("step") == "product") and not f.dirty,
+     lambda f: (f"the product does not start on the base branch either, so ticket {f.id} waits: a fix ticket for the"
+                f" base comes first." if f.last_fail.get("step") == "product" else
+                f"verify fails on the base branch too, so ticket {f.id} waits: a fix ticket for the base comes first.")),
     ("CONFLICT",           "agent", "agent_task",  lambda f: f.state == "implementing" and f.conflict and not f.dirty,
      _facts_conflict),
     ("RED_CHECK",          "agent", "agent_task",  lambda f: f.state == "implementing" and f.ci == "red" and not f.dirty,

@@ -228,6 +228,7 @@ the pages, which are also in [`engine/docs/`](engine/docs):
 | Cloud sessions, and running with no session open | [`cloud`](engine/docs/cloud.md), [`github-runner`](engine/docs/github-runner.md) |
 | GitHub settings and pull requests | [`github`](engine/docs/github.md) |
 | Structure rules and sensors | [`rules`](engine/docs/rules.md), [`sensors`](engine/docs/sensors.md) |
+| Starting the product and driving it at ship | [`product`](engine/docs/product.md) |
 | Services, keys and MCP servers the work uses | [`tools`](engine/docs/tools.md) |
 | The guards | [`guards`](engine/docs/guards.md) |
 | Guides named in the brief, and the skills | [`guides`](engine/docs/guides.md) |
