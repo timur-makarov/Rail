@@ -44,12 +44,16 @@ The pages in `.claude/skills/` are Claude Code skills, so a session with no tick
 are for the time before a ticket exists, with a person present. Each is optional, and stopping after any of
 them is a complete outcome. `rail-debug` serves any failure whose cause isn't known yet, and `rail-verify` a
 ticket that improves how the project is verified; the engine gives each in the brief only at its own step.
+`rail-tool` serves a ticket that adds a tool (`rail docs tools`). No situation's brief carries it: an agent
+finds it by its description, and `rail-grill` names it when a request needs a tool the project has not
+declared. Its text has not been tested with a model run.
 
 | Skill | Use it when | It produces |
 |---|---|---|
 | `rail-blast-radius` | The change touches existing code | Scope, tier and expected size |
 | `rail-grill` | The request should become a ticket | The ticket, filed (`rail docs grill`) |
 | `rail-slice` | The work is more than one ticket | Several tickets with their order |
+| `rail-tool` | A ticket adds a tool, or a request needs one that is not declared | The declaration, its probe, and what a person sets |
 
 **Where the skills are written.** `SKILL.md` is a format several agents read, each from a folder of its own.
 `[init] skill_dirs` lists the folders `rail init` writes the skills to, `.claude/skills` by default. For a

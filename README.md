@@ -211,7 +211,8 @@ branch.
 for building a ticket, debugging a repeated failure, answering review findings or resolving a conflict. The
 `[guides]` table in `.rail/config.toml` says which page, or which of its sections, each situation's brief
 carries. `rail init` also adds Claude Code skills to `.claude/skills/` that help a person turn an idea into a
-ticket (`rail-blast-radius`, `rail-grill`, `rail-slice`). A guide is a hint: nothing fails when an agent
+ticket (`rail-blast-radius`, `rail-grill`, `rail-slice`), and one that walks an agent through adding a tool
+(`rail-tool`). A guide is a hint: nothing fails when an agent
 ignores it, and `rail stats` shows whether it helps. [`guides`](engine/docs/guides.md) has the situations and how to write a page.
 
 Everything else is in the docs that ship with the engine, readable before `rail init` too. `rail docs` lists

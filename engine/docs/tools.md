@@ -24,6 +24,10 @@ ci = true                          # a test or dev key: a pull request's run may
 `.rail/config.toml` is in `person_paths`, so a ticket that adds or changes a tool is a person's to approve.
 Giving a machine a key is a person's act too.
 
+The skill `rail-tool` walks an agent through adding one: the ticket, the declaration, a probe run both ways,
+the name in each file that reads it, the line in `rail.yml` for a `ci = true` key, and the list of what a
+person sets. `rail-grill` names it when a request needs a tool the project has not declared.
+
 ## What the engine does with a declaration
 
 **Briefs list the tools.** The implement brief lists every tool with its `use` line and the names it reads.

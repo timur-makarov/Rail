@@ -361,6 +361,38 @@ command = "python3 {FAKE_WORKER}"
         self.assertNotIn("TOOLS", p.rail("stats", raw=True).stdout)
 
 
+class Skill(RailTest):
+    """seed/skills/rail-tool/SKILL.md walks an agent through adding a tool: what it shows is what the engine takes."""
+
+    def blocks(self, p, fence):
+        with open(p.path(".claude", "skills", "rail-tool", "SKILL.md")) as f:
+            parts = f.read().split(f"```{fence}\n")[1:]
+        return [part.split("```")[0] for part in parts]
+
+    def test_the_declaration_and_the_workflow_line_the_page_shows_pass_the_doctor(self):
+        plain = self.fixture(name="plain")
+        (declared,), (passed,) = self.blocks(plain, "toml"), self.blocks(plain, "yaml")
+        self.assertIn("ci = false", declared)
+        p = self.fixture(config=CONFIG + "\n" + declared.replace("ci = false", "ci = true"))
+        key = passed.splitlines()[-1] + "\n"
+        self.assertEqual(key, "          PAY_TEST_KEY: ${{ secrets.PAY_TEST_KEY }}\n")
+        workflow = p.path(".github/workflows/rail.yml")
+        with open(workflow) as f:
+            text = f.read()
+        self.assertIn(passed.splitlines()[1] + "\n", text)  # the page's lines stand under the step the seed has
+        with open(workflow, "w") as f:
+            f.write(text.replace(passed.splitlines()[1] + "\n", passed.splitlines()[1] + "\n" + key))
+        found = {s["step"]: s for s in p.rail("doctor", expect=None)["steps"]}
+        self.assertEqual((found["tool payments"]["result"], found["tool payments"]["detail"][:21]),
+                         ("fail", "PAY_TEST_KEY not set "))
+        self.assertEqual(found["pull request secrets"]["result"], "pass", found["pull request secrets"])
+
+    def test_the_grill_names_the_page_for_a_request_that_needs_a_new_tool(self):
+        p = self.fixture()
+        with open(p.path(".claude", "skills", "rail-grill", "SKILL.md")) as f:
+            self.assertIn("Draft the tool's ticket with `rail-tool`.", f.read())
+
+
 class Config(RailTest):
     def test_a_declaration_needs_a_use_line_and_takes_names_never_values(self):
         for n, (old, new, said) in enumerate((

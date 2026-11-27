@@ -24,7 +24,7 @@ from rail.init import include  # noqa: E402
 POINTERS = [
     r"rail docs\b",
     r"\bskills?\b",
-    r"\brail-(build|debug|findings|conflict|blast-radius|slice|verify|grill)\b",
+    r"\brail-(build|debug|findings|conflict|blast-radius|slice|verify|grill|tool)\b",
     r"\.claude/skills/",
     r"\.rail/engine/(docs|guides)/",
     r"\bGuide: read\b",
@@ -46,11 +46,15 @@ ALLOWED = [
     ("seed/skills/rail-blast-radius/SKILL.md", "draft the ticket (`rail-grill`), split first (`rail-slice`)",
      "a skill a person starts names the next skill the person may start"),
     ("seed/skills/rail-blast-radius/SKILL.md", "there is no next skill", "says there is nothing more to read"),
+    ("seed/skills/rail-grill/SKILL.md", "Draft the tool's ticket with `rail-tool`",
+     "a skill a person starts names the next skill the person may start"),
     ("review", ".claude/skills/ (",
      "the brief's directory digest lists the project's folders; a folder's name is no instruction"),
     ("engine/rail/cli.py", "--skills", "an option of rail init, which a person types when setting a project up"),
     ("engine/rail/config.py", ".claude/skills", "the default of [init] skill_dirs: a folder's name is no instruction"),
     ("engine/rail/docs.py", None, "the `rail docs` verb and its generated pages, which are for people"),
+    ("engine/rail/tools.py", "<!-- rail-tool: {name} -->",
+     "the hidden mark on the issue the engine opens for a tool whose name is missing: it names no page to read"),
     ("engine/rail/init.py", None, "installs the skills; its strings are receipts for the person running init"),
 ]
 

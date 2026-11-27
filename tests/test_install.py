@@ -106,7 +106,7 @@ class Init(RailTest):
 
 
 class Skills(RailTest):
-    SKILLS = ["rail-blast-radius", "rail-debug", "rail-grill", "rail-slice", "rail-verify"]
+    SKILLS = ["rail-blast-radius", "rail-debug", "rail-grill", "rail-slice", "rail-tool", "rail-verify"]
 
     def folder(self, p, *parts):
         return sorted(os.listdir(p.path(*parts))) if os.path.isdir(p.path(*parts)) else None

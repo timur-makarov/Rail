@@ -344,19 +344,22 @@ ticket's number.
 
 ### 11. A skill that adds a tool
 
-Size: S.
+Built (`seed/skills/rail-tool/SKILL.md`; `rail docs tools` and `rail docs guides` name it): the skill walks an
+agent through adding a tool, and `rail-grill` names it when a request needs a tool the project has not
+declared.
 
-**What it does.** A `rail-tool` skill walks an agent through adding a tool: the declaration, the probe, the
-name in each place, and the line in `rail.yml` for a `ci = true` key. `rail-grill` points to it when a request
-needs a new service.
+**Settled while building.**
+- The tool gets a ticket of its own, which the ticket that needs it names in `after`. Its `Check:` lines read
+  the declaration and not the service, so that they pass in CI and on a machine with no key yet.
+- The skill says the order to the person who merges: once the declaration is on the base branch, a machine
+  without the key claims no ticket, so the keys go onto the machines before the merge or straight after.
+- No situation's brief carries the skill. An agent finds it by its description.
+- A test holds the skill's example to the engine: the declaration it shows loads, and the workflow line it
+  shows passes doctor's `pull request secrets`.
 
-**How.**
-- New file `seed/skills/rail-tool/SKILL.md`. `seed/skills/rail-grill/SKILL.md` points to it.
-- The `[tools.NAME]` declaration itself is built (`rail docs tools`).
-- Adding a tool edits `.rail/config.toml`, so it is a PERSON ticket.
-
-**Kept when.** The skill's text passes the Rail text check; a person reads one run of it on a fixture request
-for a new service.
+**Left.**
+- The skill's text and the paragraph in `rail-grill` are not tested with a model run, and are marked so.
+- A person reads one run of the skill on a fixture request for a new service.
 
 **Waits for.** Nothing. Order of work: with the tools-on-runs item in **Numbers later decisions wait for**.
 
