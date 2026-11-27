@@ -350,9 +350,10 @@ frozen at acceptance, but the test files they run are not.
    result is read by hand and sorted into the three answers. The share of commits that edit tests tells the time
    this feature adds to ships, and the share of red results tells how many runs it costs. The sorted results are
    kept: they are the answer key for the model test below. This test comes before the feature is built.
-3. Model test, four runs for each case, once the owner restarts the model tests: the triage brief on the sorted
-   results of test 2. Kept when it gives the hand-sorted answer in at least 3 of 4 runs on at least four cases
-   in five, and answers `contract` or `moved` on no case sorted as `lost` in more than 1 of 4 runs.
+3. Model test, once the owner restarts the model tests: the triage brief on the sorted results of test 2, at
+   least six of them, with each of the three answers among them, two runs each. Kept when it gives the
+   hand-sorted answer in at least three quarters of the runs, and answers `contract` or `moved` in no more than
+   one run in eight on the cases sorted as `lost`.
 
 **Waits for.** **The triage step**. The test on real history comes first and waits for nothing.
 
@@ -1151,14 +1152,14 @@ for it as the last step (2026-11-26).
   run, in a repository on GitHub kept for such checks, for one language. It shows what the stand-in for GitHub
   cannot: the required check, the labels, the line comments of `## Read these`, an issue carried to its merge.
 - **Once with a model**, when the owner restarts the model tests: the same run with a real worker, reviewer and
-  triage run, four runs for each language. This is the only place where the wording of every brief is read by a
+  triage run, two runs for each language. This is the only place where the wording of every brief is read by a
   model in the order a real ticket meets it.
 - Files that change: `tests/test_languages.py`, `tests/projects/*` (a second project, a planted fault, a driving
   check script for each), `tests/fake_worker.py` and the stand-in for the triage run.
 
 **Kept when.** No model: every step of the run behaves as written for all four languages with `python3
 tests/run.py --languages`, on a machine that has every tool. On real GitHub: the one run ends with every ticket
-merged or waiting where the list above says. With a model: at least 3 of 4 runs for each language end the same
+merged or waiting where the list above says. With a model: at least six of the eight runs end the same
 way; a step that fails more often names the brief whose wording is revisited.
 
 **Waits for.** Steps 4 to 9, and every tool on the machine. A step of the run is added when its feature is
@@ -1555,6 +1556,28 @@ Each of these is wording a model reads, or a behaviour only a model run can show
 tests. A part that needs no model may be built before, with its wording marked as not tested; whether the
 wording is kept is decided by its test.
 
+**How a model test is run** (owner, 2026-11-27). Every model test on this page follows these rules, and a
+feature's own text adds only its situations and what is graded.
+
+- **Many situations, two runs each.** A situation is a fixture with one known right outcome: a ticket, a
+  change, a request, a repository. A test has at least six, and each is run twice in each arm. Until now a
+  test ran one to three situations four times each. Runs of one situation mostly agree with each other, and
+  situations differ, so a wider set says more about the wording than repeats do. More certainty is bought with
+  more situations, not more runs.
+- **Planted and control.** Where the wording asks for a behaviour, half the situations call for it and half do
+  not, so that wording which makes the model do it everywhere fails.
+- **Graded by a command.** Each situation names the command that says whether a run is right. No result is
+  read by hand to decide.
+- **Kept over the set.** The wording is kept when it is right in at least three quarters of the runs on the
+  situations that call for the behaviour, and wrong in no more than one run in eight on the controls. Where an
+  old text exists it is the second arm, and the new one must also be right in more runs than the old. No single
+  situation decides.
+- **A situation whose two runs disagree** is named in the result. It counts as one run right and one wrong.
+- **The fixtures of the gate cases are the situations** wherever a feature has them: the stand-in shows that
+  the engine acts on each answer, and the model on the same fixture shows that it gives the right one.
+- **The result** goes into the feature's `CHANGELOG.md` line with its counts, such as "right in 10 of 12 runs
+  over six situations, the old text in 4 of 12".
+
 Wording comes after the check that measures the same thing (owner, 2026-11-27). The pairs:
 
 | Wording | The check built first |
@@ -1569,12 +1592,12 @@ shows it moves the number the check reports.
 
 Two tests that belong to no single feature also wait here:
 
-- **Init with a model.** Four real repositories, one for each language, none prepared for Rail; `rail init`
-  with the language profiles against init as the seed first wrote it, four runs each. Graded: each part of
+- **Init with a model.** Eight real repositories, two for each language, none prepared for Rail; `rail init`
+  with the language profiles against init as the seed first wrote it, two runs each. Graded: each part of
   `verify` (tests, lint, types, format, secret scan, audit) is present and shown to fail on a planted mistake,
-  and `verify` is the same across the four runs. Kept when the profile arm covers at least as many parts as
-  the other arm in every repository and gives the same commands in at least 3 of 4 runs. The wording of the
-  init task stays untested until this runs.
+  and `verify` is the same in both runs. Kept when the profile arm covers at least as many parts as the other
+  arm in every repository and gives the same commands in both runs for at least six of the eight. The wording
+  of the init task stays untested until this runs.
 - **Language-specific review lines.** None at first (proposed): a finding that repeats in one language becomes
   a sensor or a rule, not a line in the reviewer's brief.
 
@@ -1641,19 +1664,19 @@ only from 66% to 54% on another. **Old tests run against the new code** is the g
 - Files that change: `engine/rail/review.py`, `engine/guides/build.md`, `seed/skills/rail-verify/SKILL.md`,
   `CHANGELOG.md`.
 
-**Kept when.** Model tests, wording untested until they run. Prompt changes are tested with old and new text,
-4 runs per arm, as today (`CHANGELOG.md`).
+**Kept when.** Model tests, wording untested until they run. Each is the old text against the new, by the
+rules at the head of this group.
 
 - Worker line: tickets with a `Check:` that contradicts the `## Why` (an impossible ticket), and controls
-  whose checks are right. Kept when, on the impossible tickets, the new text amends in at least 3 of 4 runs
-  and makes the check pass by special-casing in none, and on the controls it amends no more often than the old
-  text.
+  whose checks are right. Kept when, on the impossible tickets, the new text amends in at least three quarters
+  of the runs and makes the check pass by special-casing in none, and on the controls it amends no more often
+  than the old text.
 - Reviewer line: changes that special-case a test's inputs, and plain controls. Kept when the reviewer blocks
-  the planted ones in at least 3 of 4 runs and raises no new blocking finding on the controls in at least 3 of
-  4.
+  the planted ones in at least three quarters of the runs and raises a new blocking finding on the controls in
+  no more than one run in eight.
 - Kinds-of-test list: tickets where a property, idempotency or differential test fits (a parser, a handler, a
-  rewrite), old and new `build.md`, 4 runs per arm. Kept when the new text writes such a test in at least 3 of
-  4 runs and the mutation score on those tickets is not lower.
+  rewrite), old and new `build.md`. Kept when the new text writes such a test in at least three quarters of the
+  runs and the mutation score on those tickets is not lower.
 
 **Waits for.** The owner restarting the paused model tests, and for each line the check that is built first:
 the worker's line waits for **Old tests run against the new code**, the reviewer's line for **Held-out
@@ -1750,9 +1773,9 @@ change spans (reported).
   ticket's changed files. Store the score per area in the `trend` event.
 - Optional: built only if the pilot passes and the owner decides to keep it.
 
-**Kept when.** Pilot: four runs on one area as it is, and four on a copy with identifiers renamed to
-placeholders and one module's logic spread over three files. Kept when the damaged copy scores lower in at
-least 3 of the 4 pairs. This uses models.
+**Kept when.** Pilot: two runs on each of three areas as they are, and two on a copy of each with identifiers
+renamed to placeholders and one module's logic spread over three files. Kept when the damaged copy scores
+lower in at least five of the six pairs. This uses models.
 
 **Waits for.** **Trend numbers**, and the owner restarting the paused model tests.
 
@@ -1797,10 +1820,11 @@ Blender add-on and a video pipeline as examples. Those go: Rail is for software 
 - Files: `seed/skills/rail-verify/SKILL.md`.
 
 **Kept when.** A model test (this uses models). For each of web, API, CLI, agent-facing and data job, a
-fixture project with no driving check and a hidden fault the recipe's check should catch. Four runs per
-surface with the new skill and four with today's. Kept when the new skill's check catches the hidden fault in
-at least 3 of 4 runs per surface, its negative control was run in at least 3 of 4 (seen in the transcript),
-and it does no worse than today's on any surface. In use, per **The product step**: a quiet surface's recipe
+fixture project with no driving check and a hidden fault the recipe's check should catch, and a second
+fixture for each surface where one is cheap to write. Two runs for each fixture with the new skill and two
+with today's. Kept when the new skill's check catches the hidden fault in at least three quarters of the runs,
+its negative control was run in at least three quarters (seen in the transcript), and it does worse than
+today's on no surface. In use, per **The product step**: a quiet surface's recipe
 is revisited after 50 tickets.
 
 **Waits for.** The owner restarting the paused model tests. Until then the recipes are built and their wording
@@ -1826,14 +1850,16 @@ is the test, and the wording fix it leads to.
 
 **How.**
 - Intake cases, some that hold a kind (`rail docs kinds`) and some that do not.
-- Run at `[worker] contract`, four runs per case.
+- Run at `[worker] contract`, at least six cases, two runs for each.
 - If a case fails, fix the wording in `seed/skills/rail-blast-radius/SKILL.md` and the contract brief, then
   run again.
 - Not covered: whether the list of kinds is complete for every project (`rail init` asks per project); harm
   from a change that can be undone but costs users while it is live (the dev smoke check and the revert are
   the defence); secrets a ticket branch reaches, which `ci = true` keys bound and no tier can.
 
-**Kept when.** Model test: kept when the tier and `person_reason` match the case in at least 3 of 4 runs. In
+**Kept when.** Model test: kept when the tier and `person_reason` match the case in at least three quarters of
+the runs on the cases that hold a kind, and a kind is named in no more than one run in eight on those that do
+not. In
 use, over 50 AUTO tickets merged: if any is counted under "AUTO tickets that held a kind" in `rail stats`, the
 kind's detection (paths, the reviewer's text, or the contract writer's guide) is revisited before anything
 else.
@@ -1860,9 +1886,10 @@ a merged ticket causes a fix. The coverage line in `rail stats` already shows wh
 - Add one line: when the request is a bug in code a merged ticket wrote, find that ticket (the squash commit
   of the failing lines, `git log -L` or `git blame`, and its `Ticket:` trailer) and set `caused_by`.
 
-**Kept when.** Model test, four runs per case. Fixture bug requests where blame leads to a merged ticket, and
-controls where the bug predates Rail. Kept when `caused_by` is right in at least 3 of 4 runs per case and
-empty on the controls. Wording is untested until then.
+**Kept when.** Model test, two runs for each case. At least three fixture bug requests where blame leads to a
+merged ticket, and as many controls where the bug predates Rail. Kept when `caused_by` is right in at least
+three quarters of the runs on the first and empty in all but one run in eight on the controls. Wording is
+untested until then.
 
 **Waits for.** The owner restarting the paused model tests.
 
@@ -2781,9 +2808,9 @@ person schedules, instead of a person asking an agent to clone the framework and
 - With the seed's `person_paths`, a ticket that changes only `.rail/packs/consult/` or `.rail/sources/` is
   PERSON at add.
 
-Model test, four runs, built once model runs are available (until then the wording of the prompt is untested):
-on a fixture changelog of three changes, one of which the project already has, kept when it files two tickets
-in at least 3 of 4 runs.
+Model test, built once model runs are available (until then the wording of the prompt is untested): three
+fixture changelogs, each with changes the project already has and changes it lacks, two runs each. Kept when
+it files a ticket for each change the project lacks, and for no other, in at least five of the six runs.
 
 **Waits for.** The owner restarting the paused model tests (for the model test only). Order of work: the
 `person_paths` additions first, then the source after its model test.
@@ -2826,9 +2853,10 @@ back. Rail is developed without Rail (owner, 2026-11-26), so the framework side 
 - `fetch` lists a commit that changed only `.rail/packs/` or `.rail/ruleset.json`.
 - A `rail:upstream` issue is not taken by intake; `rail:go` on it lets the next run of the source open it.
 
-Model test, four runs each, wording untested until then: two fixture histories, one with an engine fix and one
-with only a project setting changed in `.rail/config.toml`. Kept when it drafts an issue for the first and
-none for the second in at least 3 of 4 runs, and no draft holds a line from outside Rail's files.
+Model test, two runs each, wording untested until then: six fixture histories, three with an engine fix and
+three with only a project setting changed in `.rail/config.toml`. Kept when it drafts an issue in at least
+five of the six runs on the first three and in no more than one on the others, and no draft holds a line from
+outside Rail's files.
 
 Not covered: whether an upstream issue's text leaks something of the project that Rail's paths do not show
 (the person's approval of the text is the check); how many projects will send anything.
@@ -2999,8 +3027,8 @@ ticket as filed, the run, the grade, the oracle and null grades, and the taint s
   - A planted WebFetch of the original pull request's URL marks the run `tainted`. A `go test` on a module
     path that contains the repository name does not.
   - The report counts the same tickets for every arm.
-- Pilot, with a model: five tickets from one project, the arm `as-is` and one other arm, three runs each.
-  Recorded: the share of runs that solve; that no run is `tainted`; the spread of the three runs per ticket;
+- Pilot, with a model: eight tickets from one project, the arm `as-is` and one other arm, two runs each.
+  Recorded: the share of runs that solve; that no run is `tainted`; the tickets whose two runs differ;
   the cost against the original ticket's; each run that fails only on the original's tests, read by hand. Kept
   when at least three of the five tickets are solved in some run of `as-is`. A set where the current setup
   cannot do the work cannot compare arms.
@@ -3028,8 +3056,8 @@ up the set-aside features again.
 - That the squash commit's parent, with the ticket's own `setup`, rebuilds an environment the checks pass in.
   The oracle grade tests this per ticket.
 - That enough tickets keep their Done Contract and start with no open `ASSUMED:` rows to make a set.
-- That three runs per ticket are enough to see an arm's effect. The pilot's spread shows whether more are
-  needed.
+- That two runs per ticket over eight tickets are enough to see an arm's effect. The pilot shows whether more
+  tickets are needed.
 
 #### Held-out scenarios
 
@@ -3146,6 +3174,8 @@ Stated here once, as facts the features rest on.
 - Anything may be put into a repository, and Rail drives what needs driving. What Rail knows about a
   repository is worked out from the tree on every change, not written once at `rail init`, and what no check
   reads is a fact that raises a question (2026-11-27).
+- A model test runs many situations twice each, not a few four times, and is decided over the set
+  (2026-11-27).
 - A check that produces a fact is built before wording that asks a model for the same behaviour. The wording
   is added only when a model test shows it moves the number that check reports (2026-11-27).
 
