@@ -243,8 +243,8 @@ the pages, which are also in [`engine/docs/`](engine/docs):
 `engine/` is copied into each project by `rail init`; `seed/` holds the files it copies once; `packs/` holds
 optional features; `tests/` holds the end-to-end tests: `python3 tests/run.py` runs them on several workers,
 and `python3 -m unittest discover -s tests` one after another. `python3 tests/run.py --languages` takes a
-small real project in each language from `rail init` to a merged ticket; a check whose tool the machine lacks
-is left out and printed as "not run". [`tests/tools.sh`](tests/tools.sh) installs those tools on a machine
+small real project in each language from `rail init` through a ticket for each feature, with stand-ins for
+the worker and the reviewer; a check whose tool the machine lacks is left out and printed as "not run". [`tests/tools.sh`](tests/tools.sh) installs those tools on a machine
 made for the work, and on your own machine only lists what is missing. A cloud environment for work on Rail
 itself needs one line as its setup script:
 

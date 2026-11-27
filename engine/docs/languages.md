@@ -63,7 +63,7 @@ gets `uv`.
 
 | Profile | Manager, by lockfile | `setup` | `verify`, in order |
 |---|---|---|---|
-| `python` | `uv` (`uv.lock`), `poetry` (`poetry.lock`), `pip` (`requirements.txt`, or with no lockfile a tracked `requirements*.txt`) | `uv sync --locked` | format `uv run ruff format --check --extend-exclude .rail --extend-exclude .claude .`; lint `uv run ruff check --extend-exclude .rail --extend-exclude .claude .`; types `uv run basedpyright --level error`; tests `uv run pytest -q`; audit `uv export --locked --no-emit-project --format requirements-txt \| pip-audit --disable-pip -r /dev/stdin` |
+| `python` | `uv` (`uv.lock`), `poetry` (`poetry.lock`), `pip` (`requirements.txt`, or with no lockfile a tracked `requirements*.txt`) | `uv sync --locked` | format `uv run ruff format --check --extend-exclude .rail --extend-exclude .claude .`; lint `uv run ruff check --extend-exclude .rail --extend-exclude .claude .`; types `uv run basedpyright --level error`; tests `uv run pytest -q`; audit `uv export --locked --no-emit-project --format requirements-txt \| pip-audit --disable-pip --no-deps -r /dev/stdin` |
 | `typescript` | `pnpm` (`pnpm-lock.yaml`), `npm` (`package-lock.json`), `yarn` (`yarn.lock`), `bun` (`bun.lock`) | `pnpm install --frozen-lockfile --ignore-scripts` | lint `pnpm exec oxlint --deny-warnings`; types `pnpm exec tsc --noEmit`; tests `pnpm test`; audit `pnpm audit` |
 | `rust` | `cargo` (`Cargo.lock`) | `cargo fetch --locked` | format `cargo fmt --check`; lint `cargo clippy --all-targets --locked -- -D warnings`; tests `cargo test --locked`; audit `cargo deny check advisories` |
 | `go` | `go` (`go.sum`) | `go mod download` | format `test -z "$(gofmt -l .)"`; lint `go vet ./...` and `golangci-lint run`; tests `go test -race ./...` (the race detector needs cgo and a C compiler); audit `govulncheck ./...` |
@@ -101,7 +101,10 @@ dependencies on each other become `uses`. Rail reads the workspace's own files a
 | Cargo | `[workspace]` `members` and `exclude` in a `Cargo.toml` | `cargo fmt --check -p {name}`, `cargo clippy -p {name} --all-targets --locked -- -D warnings`, `cargo test --locked -p {name}`; the audit reads the workspace's `Cargo.lock` | a dependency with a `path` that is a member's folder |
 | Go | the `use` lines of `go.work` | the module's own, in its folder | a `require` of another module of the `go.work` |
 
-`{name}` is the member's package name. A workspace root that holds no package of its own is no project. A file
+`{name}` is the member's package name. A workspace root that holds no package of its own is no project. The
+root of a pnpm workspace always has a `package.json`, which mostly holds the tools: it is a project only when
+a member depends on its package with `workspace:`, and it then runs the commands of a project outside a
+workspace, in the root: `pnpm --filter` matches no package at the root and exits 0. A file
 of the workspace itself (its manifest, its lockfile, the workspace file at its root) reaches the workspace's
 members and no project outside it.
 
@@ -226,12 +229,24 @@ Python service, a TypeScript app and a library both use, in a uv workspace and a
 the library runs the library's checks and both users', with the members' own commands, to a merge. No mistake
 is planted for a member's command there: a failing test fails its project's `verify`, and that is all.
 
+Each of the four projects is then carried on, a ticket for each feature, to show that the features work
+together with a real toolchain. A ticket adds a second project that uses the first (a member of a uv
+workspace, a member of a pnpm workspace, a third crate, a module of a `go.work`), and a later change to the
+first runs both projects' checks. A ticket that edits an old test raises `old-test`; one on a workflow waits
+for a person's one act; one that keeps failing gets its diagnosis and starts again; one that adds a folder
+of Terraform raises `uncovered` in the Rust project, whose crates do not cover the repository, and nothing in
+the other three, whose project is the repository's root. The last ticket starts the sample's service, seeds
+it, drives it and stops it, and fails while the sample's planted fault is switched on; the Rust sample has no
+service, and its command line is driven. `rail stats` is then read for the number of each. The worker, the
+reviewer and the triage run are stand-ins and there is no remote, so no wording a model reads is tested here,
+and nothing GitHub does.
+
 | Profile | Run by Rail's tests | Not yet run by them |
 |---|---|---|
-| `python` | uv's setup, format, lint, types, tests, for one project and for a uv workspace's members | audit (pip-audit); every Poetry and pip line |
-| `typescript` | pnpm's setup, lint, types, tests, for one project and for a pnpm workspace's members | audit; every npm, Yarn and Bun line |
-| `rust` | setup, and a Cargo workspace member's format, lint, tests | the same parts for a package in no workspace; audit (cargo-deny) |
-| `go` | setup, format, both lints, tests | audit (govulncheck); the modules of a `go.work` |
+| `python` | uv's setup, format, lint, types, tests, audit, for one project and for a uv workspace's members, its root among them | an audit that finds an advisory; every Poetry and pip line |
+| `typescript` | pnpm's setup, lint, types, tests, audit, for one project and for a pnpm workspace's members, its root among them | an audit that finds an advisory; every npm, Yarn and Bun line |
+| `rust` | setup, and a Cargo workspace member's format, lint, tests, audit | the same parts for a package in no workspace; an audit that finds an advisory |
+| `go` | setup, format, both lints, tests, for one module and for the modules of a `go.work`; audit, for one module | an audit that finds an advisory |
 
 The secret scan is run by them too, on a key planted in a commit. All of this holds on a machine that has
 every tool: a part whose tool is missing is left out there and printed as "not run". Which projects a change

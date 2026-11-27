@@ -1,12 +1,16 @@
 """The HTTP API: GET /notes, POST /notes, POST /notes/ID/done."""
 
 import json
+import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from notes.store import Store
 
 DONE = re.compile(r"^/notes/(\d+)/done$")
+# A fault to switch on from outside, for a check that drives the running service:
+# the list comes back empty.
+FAULT = "NOTES_FAULT"
 
 
 def handler(store: Store) -> type[BaseHTTPRequestHandler]:
@@ -21,7 +25,7 @@ def handler(store: Store) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:
             if self.path == "/notes":
-                self.answer(200, store.all())
+                self.answer(200, [] if os.environ.get(FAULT) else store.all())
             else:
                 self.answer(404, {"error": "not found"})
 

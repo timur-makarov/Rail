@@ -189,7 +189,7 @@ class Reach(ShopTest):
         self.assertEqual(ran(p.rail("advance", nn), "verify"), ["lib-python", "api"])
         called = self.calls()  # the lockfile changed, so each member's audit runs
         for line in ("uv lib: export --locked --no-emit-project --format requirements-txt",
-                     "pip-audit lib: --disable-pip -r /dev/stdin", "pip-audit api: --disable-pip -r /dev/stdin"):
+                     "pip-audit lib: --disable-pip --no-deps -r /dev/stdin", "pip-audit api: --disable-pip --no-deps -r /dev/stdin"):
             self.assertIn(line, called)
         self.assertEqual([line for line in called if line.startswith("pnpm")], [])
 
@@ -396,7 +396,7 @@ class Uncovered(ShopTest):
                          " --extend-exclude .rail --extend-exclude .claude . && uv run ruff check --extend-exclude .rail"
                          " --extend-exclude .claude . && uv run basedpyright --level error && uv run pytest -q && { git diff"
                          " --quiet \"$RAIL_BASE\"...HEAD -- ':(top)uv.lock' || uv export --locked --no-emit-project --format"
-                         " requirements-txt | pip-audit --disable-pip -r /dev/stdin; }")
+                         " requirements-txt | pip-audit --disable-pip --no-deps -r /dev/stdin; }")
         self.assertEqual(found["project web"]["detail"], "typescript, pnpm, a member of the workspace at the root, changed"
                          " by its [[projects]] entry; paths web/**; uses api, lib-typescript; setup: pnpm install"
                          " --frozen-lockfile --ignore-scripts --filter shop-web...; verify: pnpm test")
@@ -448,6 +448,27 @@ class Workspaces(RailTest):
         self.assertEqual(layout.reach(found, found, ["packages/ui/src/button.ts"]), ["packages/ui", "apps/admin", "apps/web"])
         self.assertEqual(layout.reach(found, found, ["pnpm-lock.yaml"]), ["packages/ui", "apps/admin", "apps/web"])
         self.assertEqual(layout.reach(found, found, ["apps/web/src/main.ts"]), ["apps/web"])
+
+    def test_the_root_of_a_pnpm_workspace_is_a_project_when_a_member_depends_on_its_package(self):
+        files = {"package.json": '{"name": "notes-web"}', "pnpm-workspace.yaml": "packages:\n  - tools/*\n",
+                 "pnpm-lock.yaml": "", "src/notes.ts": "",
+                 "tools/report/package.json": '{"name": "notes-report", "dependencies": {"notes-web": "workspace:*"}}'}
+        found = derived(files)
+        self.assertEqual(shown(found, "folder", "member", "uses"), {
+            "root": ("", "notes-web", []), "tools/report": ("tools/report", "notes-report", ["root"])})
+        # pnpm's filter matches no package at the root and exits 0, so the root runs the lines with no filter.
+        root = found.by_name["root"]
+        self.assertEqual((root["setup"], root["member"]), ("pnpm install --frozen-lockfile --ignore-scripts", "notes-web"))
+        self.assertIn("pnpm test", root["verify"])
+        self.assertNotIn("--filter", root["verify"])
+        self.assertIn("pnpm --filter notes-report test", found.by_name["tools/report"]["verify"])
+        engine()
+        from rail import layout
+        self.assertEqual(layout.reach(found, found, ["src/notes.ts"]), ["root", "tools/report"])
+        self.assertEqual(layout.reach(found, found, ["tools/report/src/report.ts"]), ["tools/report"])
+        # With no member that depends on it, the root holds the tools and is no project.
+        files["tools/report/package.json"] = '{"name": "notes-report"}'
+        self.assertEqual(sorted(derived(files).by_name), ["tools/report"])
 
     def test_a_go_work_file(self):
         found = derived({

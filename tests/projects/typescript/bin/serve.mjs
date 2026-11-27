@@ -23,6 +23,10 @@ export function serve(handle, port = 0) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { app } = await import("../src/app.ts");
-  const server = await serve(app(), Number(process.argv[2] ?? 8000));
+  const handle = app();
+  // A fault to switch on from outside, for a check that drives the running app: the list comes back empty.
+  const faulty = (request) =>
+    request.method === "GET" && new URL(request.url).pathname === "/api/notes" ? Response.json([]) : handle(request);
+  const server = await serve(process.env.NOTES_FAULT ? faulty : handle, Number(process.argv[2] ?? 8000));
   console.log(`notes on http://127.0.0.1:${server.address().port}`);
 }

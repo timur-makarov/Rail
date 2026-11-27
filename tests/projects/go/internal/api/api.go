@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 
 	"example.com/notes/internal/notes"
@@ -21,6 +22,11 @@ func answer(w http.ResponseWriter, status int, body any) {
 func Handler(store *notes.Store) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /notes", func(w http.ResponseWriter, _ *http.Request) {
+		// A fault to switch on from outside, for a check that drives the running service: the list comes back empty.
+		if os.Getenv("NOTES_FAULT") != "" {
+			answer(w, http.StatusOK, []notes.Note{})
+			return
+		}
 		answer(w, http.StatusOK, store.All())
 	})
 	mux.HandleFunc("POST /notes", func(w http.ResponseWriter, r *http.Request) {

@@ -16,7 +16,9 @@ tests = ["**/tests/**", "**/test_*.py", "**/*_test.py", "**/conftest.py", "**/py
 # lockfile; with neither, the first manager. Each part names the tool it needs on the machine. `audit` runs only on
 # a change that touches the lockfile. basedpyright fails on its warnings too unless the project's settings say
 # otherwise, and those are matters of style (a call's result not assigned, a method not marked as an override), so
-# the types part asks for errors only. ruff leaves out .rail and .claude: Rail's engine and the agent's files are
+# the types part asks for errors only. The audit reads an export of the lockfile, which is resolved already, so pip-audit
+# is told not to resolve it (--no-deps): without that it refuses a list with no hashes, which is what a project with
+# no dependency exports. ruff leaves out .rail and .claude: Rail's engine and the agent's files are
 # tracked in the project and are not its code (rail docs languages).
 [[managers]]
 name = "uv"
@@ -28,7 +30,7 @@ verify = [
   { part = "lint", tool = "ruff", run = "uv run ruff check --extend-exclude .rail --extend-exclude .claude ." },
   { part = "types", tool = "basedpyright", run = "uv run basedpyright --level error" },
   { part = "tests", tool = "pytest", run = "uv run pytest -q" },
-  { part = "audit", tool = "pip-audit", run = "uv export --locked --no-emit-project --format requirements-txt | pip-audit --disable-pip -r /dev/stdin" },
+  { part = "audit", tool = "pip-audit", run = "uv export --locked --no-emit-project --format requirements-txt | pip-audit --disable-pip --no-deps -r /dev/stdin" },
 ]
 
 [[managers]]
@@ -40,7 +42,7 @@ verify = [
   { part = "lint", tool = "ruff", run = "poetry run ruff check --extend-exclude .rail --extend-exclude .claude ." },
   { part = "types", tool = "basedpyright", run = "poetry run basedpyright --level error" },
   { part = "tests", tool = "pytest", run = "poetry run pytest -q" },
-  { part = "audit", tool = "pip-audit", run = "poetry export --format requirements.txt | pip-audit --disable-pip -r /dev/stdin" },
+  { part = "audit", tool = "pip-audit", run = "poetry export --format requirements.txt | pip-audit --disable-pip --no-deps -r /dev/stdin" },
 ]
 
 [[managers]]

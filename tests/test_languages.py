@@ -1,8 +1,9 @@
 """Language profiles: Rail finds the projects of Python, TypeScript, Rust and Go from the tracked manifests, each
 time it needs them, and each project gets its profile's commands, rules and paths with nothing written for it
 (tests/test_projects.py has what a change reaches). `Projects` takes one small real program per language from rail
-init to a merged ticket with the language's own toolchain; it skips a language whose toolchain this machine lacks,
-and `python3 tests/run.py --languages` fails there instead."""
+init through eight tickets with the language's own toolchain, and stand-ins for the worker, the reviewer and the
+triage run; it skips a language whose toolchain this machine lacks, and `python3 tests/run.py --languages` fails
+there instead."""
 
 import base64
 import hashlib
@@ -498,6 +499,300 @@ func TestTitleSpacesAreDropped(t *testing.T) {
 }
 
 
+# What the later steps of `Projects.project` need for each language (the steps are listed on the class).
+# `first`: the name of the sample's own project, and `home`: a folder inside it. `second`: a project that a ticket
+# adds in a new folder and that uses the first: its name, the ticket's scope and check, the new `files`, the `edits`
+# to files the sample has, and `lock`, the command that makes the lockfile follow. `untrim`: a change that drops
+# behaviour the first ticket added (titles are trimmed), with the edit to that ticket's test that hides it.
+# `product`: what `tests/projects/checks/` is told about the product (product.json), with the surface a change to
+# `drive` reaches.
+MORE = {
+    "python": {
+        "first": "root", "home": "",
+        "second": {
+            "name": "tools/report", "scope": ("tools/**", "pyproject.toml", "uv.lock", ".gitignore"),
+            "check": "cd tools/report && uv run pytest -q", "lock": "uv lock",
+            "files": {
+                "tools/report/pyproject.toml": """[project]
+name = "notes-report"
+version = "0.1.0"
+description = "A count of the notes in a store, done and open."
+requires-python = ">=3.11"
+dependencies = ["notes"]
+
+[tool.uv.sources]
+notes = { workspace = true }
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "../../src"]
+testpaths = ["tests"]
+""",
+                "tools/report/src/notes_report/__init__.py": """\"\"\"A count of the notes in a store.\"\"\"
+
+from notes.store import Store
+
+
+def count(store: Store) -> dict[str, int]:
+    \"\"\"How many notes are done and how many are open.\"\"\"
+    notes = store.all()
+    done = sum(1 for note in notes if note["done"])
+    return {"done": done, "open": len(notes) - done}
+""",
+                "tools/report/tests/test_count.py": """import unittest
+
+from notes_report import count
+
+from notes.store import Store
+
+
+class CountTest(unittest.TestCase):
+    def test_a_new_note_is_open(self) -> None:
+        store = Store()
+        store.add("write the report")
+        self.assertEqual(count(store), {"done": 0, "open": 1})
+""",
+            },
+            # The root's type check leaves the member to the member's own: it cannot see the member's `src`. A
+            # member that depends on the root has uv install the root as a package, which leaves build metadata.
+            "edits": [("pyproject.toml", "", '\n[tool.uv.workspace]\nmembers = ["tools/report"]\n\n[tool.basedpyright]\n'
+                                             'exclude = ["tools", "**/__pycache__", "**/.*"]\n'),
+                      (".gitignore", "", "*.egg-info/\n")],
+        },
+        "untrim": {
+            "code": [("src/notes/store.py", "        title = title.strip()\n        if not title:\n",
+                      "        if not title.strip():\n")],
+            "test": ("tests/test_trim.py", '["title"], "write the report")', '["title"], "  write the report ")'),
+        },
+        "product": {"start": "PYTHONPATH=src exec python3 -m notes {port} {run}/notes.db", "path": "/notes"},
+        "surface": ("api", "api", "root"), "drive": "",
+    },
+    "typescript": {
+        "first": "root", "home": "",
+        "second": {
+            "name": "tools/report", "scope": ("tools/**", "pnpm-workspace.yaml", "pnpm-lock.yaml"),
+            "check": 'cd tools/report && node --test "test/**/*.test.ts"', "lock": "pnpm install --lockfile-only",
+            "files": {
+                "pnpm-workspace.yaml": "packages:\n  - tools/report\n",
+                "tools/report/package.json": """{
+  "name": "notes-report",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \\"test/**/*.test.ts\\""
+  },
+  "dependencies": {
+    "notes-web": "workspace:*"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}
+""",
+                "tools/report/tsconfig.json": """{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["src"]
+}
+""",
+                "tools/report/src/report.ts": """import type { Notes } from "notes-web/src/notes.ts";
+
+export function count(notes: Notes): { done: number; open: number } {
+  const all = notes.all();
+  const done = all.filter((note) => note.done).length;
+  return { done, open: all.length - done };
+}
+""",
+                "tools/report/test/report.test.ts": """import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import { Notes } from "notes-web/src/notes.ts";
+
+import { count } from "../src/report.ts";
+
+test("a new note is open", () => {
+  const notes = new Notes();
+  notes.add("write the report");
+  assert.deepEqual(count(notes), { done: 0, open: 1 });
+});
+""",
+            },
+            "edits": [],
+        },
+        "untrim": {
+            "code": [("src/notes.ts", "  add(given: string): Note {\n    const title = given.trim();\n",
+                      "  add(title: string): Note {\n"),
+                     ("src/notes.ts", '    if (title === "") {\n', '    if (title.trim() === "") {\n')],
+            "test": ("test/trim.test.ts", '.title, "write the report");', '.title, "  write the report ");'),
+        },
+        "product": {"start": "exec node bin/serve.mjs {port}", "path": "/api/notes"},
+        "surface": ("api", "api", "root"), "drive": "",
+    },
+    "rust": {
+        "first": "crates/notes", "home": "crates/notes/",
+        "second": {
+            "name": "crates/notes-report", "scope": ("crates/notes-report/**", "Cargo.toml", "Cargo.lock"),
+            "check": "cargo test --locked -p notes-report", "lock": "cargo metadata --format-version 1 --offline > /dev/null",
+            "files": {
+                "crates/notes-report/Cargo.toml": """[package]
+name = "notes-report"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+notes = { path = "../notes" }
+""",
+                "crates/notes-report/src/lib.rs": """//! A count of the notes in a list.
+
+use notes::Notes;
+
+/// How many notes are done and how many are open.
+pub fn count(notes: &Notes) -> (usize, usize) {
+    let done = notes.all().iter().filter(|note| note.done).count();
+    (done, notes.all().len() - done)
+}
+""",
+                "crates/notes-report/tests/count.rs": """use notes::Notes;
+use notes_report::count;
+
+#[test]
+fn a_new_note_is_open() {
+    let mut notes = Notes::default();
+    notes.add("write the report").unwrap();
+    assert_eq!(count(&notes), (0, 1));
+}
+""",
+            },
+            "edits": [("Cargo.toml", 'members = ["crates/notes", "crates/notes-cli"]',
+                       'members = ["crates/notes", "crates/notes-cli", "crates/notes-report"]')],
+        },
+        "untrim": {
+            "code": [("crates/notes/src/lib.rs", "        let title = title.trim();\n        if title.is_empty() {\n",
+                      "        if title.trim().is_empty() {\n")],
+            "test": ("crates/notes/tests/trim.rs", 'title, "write the report");', 'title, "  write the report ");'),
+        },
+        "product": {"cli": "cargo run --quiet --locked -p notes-cli --"},
+        "surface": ("cli", "cli", "crates/notes-cli"), "drive": "crates/notes-cli/",
+    },
+    "go": {
+        "first": "root", "home": "",
+        "second": {
+            "name": "tools/report", "scope": ("tools/**", "go.work"),
+            "check": "cd tools/report && go test ./...", "lock": "",
+            "files": {
+                "go.work": "go 1.22\n\nuse (\n\t.\n\t./tools/report\n)\n",
+                "tools/report/go.mod": "module example.com/notes/tools/report\n\ngo 1.22\n\n"
+                                       "require example.com/notes v0.0.0\n\nreplace example.com/notes => ../..\n",
+                "tools/report/report.go": """// Package report counts the notes of a store.
+package report
+
+import "example.com/notes/internal/notes"
+
+// Count says how many notes are done and how many are open.
+func Count(store *notes.Store) (done, open int) {
+	for _, note := range store.All() {
+		if note.Done {
+			done++
+		} else {
+			open++
+		}
+	}
+	return done, open
+}
+""",
+                "tools/report/report_test.go": """package report
+
+import (
+	"testing"
+
+	"example.com/notes/internal/notes"
+)
+
+func TestANewNoteIsOpen(t *testing.T) {
+	var store notes.Store
+	if _, err := store.Add("write the report"); err != nil {
+		t.Fatal(err)
+	}
+	if done, open := Count(&store); done != 0 || open != 1 {
+		t.Fatalf("got %d done and %d open", done, open)
+	}
+}
+""",
+            },
+            "edits": [],
+        },
+        "untrim": {
+            "code": [("internal/notes/store.go", '	title = strings.TrimSpace(title)\n	if title == "" {\n',
+                      '	if strings.TrimSpace(title) == "" {\n')],
+            "test": ("internal/notes/trim_test.go", 'note.Title != "write the report"',
+                     'note.Title != "  write the report "'),
+        },
+        "product": {"start": "go build -o {run}/notes ./cmd/notes && exec {run}/notes serve 127.0.0.1:{port}",
+                    "path": "/notes"},
+        "surface": ("api", "api", "root"), "drive": "",
+    },
+}
+CLEAN = {"summary": "Clean.", "findings": []}
+TF = 'resource "aws_s3_bucket" "notes" {\n  bucket = "notes-export"\n}\n'
+PUSH = """name: push
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  say:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo pushed
+"""
+
+
+def card(title, scope, check, why):
+    scopes = ", ".join(f'"{s}"' for s in scope)
+    return (f'+++\ntitle = "{title}"\ntier = "AUTO"\nscope_paths = [{scopes}]\n+++\n\n## Why\n{why}\n\n'
+            f"## Done Contract\n- Check: `{check}`\n")
+
+
+def said(answer, reason="Read the ticket and the change.", **more):
+    """An answer to a triage question, as the stand-in for the triage run gives it."""
+    return {"answer": answer, "reason": reason, **more}
+
+
+def ran(answer, family):
+    """The names behind a family's steps that passed: `verify:root` gives `root`."""
+    return [s["step"].split(":", 1)[1] for s in answer["steps"]
+            if s["step"].startswith(family + ":") and s.get("result") == "pass"]
+
+
+def failed(answer):
+    return [s["step"] for s in answer["steps"] if s.get("result") == "fail"]
+
+
+def area(root, name, holds):
+    """Add a row for a new top-level folder to `## Areas` of ARCHITECTURE.md, as doc-lint asks of the change."""
+    full = os.path.join(root, "ARCHITECTURE.md")
+    lines = read(full).splitlines()
+    at = lines.index("## Areas") + 1
+    while at < len(lines) and lines[at].startswith("|"):
+        at += 1
+    lines.insert(at, f"| {name} | {name}/** | {holds} |")
+    with open(full, "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 def stand_ins(text):
     """The seed config's text with Rail's stand-ins where it names a model's CLI: the worker, the reviewer, which the
     triage run uses too, and consult. No test here starts a model."""
@@ -523,7 +818,20 @@ def edit(root, path, old, new):
 
 
 class Projects(RailTest):
-    """Each language's project from rail init to a merged ticket, with the commands its profile gives it."""
+    """Each language's project from rail init on, with the commands its profile gives it and no remote. Each step
+    checks that the ticket ends where it should; the cases of each feature are in that feature's own tests.
+
+    1. `rail init` writes no project, and `rail doctor` prints the one it derived.
+    2. A plain AUTO ticket: each part of `verify` catches a planted mistake, and the ticket merges.
+    3. A ticket adds a second project that uses the first: set up and checked in the ship that adds it.
+    4. A ticket drops behaviour and edits the test that held it: `old-test`, answered `lost`.
+    5. A ticket on a path of a kind: built with no wait, merged by a person's `rail accept`.
+    6. A ticket fails the same way to the cap: `stuck`, answered `approach`, started again and merged.
+    7. A ticket adds a folder no check reads: `uncovered`, answered `needs-checks`, where a folder can be so.
+    8. A ticket changes a project of a surface: the product is started, seeded, driven and stopped.
+    9. `rail stats` has a number for each of these.
+
+    Steps 3 to 9 need every tool of the profile, and are left out, and reported, on a machine that lacks one."""
 
     def project(self, name):
         spec = PROJECTS[name]
@@ -627,6 +935,195 @@ class Projects(RailTest):
         self.assertEqual(p.rail("advance", "1")["state"], "merged")
         self.assertIn(change["fix"][2].strip().splitlines()[-1].strip(), p.git("show", f"main:{change['fix'][0]}"))
         self.assertEqual(p.git("show", f"main:{change['test'][0]}"), change["test"][1])
+        if left:
+            # A project that a ticket adds gets every part of its profile's verify, so the rest needs every tool.
+            if report:
+                with open(report, "a") as f:
+                    f.write(f"{name}: the steps after the first ticket were not run, for the same tools\n")
+            return
+        self.later(p, name)
+
+    def take(self, p, text, tier="AUTO"):
+        """File a ticket and claim it. Returns (its id, the claim's answer, its worktree)."""
+        added = p.add(text)
+        self.assertEqual(added["tier"], tier, added)
+        nn = added["ticket"]
+        claimed = p.rail("next", "--ticket", nn)
+        self.assertEqual((claimed["ticket"], claimed["reason"]["code"]), (nn, "IMPLEMENT"), claimed)
+        return nn, claimed, p.worktree(nn)
+
+    def merge(self, p, nn):
+        done = p.rail("advance", nn)
+        self.assertEqual(done["state"], "merged", done)
+
+    def journal(self, p, nn, kind):
+        rows = [json.loads(line) for line in p.git("show", f"main:.rail/journal/{nn}-events.jsonl").splitlines()]
+        return [e for e in rows if e["event"] == kind]
+
+    def later(self, p, name):
+        """The steps after the first ticket, each a ticket of its own (the class says which)."""
+        more = MORE[name]
+        first, home, second = more["first"], more["home"], more["second"]
+
+        # 3. A second project in a new folder, which uses the first: found from its manifest, with nothing written
+        # for it, and set up and checked in the ship that adds it.
+        folder = second["name"].split("/")[0]
+        known = f"| {folder}/** |" in read(p.path("ARCHITECTURE.md"))
+        nn, _, work = self.take(p, card("Count the notes", (*second["scope"], "ARCHITECTURE.md"), second["check"],
+                                        "Nothing says how many notes are open and how many are done."))
+        if not known:
+            area(work, folder, "`report`, which counts the notes that are done and open")
+        for path, text in second["files"].items():
+            edit(work, path, "", text)
+        for change in second["edits"]:
+            edit(work, *change)
+        if second["lock"]:
+            code, output = shell(second["lock"], work)
+            self.assertEqual(code, 0, output)
+        p.queue_reviews(CLEAN)
+        shipped = p.rail("advance", nn)
+        self.assertIn(second["name"], ran(shipped, "setup"), shipped["steps"])
+        self.assertIn(second["name"], ran(shipped, "verify"), shipped["steps"])
+        self.merge(p, nn)
+        self.assertNotIn("\n[[projects]]", read(p.path(".rail/config.toml")))
+        shown = {s["step"]: s["detail"] for s in p.rail("doctor", expect=None)["steps"]}
+        self.assertIn(f"uses {first}", shown[f"project {second['name']}"])
+
+        # 4. A change that drops behaviour and edits the test that held it: the base's version of the test fails on
+        # the new code, one question is raised, and answered `lost` the ticket is the worker's again.
+        untrim = more["untrim"]
+        nn, _, work = self.take(p, card("Say what a title may hold", (*PROJECTS[name]["ticket"]["scope"], home + "TITLES.md"),
+                                        f"test -f {home}TITLES.md",
+                                        "Nobody can read anywhere what a note's title may hold."))
+        edit(work, home + "TITLES.md", "", "# Titles\n\nA title is any text but spaces alone.\n")
+        for change in (*untrim["code"], untrim["test"]):
+            edit(work, *change)
+        p.queue_reviews(said("lost", "A title keeps the spaces around it now, and the ticket asks for a page of words."))
+        back = p.rail("advance", nn, expect=3)
+        self.assertEqual((back["state"], back["reason"]["code"], back["steps"][-1]["detail"]),
+                         ("implementing", "STEP_FAILED", "Q1 old-test: lost"), back)
+        for path, old, new in (*untrim["code"], untrim["test"]):
+            edit(work, path, new, old)  # the behaviour and its test, as they were
+        p.queue_reviews(CLEAN)
+        shipped = p.rail("advance", nn)
+        # A change to the first project runs its checks and those of the project that uses it.
+        self.assertLessEqual({first, second["name"]}, set(ran(shipped, "verify")), shipped["steps"])
+        self.merge(p, nn)
+        (asked,) = self.journal(p, nn, "question")
+        self.assertEqual((asked["type"], asked["key"]), ("old-test", untrim["test"][0]))
+
+        # 5. A ticket on a path of a kind: built with no wait, and merged by a person's one act.
+        nn, _, work = self.take(p, card("Say when a push reaches main", (".github/workflows/**",),
+                                        "test -f .github/workflows/push.yml", "Nothing runs on a push to main."),
+                                tier="PERSON")
+        edit(work, ".github/workflows/push.yml", "", PUSH)
+        p.queue_reviews(CLEAN, CLEAN)  # the reviewer, and the security seat a PERSON ticket still gets
+        ready = p.rail("advance", nn)
+        self.assertEqual((ready["owner"], ready["reason"]["code"]), ("person", "MERGE_BY_PERSON"), ready)
+        self.assertEqual(ready["action"]["facts"]["wait"], {"kind": "approval", "accept": f"rail accept {nn}"})
+        p.rail("accept", nn)
+        self.merge(p, nn)
+        (accepted,) = self.journal(p, nn, "accepted")
+        self.assertEqual((accepted["by"], accepted["tier"], accepted["kinds"]), ("engine", "PERSON", ["runs-with-secrets"]))
+
+        # 6. A ticket that fails the same way until the cap: one diagnosis, and answered `approach` it starts again
+        # from the base branch and merges.
+        nn, _, work = self.take(p, card("Say how a note is finished", (home + "FINISHING.md", home + "FINISHED.md"),
+                                        f"test -f {home}FINISHING.md",
+                                        "Nobody can read anywhere how a note is finished."))
+        edit(work, home + "FINISHED.md", "", "# Finishing\n\nA note is finished by its number.\n")  # the wrong name
+        for _ in range(configmod.load(p.root)["retry"]["cap"] + 1):
+            stuck = p.rail("advance", nn, expect=None)
+            if stuck["reason"]["code"] == "DIAGNOSE":
+                break
+            self.assertEqual((stuck["reason"]["code"], failed(stuck)), ("STEP_FAILED", ["checks"]), stuck)
+        self.assertEqual(stuck["reason"]["code"], "DIAGNOSE", stuck)
+        p.queue_reviews(said("approach", evidence="Each attempt writes FINISHED.md. The check asks for FINISHING.md."))
+        again = p.rail("next", "--ticket", nn)
+        self.assertEqual((again["reason"]["code"], again["action"]["facts"]["restarted"]["type"]), ("IMPLEMENT", "stuck"), again)
+        work = p.worktree(nn)
+        self.assertFalse(os.path.exists(os.path.join(work, home + "FINISHED.md")))  # none of the attempts' work
+        edit(work, home + "FINISHING.md", "", "# Finishing\n\nA note is finished by its number.\n")
+        p.queue_reviews(CLEAN)
+        p.rail("advance", nn)
+        self.merge(p, nn)
+
+        # 7. A folder that no check reads. Where the sample's project is the repository's root, every folder is that
+        # project's and nothing is asked. Where it is not, one question is raised, and answered `needs-checks` a
+        # PERSON ticket is filed that writes the folder's checks.
+        nn, _, work = self.take(p, card("Add the export bucket", ("infra/**", "ARCHITECTURE.md"), "test -f infra/main.tf",
+                                        "The export has no bucket to write to."))
+        edit(work, "infra/main.tf", "", TF)
+        area(work, "infra", "the bucket the export writes to")
+        rooted = first == "root"
+        p.queue_reviews(*([] if rooted else [said("needs-checks", evidence="Terraform that declares the export bucket.")]),
+                        CLEAN)
+        shipped = p.rail("advance", nn)
+        covers = [s["detail"] for s in shipped["steps"] if s["step"] == "intake"]
+        self.merge(p, nn)
+        if rooted:
+            self.assertEqual((covers, self.journal(p, nn, "question")), ([], []))
+        else:
+            (asked,) = self.journal(p, nn, "question")
+            self.assertEqual((asked["type"], asked["fact"]["folder"]), ("uncovered", "infra"))
+            filed = str(int(nn) + 1)
+            self.assertEqual(covers, [f"ticket {filed} covers infra"])
+            row = next(t for t in p.rail("status")["tickets"] if t["ticket"] == filed)
+            self.assertEqual(row["tier"], "PERSON", row)
+            self.assertIn('external_id = "coverage:infra"', p.git("show", f"{row['branch']}:.rail/tickets/{filed}.md"))
+
+        # 8. The product. A person says how it is started and which surface users reach; a change to a project of
+        # that surface starts, seeds, drives and stops it, and with the sample's fault switched on the step fails.
+        surface, kind, reached = more["surface"]
+        shutil.copytree(os.path.join(HERE, "projects", "checks"), p.path(".rail", "checks"))
+        with open(p.path(".rail", "checks", "product.json"), "w") as f:
+            json.dump(more["product"], f)
+        starts = ('\n[product]\nstart = "python3 .rail/checks/start.py"\nready = "python3 .rail/checks/ready.py"\n'
+                  'seed = "python3 .rail/checks/seed.py"\nstop = "python3 .rail/checks/stop.py"\nready_secs = 120\n'
+                  if "start" in more["product"] else "")
+        with open(p.path(".rail/config.toml"), "a") as f:
+            f.write(f'{starts}\n[[surfaces]]\nname = "{surface}"\nkind = "{kind}"\nprojects = ["{reached}"]\n'
+                    f'check = ".rail/checks/{kind}.py"\n')
+        p.git("add", "-A")
+        p.git("commit", "--quiet", "-m", "say how the product is started and driven")
+        drive = more["drive"]
+        nn, _, work = self.take(p, card("Say what the list holds", (drive + "LISTING.md",), f"test -f {drive}LISTING.md",
+                                        "Nobody can read anywhere what the list of notes holds."))
+        edit(work, drive + "LISTING.md", "", "# The list\n\nEvery note, in the order it was added.\n")
+        broken = p.rail("advance", nn, expect=3, env_extra={"RAIL_TEST_PLANT": "1"})
+        self.assertEqual((broken["reason"]["code"], failed(broken)), ("STEP_FAILED", [f"product:{surface}"]), broken)
+        p.queue_reviews(CLEAN)
+        shipped = p.rail("advance", nn)
+        self.assertEqual([(s["step"], s["result"]) for s in shipped["steps"] if s["step"].split(":")[0] == "product"],
+                         [("product", "pass"), (f"product:{surface}", "pass")], shipped["steps"])
+        self.merge(p, nn)
+        # What the check wrote down is kept with the ticket, for the reviewer and for a person.
+        (kept,) = json.loads(p.git("show", f"main:.rail/journal/{nn}-evidence.json")).values()
+        self.assertIn("write the report", "".join(kept[surface]["files"].values()))
+
+        # 9. The numbers of all of it.
+        stats = p.rail("stats")
+        data, text = stats["stats"], stats["text"]
+        self.assertEqual(data["merged"], 7)
+        self.assertEqual((data["tiers"]["AUTO"]["merged"], data["tiers"]["PERSON"]["merged"]), (6, 1))
+        held = data["person_changed_nothing"]["runs-with-secrets"]
+        self.assertEqual((held["tickets"], held["changed_nothing"]), (1, 1))
+        asked = {"old-test": {"lost": 1}, "stuck": {"approach": 1}, **({} if rooted else {"uncovered": {"needs-checks": 1}})}
+        self.assertEqual({kind: (row["questions"], row["answers"]) for kind, row in data["triage"].items()},
+                         {kind: (1, answers) for kind, answers in asked.items()})
+        self.assertEqual(data["stuck"], {"diagnosed": 1, "answers": {"approach": 1}, "merged_after": 1})
+        self.assertEqual(data["driving"], {surface: {"tickets": 1, "runs": 2, "failed": 1, "share": 0.5}})
+        # A split shows a group of five tickets or more. Every ticket reaches a project that is the repository's
+        # root; no crate of the Rust workspace is reached by five, so there the split is by language alone.
+        split = data["outcomes"]["by_project"]
+        if rooted:
+            self.assertEqual(split[first]["merged"], 7, split)
+            self.assertIn("BY PROJECT", text)
+        else:
+            self.assertEqual((split, data["outcomes"]["by_profile"][name]["merged"]), ({}, 5))
+        for line in ("DRIVING CHECKS", "old-test: lost 1 (100%).", "stuck: approach 1 (100%).",
+                     "Stuck tickets that got a diagnosis: 1 (approach 1).", "runs-with-secrets 1 of 1"):
+            self.assertIn(line, text)
 
     def test_a_python_service_a_typescript_app_and_a_library_both_use(self):
         """tests/projects/shop: a uv workspace and a pnpm workspace that share `lib`. From rail init to a merged

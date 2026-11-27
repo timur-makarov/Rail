@@ -213,18 +213,24 @@ def _pnpm(tree, folders, files):
         for folder in _members(root, folders, [g for g in globs if not g.startswith("!")],
                                [g[1:] for g in globs if g.startswith("!")]):
             members[folder] = tree.json(_join(folder, "package.json")).get("name") or posixpath.basename(folder)
-        names = {name: folder for folder, name in members.items()}
-        uses = {}
-        for folder in members:
-            data = tree.json(_join(folder, "package.json"))
-            wanted = set()
+        def wanted(folder):
+            data, named = tree.json(_join(folder, "package.json")), set()
             for key in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
                 group = data.get(key)
-                wanted |= {name for name, spec in (group.items() if isinstance(group, dict) else [])
-                           if isinstance(spec, str) and spec.startswith("workspace:")}
-            uses[folder] = sorted({names[n] for n in wanted if n in names and names[n] != folder})
+                named |= {name for name, spec in (group.items() if isinstance(group, dict) else [])
+                          if isinstance(spec, str) and spec.startswith("workspace:")}
+            return named
+
         # The root's package.json is the workspace's own file: it holds the tools, not a package of the product.
-        found.append({"profile": "typescript", "root": root, "members": members, "uses": uses, "virtual": True})
+        # It is one when a member depends on it: then the root is a member too.
+        own = tree.json(_join(root, "package.json")).get("name")
+        if own and any(own in wanted(folder) for folder in members):
+            members[root] = own
+        names = {name: folder for folder, name in members.items()}
+        uses = {folder: sorted({names[n] for n in wanted(folder) if n in names and names[n] != folder})
+                for folder in members}
+        found.append({"profile": "typescript", "root": root, "members": members, "uses": uses,
+                      "virtual": root not in members})
     return found
 
 
@@ -377,7 +383,10 @@ class Layout:
                                      for p in self.files)
                 manager = _manager(profile, tree.names, folder, space["root"] if space else None)
                 member = space["members"][folder] if space else None
-                setup, parts = _commands(manager, member, type_check)
+                # Where the manager's filter does not match the package at a workspace's root, that package runs
+                # the lines a project outside a workspace runs, in the root.
+                plain = bool(space and manager and folder == space["root"] and manager.get("root_plain"))
+                setup, parts = _commands(manager, None if plain else member, type_check)
                 found.append({"name": folder or ROOT, "folder": folder, "paths": [_join(folder, "**")], "profile": name,
                               "manager": manager["name"] if manager else None, "setup": setup,
                               "verify": " && ".join(part["run"] for part in parts), "parts": parts,

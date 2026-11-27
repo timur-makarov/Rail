@@ -17,13 +17,16 @@ tests = ["**/*.test.*", "**/*.spec.*", "**/__tests__/**", "**/e2e/**", "**/vites
 # a change that touches the lockfile. Installs run no dependency's lifecycle scripts. oxlint reports its default
 # rules as warnings and exits 0 on them, so the lint part runs it with --deny-warnings. `member_setup` and a
 # part's `member` are what a member of a pnpm workspace runs, where {name} is the member's package name; not
-# checked on a machine with pnpm. A [[projects]] entry of the config puts the repository's own formatter check
-# and scripts in their place (rail docs languages).
+# checked on a machine with pnpm. The package at a workspace's root, where it is a project, runs the lines with
+# no filter in the root (`root_plain`): a filter that names it matches nothing, and pnpm then exits 0. A
+# [[projects]] entry of the config puts the repository's own formatter check and scripts in their place (rail
+# docs languages).
 [[managers]]
 name = "pnpm"
 lockfile = "pnpm-lock.yaml"
 setup = "pnpm install --frozen-lockfile --ignore-scripts"
 member_setup = "pnpm install --frozen-lockfile --ignore-scripts --filter {name}..."
+root_plain = true                                          # --filter matches no package at a workspace's root and exits 0
 verify = [
   { part = "lint", tool = "oxlint", run = "pnpm exec oxlint --deny-warnings", member = "pnpm --filter {name} exec oxlint --deny-warnings" },
   { part = "types", tool = "tsc", run = "pnpm exec tsc --noEmit", member = "pnpm --filter {name} exec tsc --noEmit" },

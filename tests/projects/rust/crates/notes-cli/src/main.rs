@@ -27,6 +27,8 @@ fn run(args: &[String]) -> Result<String, Box<dyn Error>> {
             notes.save(path)?;
             Ok(format!("done {number}\n"))
         }
+        // A fault to switch on from outside, for a check that drives the built command: the list comes out empty.
+        ["list"] if env::var_os("NOTES_FAULT").is_some() => Ok(String::new()),
         ["list"] => Ok(notes.render()),
         _ => Err(USAGE.into()),
     }
