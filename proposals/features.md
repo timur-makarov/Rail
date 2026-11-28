@@ -400,14 +400,13 @@ number. The run cost 448 calls to GitHub's REST API, 64 for each merged ticket.
   the remote, so `rail stats` counted it as merged with no review; a shipped ticket with no pull request was
   sent to `rail advance`, which opens none, and the pull request `rail next` then opened said "Not shipped
   yet".
+- At the PERSON ticket's merge the label `rail:go` was recorded as `continued` and started the checks again,
+  and nothing merged. The owner decided on 2026-11-28 that the merge button is the act: the label is now
+  taken off with no event, and `rail accept` is refused there.
 - Not shown: the `uncovered` question, which needs a sample whose project is not the repository's root (the
   Rust sample). The Terraform folder of a rooted sample asks nothing.
 
 **Left.**
-- **A decision for the owner: the label `rail:go` on a PERSON ticket's pull request at its merge.** A person
-  merges such a ticket with GitHub's merge button. The label there is recorded as `continued`, is taken off,
-  and CI runs again; nothing is merged. `rail docs states` says one act continues any wait. Either the label
-  merges the pull request there, or the page and the brief say that the merge button is the act.
 - **A clone that fetches one branch** (`git clone --depth 1`, as some cloud machines make) has no tracking
   branch for a ticket's branch after its push, so no pull request is opened at the claim and `rail doctor`
   says nothing. Seen in this run. A line in doctor would say it; `rail next --ticket NN` opens the pull
@@ -2492,7 +2491,8 @@ Stated here once, as facts the features rest on.
 - Where the worker judged its own case, a fresh run with no stake answers one closed question the engine
   raises (2026-11-27).
 - A person acts once on a PERSON ticket, at the merge. Approval of a contract before the build is a setting,
-  off unless a project turns it on for a kind (2026-11-27).
+  off unless a project turns it on for a kind (2026-11-27). With a remote that act is GitHub's merge button:
+  the label `rail:go` merges nothing there (2026-11-28).
 - A stuck ticket gets one diagnosis before it is dropped or waits (2026-11-27).
 - A Rail serves one repository (2026-11-27).
 - Anything may be put into a repository, and Rail drives what needs driving. What Rail knows about a

@@ -759,7 +759,9 @@ def _render_answer(x):
 def _render_merge_by_person(x):
     asked = "".join(f"\nThe reviewer found what a revert doesn't undo: {said}" for said in x["asked"])
     if x["remote"]:
-        return f"Ticket {x['ticket']} ({x['tier']}) is ready: a person reviews and merges {_pr(x)}." + asked
+        # Not tested with a model run: the sentence on the merge button and the label.
+        return (f"Ticket {x['ticket']} ({x['tier']}) is ready: a person reviews {_pr(x)} and merges it with GitHub's merge"
+                " button, or closes it. The label rail:go merges nothing there." + asked)
     return (f"Ticket {x['ticket']} ({x['tier']}) is ready to merge. A person reviews branch {x['branch']} and approves the"
             f" merge: {x['wait']['accept']}. The engine then merges it." + asked)
 

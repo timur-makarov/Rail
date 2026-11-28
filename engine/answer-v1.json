@@ -308,6 +308,7 @@
               "CONSULT_LIMIT",
               "GIT",
               "MERGED",
+              "MERGE_ON_GITHUB",
               "NOTHING_TO_ACCEPT",
               "NOTHING_TO_AMEND",
               "NOT_ADOPTABLE",
