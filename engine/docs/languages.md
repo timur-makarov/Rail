@@ -63,7 +63,7 @@ gets `uv`.
 
 | Profile | Manager, by lockfile | `setup` | `verify`, in order |
 |---|---|---|---|
-| `python` | `uv` (`uv.lock`), `poetry` (`poetry.lock`), `pip` (`requirements.txt`, or with no lockfile a tracked `requirements*.txt`) | `uv sync --locked` | format `uv run ruff format --check --extend-exclude .rail --extend-exclude .claude .`; lint `uv run ruff check --extend-exclude .rail --extend-exclude .claude .`; types `uv run basedpyright --level error`; tests `uv run pytest -q`; audit `uv export --locked --no-emit-project --format requirements-txt \| pip-audit --disable-pip --no-deps -r /dev/stdin` |
+| `python` | `uv` (`uv.lock`), `poetry` (`poetry.lock`), `pip` (`requirements.txt`, or with no lockfile a tracked `requirements*.txt`) | `uv sync --locked` | format `uv run ruff format --check --extend-exclude .rail --extend-exclude .claude .`; lint `uv run ruff check --extend-exclude .rail --extend-exclude .claude .`; types `env -u GITHUB_ACTIONS uv run basedpyright --level error`; tests `uv run pytest -q`; audit `uv export --locked --no-emit-project --format requirements-txt \| pip-audit --disable-pip --no-deps -r /dev/stdin` |
 | `typescript` | `pnpm` (`pnpm-lock.yaml`), `npm` (`package-lock.json`), `yarn` (`yarn.lock`), `bun` (`bun.lock`) | `pnpm install --frozen-lockfile --ignore-scripts` | lint `pnpm exec oxlint --deny-warnings`; types `pnpm exec tsc --noEmit`; tests `pnpm test`; audit `pnpm audit` |
 | `rust` | `cargo` (`Cargo.lock`) | `cargo fetch --locked` | format `cargo fmt --check`; lint `cargo clippy --all-targets --locked -- -D warnings`; tests `cargo test --locked`; audit `cargo deny check advisories` |
 | `go` | `go` (`go.sum`) | `go mod download` | format `test -z "$(gofmt -l .)"`; lint `go vet ./...` and `golangci-lint run`; tests `go test -race ./...` (the race detector needs cgo and a C compiler); audit `govulncheck ./...` |
@@ -75,7 +75,9 @@ The other managers of a profile run the same parts through their own runner. How
 - `types` is left out where type checking is off: a `package.json` with no `tsconfig.json`.
 - Python's `types` asks basedpyright for errors only (`--level error`). With no settings of the project's own,
   basedpyright also fails on its warnings, and those are matters of style: a call's result that is not assigned,
-  a method not marked as an override. A project that wants them writes its own settings and command.
+  a method not marked as an override. A project that wants them writes its own settings and command. The
+  command takes `GITHUB_ACTIONS` out of its environment: on a GitHub runner basedpyright writes annotations
+  for the run and then fails on its warnings whatever level it was asked for.
 - TypeScript's `lint` runs oxlint with `--deny-warnings`: oxlint reports its default rules, a `debugger`
   statement among them, as warnings and exits 0 on them.
 - An audit runs only on a change that touches the project's lockfile:

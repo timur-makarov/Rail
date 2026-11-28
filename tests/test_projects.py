@@ -394,7 +394,8 @@ class Uncovered(ShopTest):
         self.assertEqual(found["project api"]["detail"], "python, uv, a member of the workspace at the root; paths api/**;"
                          " uses lib-python; setup: uv sync --locked --package shop-api; verify: uv run ruff format --check"
                          " --extend-exclude .rail --extend-exclude .claude . && uv run ruff check --extend-exclude .rail"
-                         " --extend-exclude .claude . && uv run basedpyright --level error && uv run pytest -q && { git diff"
+                         " --extend-exclude .claude . && env -u GITHUB_ACTIONS uv run basedpyright --level error"
+                         " && uv run pytest -q && { git diff"
                          " --quiet \"$RAIL_BASE\"...HEAD -- ':(top)uv.lock' || uv export --locked --no-emit-project --format"
                          " requirements-txt | pip-audit --disable-pip --no-deps -r /dev/stdin; }")
         self.assertEqual(found["project web"]["detail"], "typescript, pnpm, a member of the workspace at the root, changed"
