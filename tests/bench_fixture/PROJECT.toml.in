@@ -1,0 +1,74 @@
+# The bench's fixture project: a tiny calculator. bench/fixture.py builds its repository from start/ and fixes/ and
+# writes this file next to it, with @REPO@ replaced by the repository's path.
+
+[project]
+name = "calc"
+repo = "@REPO@"
+slug = "acme/calc"
+language = "python"
+package = "acme-calc"
+tests = ["tests/**"]
+
+[commands]
+setup = ""
+test_files = "python3 -m unittest {files}"
+test_package = "python3 -m unittest discover -s {package}/tests -t {package}"
+package_of = "root"
+failed = '^(?:FAIL|ERROR): (\S+ \([^)]*\))'
+timeout_minutes = 5
+env = { PYTHONDONTWRITEBYTECODE = "1" }
+
+[rail.config.commands]
+verify = "python3 -m unittest tests.test_ops"
+timeout_secs = 120
+
+# The calculator has no manifest, so no project is found from it: one is declared, and no folder is left to ask about.
+[[rail.config.projects]]
+name = "calc"
+paths = ["**"]
+
+[[situation]]
+id = "calc-01"
+request = """add() gives the wrong answer
+calc.ops.add(2, 3) returns -1. It should return 5."""
+start = "start"
+hidden_tests = ["tests/test_add.py"]
+fix = "calc-01-fix"
+closed = 2026-12-01
+kind = "wrong-result"
+half = "work"
+issue = "https://github.com/acme/calc/issues/7"
+pull = 8
+
+[[situation]]
+id = "calc-02"
+request = """div(1, 0) crashes with ZeroDivisionError
+Dividing by zero should raise ValueError("division by zero"), which the callers catch."""
+start = "start"
+hidden_tests = ["tests/test_div.py"]
+fix = "calc-02-fix"
+closed = 2026-12-02
+kind = "crash"
+half = "work"
+
+[[situation]]
+id = "calc-flaky"
+request = """Add neg()
+calc.ops needs neg(a), which returns -a."""
+start = "start"
+hidden_tests = ["tests/test_neg.py"]
+fix = "calc-flaky-fix"
+closed = 2026-12-03
+kind = "missing-behaviour"
+half = "work"
+
+[[situation]]
+id = "calc-null"
+request = """Document mul()
+mul() has no docstring."""
+start = "start"
+hidden_tests = ["tests/test_mul_more.py"]
+fix = "calc-null-fix"
+closed = 2026-12-04
+kind = "missing-behaviour"
+half = "held"

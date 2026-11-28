@@ -10,34 +10,47 @@ stores state. Never edit it by hand: the guard denies it.
 | `NN-review.json` | The review runs: each run's findings as the reviewer wrote them |
 | `NN-advice.md` | What consult advised, one section per consult |
 | `NN-summary.md` | A sweep ticket only: what the sweep found |
+| `NN-evidence.json` | Only where a ship drove the product: `{patch_id: {surface: {files: {name: text}, cut, left}}}` for the last shipped patch, with `cut` the files cut at a cap and `left` the files that are not text and stay on the machine (`rail docs product`) |
+| `NN-coverage.json` | Only where the ticket's ship was answered about a folder inside no project: `{folder: {types, answer, holds, covered_by}}` (`rail docs languages`) |
 
 ## Events: `NN-events.jsonl`
 
 - One JSON object per line. The engine appends; nothing is rewritten.
 - Every line has `v` (1), `at` (UTC, ISO 8601, to the second), `ticket` and `event`.
 - A reader ignores fields and events it doesn't know.
+- An event of any kind may carry `gh_calls`: the GitHub REST calls the engine made since the event before it, on
+  the last event of each write. Calls a command makes after its last event, and those of a command that writes
+  none (a `rail next` with nothing to do, `rail status`), wait in the local cache and go onto the next event a
+  command writes in that clone, whatever its ticket. So one event's number says little, and the sum over the
+  journals is every call the engine made: `rail stats` divides it by the merged tickets.
 - Between green CI and the merge the engine writes nothing here except `continued`, because a journal commit
   would move the head CI just passed. What is needed then lives on GitHub (labels) or in the local cache.
 
 | Event | Written when | Fields | Read by |
 |---|---|---|---|
-| `requested` | The ticket is made: `rail add`, intake, a sweep, `rail adopt` | `via` (`add`, `intake`, `sweep`, `adopt`), `channel` (`session`, `github`, `tracker`, `engine`, or the `## Grilling` record's channel), `grilled`, `assumed` (open ASSUMED rows at the start), `filed_by` (the issue's author), `not_taken` (why an issue's whole ticket became a request), `external_id` (the ticket's, when it has one). When grilled: `agent`, `person`, `started`, `confirmed`, `drafts`, and `questions` with each one's `id`, `topic`, `recommended` and `taken` | `rail stats`. A drop mark on the counter branch keeps a copy, since the journal goes with the branch |
-| `accepted` | Ticket lint first passes on an AUTO ticket; a person approves; an amend takes effect | `by` (`engine`, `person`), `via` (`lint`, `label`, `accept`, `amend`, `merge`), `tier`, `contract`, `done`, `scope_paths`, `note` | The `accepted` state. Ship and CI compare `contract` and `tier` with the ticket: that is the freeze. `via: merge` is a contract pull request that a person merged |
-| `amended` | `rail amend NN` | `contract` (the new hash), `changed` (any of `done_contract`, `scope`, `tier`), `added_paths`, `needs_approval`, `reason` (when one was given) | When `needs_approval` is true, the ticket waits until a later `accepted` |
+| `requested` | The ticket is made: `rail add`, intake, a sweep, `rail adopt` | `via` (`add`, `intake`, `sweep`, `adopt`, `revert`), `channel` (`session`, `github`, `tracker`, `engine`, or the `## Grilling` record's channel), `grilled`, `assumed` (open ASSUMED rows at the start), `filed_by` (the issue's author), `not_taken` (why an issue's whole ticket became a request), `hidden_removed` (how many HTML comments intake took out of the request, when any), `external_id` (the ticket's, when it has one), and after a failed deploy to dev `opened` (when the smoke check's issue was opened) on the revert and the fix, with `smoke: true` on the fix. When grilled: `agent`, `person`, `started`, `confirmed`, `drafts`, and `questions` with each one's `id`, `topic`, `recommended` and `taken` | `rail stats`. A drop mark on the counter branch keeps a copy, since the journal goes with the branch |
+| `accepted` | Ticket lint first passes; a person approves; an amend takes effect | `by` (`engine`, `person`), `via` (`lint`, `label`, `accept`, `amend`, `merge`), `tier`, `contract`, `done`, `scope_paths`, `kinds` (the ids of what the ticket holds that a revert doesn't undo: those its `person_reason` names, in the order written, and those its scope's paths reach; `rail docs kinds`), `wait` (the code of the wait a person's approval answered, such as `APPROVE_CONTRACT`), `note` | The `accepted` state. Ship and CI compare `contract` and `tier` with the ticket: that is the freeze. `via: merge` is a contract pull request that a person merged |
+| `amended` | `rail amend NN` | `contract` (the new hash), `changed` (any of `done_contract`, `scope`, `tier`, `after`, `priority`), `added_paths`, `needs_approval`, `reason` | When `needs_approval` is true, the ticket waits until a later `accepted` |
 | `adopted` | `rail adopt BRANCH FILE` filed the ticket with a branch's work on it | `branch` (the adopted branch), `head` (its head commit, 12 characters) | `rail stats` |
 | `drafting` | `next`, when it hands a session the brief to write an unfinished ticket's contract | `session` | Other sessions leave that contract alone for `[claim] stale_minutes`; `rail next --ticket NN` takes it over |
 | `claimed` | A claim or a takeover inside `next`, or `rail adopt` | `session`, `takeover`, and in a cloud session `session_url` | The `implementing` state. `next` finds this session's ticket by it, and the pull request ends with the last `session_url` |
 | `base_checks` | `next`, at a ticket's first claim, once setup has passed, unless `[commands] base_checks` is false. Not for a ticket with no `Check:` line. `rail adopt` writes it from its gate, where every check was red | `base` (the base branch's commit, 12 characters), `checks`: each check's `command` and `result` (`red`: it ran and failed; `green`: it ran and passed; `could_not_run`: exit 127 or 126; `timed_out`: past `timeout_secs`) | `rail stats`; the IMPLEMENT brief and the reviewer's brief, when every check was green. It is no step, no attempt and no state |
-| `saved` | `rail save`, the save hooks, and `advance` before a long command | `via` (`save`, `stop`, `pulse`, `advance`), `files` | Shows the ticket is alive: its `at` is what `[claim] stale_minutes` is measured from |
+| `saved` | `rail save`, the save hooks, `advance` before a long command, and `rail work` while its worker runs | `via` (`save`, `stop`, `pulse`, `advance`, `work`), `files` | Shows the ticket is alive: its `at` is what `[claim] stale_minutes` is measured from |
+| `worked` | `rail work NN`, once its worker run ended | `code` (the answer it ran for), `model`, `effort`, `end` (`done`, `turns`, `budget`, `timeout`, `error`), `minutes`, `resumed`, `resume_failed` (a resume failed and it ran fresh), and from the command's JSON result when it gave one: `cost_usd` (none after a timeout), `turns`, `session`. `counts` and `keys`: Bash commands that failed before the first one of the same program passed (`failed`), commands the shell couldn't find (`not_found`), tool calls a rule or the guard denied (`denied`), files read more than twice (`reread`). A key is the program (the first word after `NAME=value` words, a leading `cd DIR &&`, and `uv run`, `npx`, `pnpm exec`, `poetry run`, `bundle exec`), the denied program or tool with the rule, or the path. `tools`: the declared tools the run used, by name (`rail docs tools`) | The next run's `RAIL_SESSION`. While a rebase is open the event waits in the local cache (`rail docs loop`) |
 | `step` | Every step the engine runs (below) | `step`, `status` (`ran`, or `could_not_run` when the shell couldn't start the command: exit 127 or 126), `result` (`pass`, `fail`; always `fail` when it couldn't run), `patch_id`, `counted`, `detail`, `duration_ms`, `cost_usd`. A failed step has `signature`: the step's name and 12 hex characters of a hash of its normalised output (below) | The retry budget and cap, and the pull request's Evidence table |
 | `shipped` | Every ship step passed for the current patch | `patch_id`, `head`, `tier`, `size` | CI's "not shipped yet" test, and the `reviewing` and `in-ci` states |
-| `split_offered` | The first ship of an AUTO ticket whose change is over `[size] cap`, when no `person_paths` or `migration_paths` file raised it. Once per ticket | `patch_id`, `size`, `cap` | The `SPLIT` brief; the next ship raises the tier as usual. No step failed, so it spends no attempt. `rail stats` |
-| `guided` | `next` or `advance` named a `[guides]` page in a brief, the first time for each situation. Not while a rebase is stopped | `situation` (`start`, `stuck`, `findings`, `conflict`, `contract`, `split`), `path` | `start` is named once per ticket. `rail stats` (`rail docs guides`) |
-| `tier_raised` | Ship makes an AUTO ticket PERSON, or a review run asks for a person | `from`, `to`, `reason` (`size`, `person_paths`, `migration_paths`, `reviewer`), `detail` (for `reviewer`: the reviewer's sentence) | The ticket's tier from then on, CI included |
-| `finding` | A review run reports or repeats a finding; `rail answer`; a refuter or the owner decides one | `id`, `outcome` (`open`, `fixed`, `declined`, `parked`), `by` (`reviewer`, `author`, `refuter`, `owner`), `reason`, `disputed`. The first event for an id also has `severity`, `claim` and `check` | `advance` and CI: no finding may be open. The sweep reads the parked ones and the `check` of fixed ones |
+| `base_tests` | Ship, once every step has passed, when the change edits, deletes or renames a file of the base that matches `[tests] paths`: the engine ran `verify` and each `Check:` line once more with the base's version of those files (`rail docs triage`). Once for a patch | `patch_id`, `base` (the base commit, 12 characters), `files` (the paths as the base has them), `commands` (for each: `step`, `command`, `result`, which is `green`, `red`, `could_not_run` or `timed_out`, and for a red one `output`, the end of what it printed) | The `old-test` question of the triage step, and the reviewer's brief. Never a gate: it fails no step |
+| `split_offered` | The first ship of an AUTO ticket whose change is over `[size] cap`, when no file on a kind's paths raised it. Once per ticket | `patch_id`, `size`, `cap` | The `SPLIT` brief; the next ship goes on as AUTO. No step failed, so it spends no attempt. `rail stats` |
+| `question` | Ship, once every step has passed: a type of the triage step found its fact in the patch (`rail docs triage`). `next`, for a ticket at its retry cap: the one question of type `stuck`, which has no `patch_id` (`rail docs retries`) | `id` (`Q1`, `Q2`, ... by ticket), `type`, `patch_id`, `key` (what tells one fact of the type from another), `fact` (the fact as plain values, with `said`, the fact in one line) | The `reviewing` state and `next`'s `TRIAGE` answer, while the patch's question has no answer; the triage run's brief; CI; `rail stats` |
+| `answered` | A triage run answered a question | `id`, `type`, `patch_id`, `answer`, `reason` (the run's own), `evidence` when it named any, `evidence_ok` when the engine checked it (false: the answer does not count, and the question stays open), `model`. What the run cost is on its `step` event, as every run's is | State derivation: the ticket goes on, or `triage` failed and the worker's brief shows the answer; ship, which keeps a stopping answer for the same patch; the sweep and `rail stats` |
+| `restarted` | `next`, after a person continued the wait `SECRET_FOUND`, or after the diagnosis of a stuck ticket answered `approach`: the engine started the ticket's branch again from the base branch, under a new name (`rail docs triage`, `rail docs retries`) | `question`, `type` (`secret` or `stuck`), `branch` (the old branch), `to` (the new one), `rule` and `file` of the finding where the line's fingerprint names them, and for `stuck` `note`, what the diagnosis named | The worker's next brief, until the ticket ships on the new branch; state derivation, which then no longer starts the branch again, counts no failure of the old branch as this patch's and, for `stuck`, starts the retry budget and cap again |
+| `guided` | `next` or `advance` put a `[guides]` page's text in a brief, the first time for each situation. Not while a rebase is stopped | `situation` (`start`, `stuck`, `findings`, `conflict`, `contract`, `split`), `path` | `start` is given once per ticket. `rail stats` (`rail docs guides`) |
+| `tier_raised` | Ship makes an AUTO ticket PERSON, or a review run asks for a person | `from`, `to`, `reason` (`kinds`, `person_paths`, `migration_paths`, `reviewer`; `size` from an older engine), `kind` (the kind's id; for `reviewer`, its first item's), `kinds` (for `reviewer`: each id it listed), `detail` (for `reviewer`: the first item, as `kind: file:line: why`; for a path: the files) | The ticket's tier from then on, CI included |
+| `finding` | A review run reports or repeats a finding; `rail answer`; a refuter or the owner decides one | `id`, `outcome` (`open`, `fixed`, `declined`, `parked`), `by` (`reviewer`, `author`, `refuter`, `owner`, and `engine` when an upheld finding stands on an AUTO ticket), `reason`, `disputed`. The first event for an id also has `severity`, `claim` and `check` | `advance` and CI: no finding may be open. The sweep reads the parked ones and the `check` of fixed ones |
+| `flake` | Ship: `verify` or a `Check:` line failed, the engine ran that one command once more on the same code, and it passed | `step` (`verify`, `checks`), `command`, `patch_id`, `codes` (the two exit codes, `timeout` for a run that timed out) | The worker's brief, the reviewer's brief, the sweep and `rail stats` (`rail docs retries`). The step's own event still says `fail` |
 | `consulted` | Consult ran | `trigger` (`retry_cap`, `request`), `step`, `verdict` (`proceed`, `change`, `stop`), `same_model` | The retry rule below, and the limit of three per ticket |
-| `continued` | A person continued a wait with `rail:go` or `rail accept` | `via` (`label`, `accept`), `note` | A fresh retry budget, and the agent's next brief |
-| `dropped` | `rail drop` | `by` (`agent`, `person`), `reason` | The `dropped` state |
+| `continued` | A person continued a wait with `rail:go` or `rail accept` | `via` (`label`, `accept`), `wait` (the code of the wait it continued, such as `MERGE_BY_PERSON`), `note` | A fresh retry budget, and the agent's next brief |
+| `dropped` | `rail drop`, or the engine at the retry cap of an AUTO ticket (`STUCK`). A pull request closed by hand writes no event, only the drop's mark (below) | `by` (`agent`, `person`, `engine`), `reason`; from the engine also `step` and `signature`, the step it stopped at and its last failure's; `diagnosis`, the answer of the diagnosis the ticket got at its retry cap, when it got one; `replaced_by`, the tickets that replace a ticket that was split | The `dropped` state. Written before the drop's mark, which is written before anything is removed |
 
 `contract` is the first 12 hex characters of the SHA-256 of the Done Contract section and the sorted
 `scope_paths`, with whitespace normalised. The tier is not in the hash: it is compared by rank, so it may
@@ -57,6 +70,13 @@ A sample:
 {"v":1,"at":"2026-01-11T14:41:13Z","ticket":"14","event":"finding","id":"F1","outcome":"fixed","by":"author","reason":"Both paths now revoke the old token."}
 ```
 
+**Every decision of an agent carries its reason.** `rail answer NN F1 fixed|declined|parked`, `rail amend` of
+an accepted contract and `rail drop` refuse an empty reason from an agent, so a `finding`, `amended` or
+`dropped` event written by one always says why: the next review run, the sweep and `rail stats` read the
+journal, and a decision with no reason tells them only that something happened. A person's act needs none
+(`rail answer ... --owner` on `fixed` and `parked`, `rail drop --by person`): approving is itself the
+reason. Ticket lint refuses a `VERIFIED: decided, not checked:` row with nothing after it.
+
 ## Steps
 
 | `step` | Run at | Fails when |
@@ -69,23 +89,29 @@ A sample:
 | `change` | Ship, after every other check has passed | The ticket changes no file (a sweep ticket may). Recorded only when it fails |
 | `rules` | Ship, CI | A structure rule matches an added line or file |
 | `migration` | Ship, CI | A ticket on `migration_paths` lacks `reversibility` or `rollback` |
-| `size` | Ship, CI | Never. On an AUTO ticket, a count over `[size] cap` writes `split_offered` at the first ship that meets it and stops there; after that, and in CI, `tier_raised` |
+| `size` | Ship, CI | Never. On an AUTO ticket, a count over `[size] cap` writes `split_offered` at the first ship that meets it and stops there; after that the ship goes on. Size raises no tier |
 | `doc-lint` | Ship, CI | `ARCHITECTURE.md` no longer matches the tree |
 | `verify` | Ship, CI | The command fails. When it fails on the base branch too, the event has `counted: false` |
+| any ship step | Ship | A command that couldn't run has `counted: false`. A failed `verify`, `checks`, `sensors` or product step with a declared tool out of reach has `counted: false` and `tools_down` (each tool and what its probe said): `rail docs retries` |
 | `checks` | Ship, CI | A `Check:` line fails; `detail` names it |
+| `sensors` | Ship, CI, last, when the change touches a sensor's `paths` | A sensor reports a violation on a line the change adds; `detail` counts them and names the sensors. `could_not_run` when a sensor ends with an exit it doesn't declare (`rail docs sensors`). Passed or failed, the event has `excused` when a `SENSOR(NN)` comment answered a violation: for each, `sensor`, `path`, `line`, `message`, and the comment's `marker_line` and `marker` |
+| `product` | Ship, CI, last, when the change reaches a surface | `start`, `ready` or `seed` fails, and `detail` names which, as `ready: not ready after 120s`; or `stop` fails after everything else passed. When the product does not start on the base branch either, `detail` is `red base` and the event has `counted: false` (`rail docs product`) |
+| `product:NAME` | Ship, CI, after `product`, for each surface the change reaches | The surface's driving check fails. `detail` says what it left as evidence, as `2 evidence files, 1 more left on the machine` |
+| `triage` | `advance`, once for each open question, before any review; ship, with no run, when an answer that stopped this same patch still stands; CI | The answer stops the change or holds it for a person; `detail` is the question, its type and the answer, as `Q1 old-test: lost`, and the event has `question` and `type`. A run past `timeout_secs`, one whose output is invalid and one whose evidence fails the engine's check fail with `counted: false`. In CI: a question about the patch is open, or its answer stops the change |
 | `review`, `security` | `advance` | The run leaves a blocking finding open. A run past `timeout_secs` fails with `detail: "timeout"`, and a run whose output is invalid with `detail: "invalid output: ..."`, both with `counted: false`. No run and no step when the change needs no review |
-| `refuter` | `advance` | The refuter upholds the finding. A pass means it dismissed it |
+| `refuter` | `advance`; `rail answer` | The refuter upholds the finding. A pass means it dismissed it. On an AUTO ticket, `rail answer` writes a failed `refuter` step, with no run, when the author disputes a finding a refuter already upheld: the verdict stands, and the dispute counts toward the retry cap |
 | `sweep` | `rail sweep` | Never |
-| `harvest` | `rail sweep`, when nothing merged without a review: no review run | Never. `detail: "nothing to file"` when the sweep found nothing, and its ticket then merges with no task |
+| `harvest` | `rail sweep`, when no review pass ran (nothing merged without a review, and no area to read), and after a pass when the sweep found nothing | Never. `detail: "nothing to file"` when the sweep found nothing, and its ticket then merges with no task |
 | `merge` | `advance`, with no remote | The base branch moved during the merge |
 
 **The retry budget.** A step's attempts are its `step` events with `result: "fail"` and `counted` not false
-(a command that couldn't run is an attempt too),
+(a ship step that couldn't run, or that failed with a declared tool out of reach, is none),
 since that step last passed or since a person's `continued` or approval, whichever is later. Two attempts in a
 row are the same failure when their `signature`s are equal, or when either has none (an older engine wrote
 it). At `[retry] budget` same failures in a row consult runs once for that step and the agent gets one more
-attempt; if that fails too, the ticket waits for a person. At `[retry] cap` attempts, whatever their
-signatures, the ticket waits for a person (`rail docs retries`).
+attempt; if that fails too, the ticket is stuck. At `[retry] cap` attempts, whatever their signatures, the
+ticket is stuck. A stuck AUTO ticket is dropped with a record; a stuck PERSON ticket waits for a person
+(`rail docs retries`).
 
 **The signature** is `STEP:HASH`. The hash is the first 12 hex characters of the SHA-256 of the tail of the
 failure's output, lower-cased, with absolute paths, temp-folder names, hex strings and runs of digits
@@ -134,7 +160,7 @@ One file per ticket. The engine appends one entry per run.
 | `head` | The commit the reviewer saw | The person, and the reset after the run |
 | `tier` | The tier at the time | CI: was a `security` run needed |
 | `disputes` | A refuter run only: the finding's id | `advance`: which finding the refuter judged |
-| `needs_person` | A `review` or `security` run that asked for a person: its sentence | The pull request's Risk section and the wait for a person |
+| `kinds` | A `review` or `security` run that listed any: its `kinds` items | The pull request's Risk section and the wait for a person |
 | `model`, `cost_usd` | From the command's JSON, when it gives them. `model` is the one that did the work | The Evidence table |
 
 **A review is complete for a patch** when all three hold. The `reviewing` state and CI use the same test:
@@ -142,20 +168,21 @@ One file per ticket. The engine appends one entry per run.
 1. A `review` run exists with this `patch_id`. On a PERSON ticket, a `security` run exists too. An AUTO
    ticket whose every changed product file is in `[review] skip_paths`, or that changes no product file,
    needs no run.
-2. No finding is open: the last `finding` event for every id has another outcome.
+2. No blocking finding is open: the last `finding` event for every blocking id has another outcome. An
+   advisory finding may stay open.
 3. A blocking finding marked `fixed` counts only once a later run of the same role didn't repeat it. Marking
    it fixed and changing nothing doesn't pass.
 
 ## What a reviewer returns: `review/v1`
 
 Every run of `[review] command` returns this shape: the review, the security seat, the refuter and the
-sweep. The schema is `.rail/engine/review-v1.json`; the default command passes its text to
-`claude -p --json-schema`.
+sweep. The schema is `.rail/engine/review-v1.json`; the default command passes the base branch's copy of
+its text (`RAIL_REVIEW_SCHEMA`, `rail docs review`) to `claude -p --json-schema`.
 
 | Field | Holds | Read by |
 |---|---|---|
 | `summary` | One or two sentences: what was checked and how. In a refuter run: why the finding holds or doesn't | The pull request's Evidence row; the reason on a finding the refuter dismisses |
-| `findings[].severity` | `blocking` (must not merge as it is), `advisory` (worth fixing, safe to merge), `parked` (a real problem this change didn't cause) | `advance`: a blocking finding holds the ticket; a parked one needs no answer |
+| `findings[].severity` | `blocking` (must not merge as it is), `advisory` (worth fixing, safe to merge), `parked` (a real problem this change didn't cause) | `advance`: a blocking finding holds the ticket; an advisory one may stay open, and the sweep gathers it; a parked one needs no answer |
 | `findings[].file`, `line` | A path from the repository root, and a line in the file as it is after the change | The author's next brief |
 | `findings[].claim` | What is wrong, and the input or sequence that shows it | The author, the refuter and the person |
 | `findings[].check` | A deterministic check that would catch this kind of mistake, when one exists | The sweep, which turns repeated kinds into checks |
@@ -164,7 +191,7 @@ sweep. The schema is `.rail/engine/review-v1.json`; the default command passes i
 | `findings[].evidence.reproduced` | Added by the engine: true when every non-empty line of `output`, normalised as failure signatures are (numbers, hashes, paths and spacing left out), is in the re-run's output. Nothing is decided from it | `rail stats` |
 | `findings[].evidence.scripts` | Added by the engine: `{path: text}` of each untracked file the command names (at most 3, each cut at 8,000 characters), which the clean-up removes | The author's brief, with the finding |
 | `findings[].repeats` | On a re-review: the id of the earlier finding this one repeats | The engine: the finding keeps its id and is open again |
-| `needs_person` | Optional, rarely given: one sentence on why a person should see the change although no finding blocks it | `advance`: from a `review` or `security` run, an AUTO ticket becomes PERSON. A refuter's or a sweep's is ignored |
+| `kinds` | Optional: each thing in the change a revert doesn't undo, as `kind` (an id from `rail docs kinds`; an unknown one makes the output invalid), `file`, `line` and `why` | `advance`: from a `review` or `security` run, an AUTO ticket becomes PERSON; on a PERSON ticket they are only recorded. A refuter's or a sweep's are ignored |
 
 After the schema, the engine checks what only it can: `file` is a tracked path at the reviewed commit and
 `line` is inside it (within two lines, because reviewers are sometimes off by one or two); `repeats` names
@@ -188,7 +215,16 @@ ended (`rail docs stats`).
   which records that a person ended a wait.
 - **Ticket IDs.** They are taken from the counter branch `rail/ids` on the remote (`rail docs tickets`).
 - **A dropped ticket's journal** goes with its branch. Its ID, the title it was added with and the drop
-  itself (a `rail drop NN` commit, which keeps the `requested` event) stay in the counter branch, so a dropped ticket stays dropped when its
-  branch is deleted.
+  itself stay in the counter branch, so a dropped ticket stays dropped when its branch is deleted. The drop's
+  mark is a `rail drop NN` commit whose message keeps the `requested` event with one more key, `dropped`: `by`,
+  `reason`, `at`, `cost_usd` (what the ticket's worker and review runs reported, when they reported any),
+  from the engine `step` and `signature`, `diagnosis` and `replaced_by` as the event has them, and for a PERSON
+  ticket `tier` and `kinds`. A pull request closed
+  without a merge gets the same mark, `by` a person. The mark is written before the worktree and branches
+  are removed and before the pull request is closed. When it can't be (offline, or a push refused other than by
+  another clone's push), nothing is removed and the ticket rests as `DROP_PENDING` until a later `rail next`
+  writes it and finishes the drop.
 - **The local cache** in the git directory (`rail/cache/`): a requested merge, the waits already announced,
-  when the save hook last ran. Nothing else needs it, and a fresh clone works without it.
+  when the save hook last ran, each `rail work` run's log (`work/NN`: one line per tool call, cut at 200
+  characters a line and 500 lines a run), a `worked` event a rebase holds back (`worked/NN`), and the GitHub calls no event carries yet (`gh_calls/`). Nothing
+  else needs it, and a fresh clone works without it.

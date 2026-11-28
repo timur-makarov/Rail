@@ -59,6 +59,10 @@ def failed_step(answer):
     return failed[0]["step"], failed[0].get("detail")
 
 
+def step_of(answer, name):
+    return [s for s in answer["steps"] if s["step"] == name][-1]
+
+
 def journal(fx, nn="1", branch="1-fix-add"):
     return [json.loads(l) for l in fx.git("show", f"{branch}:.rail/journal/{nn}-events.jsonl").splitlines()]
 
@@ -150,6 +154,26 @@ class Ship(RailTest):
         recorded = [e for e in journal(p) if e["event"] == "step" and e["step"] == "verify"][-1]
         self.assertNotIn("counted", recorded)
         self.assertEqual(p.rail("next", "--ticket", "1")["reason"]["code"], "STEP_FAILED")
+
+
+    def test_setup_and_verify_take_their_own_limits_and_a_check_still_stops_at_timeout_secs(self):
+        # A cold build in a new worktree needs longer than a check should ever run.
+        p = self.fixture(config=CONFIG.replace("timeout_secs = 60", "timeout_secs = 2\nsetup_timeout_secs = 30\n"
+                                               "verify_timeout_secs = 30\nsetup = 'sleep 3'")
+                         .replace("python3 -m py_compile src/calc.py", "sleep 3 && python3 -m py_compile src/calc.py"))
+        p.add(ticket(check="sleep 30"))
+        claimed = p.rail("next")
+        self.assertEqual((step_of(claimed, "setup")["result"], claimed["reason"]["code"]), ("pass", "IMPLEMENT"))
+        p.fix_calc("1")
+        failed = p.rail("advance", "1", expect=3)
+        self.assertEqual(step_of(failed, "verify")["result"], "pass")
+        self.assertEqual(failed_step(failed), ("checks", "sleep 30: timeout"))
+
+    def test_with_no_limit_of_its_own_setup_stops_at_timeout_secs_as_before(self):
+        p = self.fixture(config=CONFIG.replace("timeout_secs = 60", "timeout_secs = 2\nsetup = 'sleep 30'"))
+        p.add(ticket())
+        claimed = p.rail("next", expect=None)
+        self.assertEqual((step_of(claimed, "setup")["result"], step_of(claimed, "setup")["detail"]), ("fail", "timeout"))
 
 
 class Conflicts(RailTest):
@@ -247,7 +271,7 @@ class RemoteMerge(RailTest):
         self.assertEqual(a.rail("status")["tickets"][0]["note"], "waiting: merge failed")
         waiting = a.rail("next", "--ticket", "1")
         self.assertEqual((waiting["owner"], waiting["reason"]["code"], waiting["action"]["kind"]),
-                         ("human", "MERGE_FAILED", "human_wait"))
+                         ("person", "MERGE_FAILED", "person_wait"))
         self.assertIn("was requested and hasn't landed", waiting["action"]["brief"])
         self.assertIn("rail accept 1", waiting["action"]["brief"])
         self.assertIn("rail:needs-you", github.pr(1)["labels"])
@@ -272,7 +296,7 @@ class RemoteMerge(RailTest):
         a.rail("next")
         self.assertIn("rail:needs-you", github.pr(1)["labels"])
         waiting = a.rail("next")
-        self.assertEqual((waiting["owner"], [w["needs"] for w in waiting["waits"]]), ("human", ["MERGE_FAILED"]))
+        self.assertEqual((waiting["owner"], [w["needs"] for w in waiting["waits"]]), ("person", ["MERGE_FAILED"]))
         self.assertIn("was requested and hasn't landed", waiting["waits"][0]["brief"])
         self.assertNotIn("holds ticket 1", waiting["waits"][0]["brief"])
         self.assertEqual(a.rail("status")["tickets"][0]["note"], "waiting: merge failed")
@@ -314,8 +338,8 @@ class LocalMerge(RailTest):
         p.write("src/calc.py", "def add(a, b):\n    return a - b  # my own edit\n")  # uncommitted, in the main checkout
         refused = p.rail("advance", "1", expect=3)
         self.assertEqual((refused["state"], refused["owner"], refused["reason"]["code"]),
-                         ("merge-ready", "human", "MERGE_FAILED"))
-        self.assertEqual(refused["action"]["kind"], "human_wait")
+                         ("merge-ready", "person", "MERGE_FAILED"))
+        self.assertEqual(refused["action"]["kind"], "person_wait")
         self.assertEqual(failed_step(refused)[0], "merge")
         self.assertIn("src/calc.py", refused["action"]["brief"])
         self.assertEqual(p.git("rev-parse", "main"), before)
@@ -336,6 +360,9 @@ class RailCI(RailTest):
         self.assertEqual(result["reason"]["code"], "CI_NO_TICKET")
         self.assertEqual(failed_step(result), ("verify", "exit 1"))
         self.assertIn("No ticket on branch bump-deps", result["action"]["brief"])
+        # The run's log is where a person reads why: the failing command's output is in the answer.
+        self.assertIn("Failed at 'verify':", result["action"]["brief"])
+        self.assertIn("SyntaxError", result["action"]["brief"])
 
     def test_ci_fails_a_change_that_needs_a_higher_tier_than_it_shipped_as(self):
         # The ticket shipped AUTO; on the pull request's head the project's config makes its change a person's.
@@ -378,7 +405,7 @@ class Choosing(RailTest):
         self.assertEqual(p.rail("intake", "--external-id", "PROJ-7", "--title", "Fix totals", "--brief", brief)["created"],
                          ["3"])
         self.assertEqual(p.rail("next", "--ticket", "PROJ-7")["ticket"], "3")
-        self.assertEqual(p.rail("drop", "PROJ-7")["state"], "dropped")
+        self.assertEqual(p.rail("drop", "PROJ-7", "--reason", "not needed")["state"], "dropped")
         self.assertEqual([(t["ticket"], t["state"]) for t in p.rail("status")["tickets"]],
                          [("1", "accepted"), ("2", "implementing"), ("3", "dropped")])
 

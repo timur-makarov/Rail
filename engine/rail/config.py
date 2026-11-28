@@ -5,38 +5,71 @@ import difflib
 import os
 import tomllib
 
+from .ticket import KINDS
 from .util import RailError
 
 REVIEW_COMMAND = (
-    "claude -p --safe-mode --system-prompt-file .rail/engine/reviewer.md "
+    "claude -p --safe-mode --effort high --autocompact 400000 --system-prompt-file \"$RAIL_REVIEW_PROMPT\" "
     "--tools Read,Grep,Glob,Bash,Edit,Write --allowedTools Bash,Edit,Write "
     "--disallowedTools 'Bash(git push *)' --output-format json "
-    "--json-schema \"$(cat .rail/engine/review-v1.json)\""
+    "--json-schema \"$(cat \"$RAIL_REVIEW_SCHEMA\")\""
+)
+
+# The worker `rail work` starts. Every flag lives here, so another vendor's CLI fits too: the engine reads the JSON keys
+# it finds in the output and ends the run after [worker] timeout_minutes.
+WORKER_COMMAND = (
+    'claude -p --output-format stream-json --verbose ${RAIL_MODEL:+--model "$RAIL_MODEL"} '
+    '${RAIL_EFFORT:+--effort "$RAIL_EFFORT"} --permission-mode auto --permission-prompts none --max-turns 300 '
+    '--max-budget-usd 15 --autocompact 400000 ${RAIL_SESSION:+--resume "$RAIL_SESSION"}'
 )
 
 DEFAULTS = {
     "base_branch": "main",
-    "person_paths": [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".claude/**", ".github/workflows/**"],
-    "migration_paths": ["**/migrations/**"],
-    "commands": {"setup": "", "verify": "", "provision": "", "timeout_secs": 900, "base_checks": True},
+    "person_paths": [".rail/bin/**", ".rail/engine/**", ".rail/config.toml", ".rail/sensors/**"],  # the kind `controls`
+    "migration_paths": ["**/migrations/**"],  # the kind `data-loss`
+    # Kinds whose tickets wait for a person's approval of the contract before the build. Empty: a person acts once
+    # on a PERSON ticket, at the merge.
+    "approve_contract": [],
+    # Paths that hold each kind of change a revert doesn't undo (rail docs kinds).
+    "kinds": {kind: [".github/workflows/**", ".claude/**"] if kind == "runs-with-secrets" else [] for kind in KINDS},
+    "commands": {"setup": "", "verify": "", "provision": "", "timeout_secs": 900, "setup_timeout_secs": 0,
+                 "verify_timeout_secs": 0, "base_checks": True},
     "size": {"cap": 600, "exclude": []},
     "review": {"command": REVIEW_COMMAND, "model": "", "skip_paths": []},
+    "triage": {"command": "", "model": ""},
     "retry": {"budget": 2, "cap": 5},
-    "consult": {"command": "claude -p --safe-mode --tools Read,Grep,Glob", "model": ""},
+    "consult": {"command": "claude -p --safe-mode --effort high --autocompact 400000 --tools Read,Grep,Glob", "model": ""},
     "claim": {"stale_minutes": 30, "save_minutes": 10},
     "worker": {"ladder": ["claude-sonnet-5-5:medium", "claude-sonnet-5-5:high", "claude-opus-5-5:medium"],
                "person_ladder": ["claude-opus-5-5:medium", "claude-opus-5-5:high"],
-               "contract": "claude-opus-5-5:high"},
+               "contract": "claude-opus-5-5:high", "command": WORKER_COMMAND, "timeout_minutes": 90,
+               "ticket_usd": 40.0, "daily_usd": 0.0},
     "sweep": {"after": 20, "every": 20},
+    "stats": {"held_days": 14},
     "map": {"depth": 1, "ignore": []},
-    # A page named in the brief when its situation applies. The pages come with the seed config only: a project
-    # whose config has no [guides] table gets no guide.
+    "tests": {"paths": []},
+    # A page whose text the brief carries when its situation applies. The pages come with the seed config only: a
+    # project whose config has no [guides] table gets no guide.
     "guides": {key: "" for key in ("start", "stuck", "findings", "conflict", "contract", "split", "setup")},
     "rules": [],
+    "init": {"skill_dirs": [".claude/skills"], "other_manifests": []},
+    "sensors": [],
+    "tools": {},
+    "projects": [],
+    # How the product is started, and each way users reach it with the script that drives it (rail docs product).
+    "product": {"start": "", "ready": "", "seed": "", "stop": "", "ready_secs": 120},
+    "surfaces": [],
 }
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-RULE_KEYS = {"id": str, "files": str, "forbid": list, "only_in": str, "allow": list, "fix": str, "why": str}
+RULE_KEYS = {"id": str, "files": str, "forbid": list, "only_in": str, "allow": list, "fix": str, "why": str,
+             "flag": bool}
+PROJECT_KEYS = {"name": str, "paths": list, "setup": str, "verify": str, "uses": list}
+SENSOR_KEYS = {"id": str, "paths": list, "command": str, "ok_exit": list, "violations_exit": list, "fix": str}
+SURFACE_KEYS = {"name": str, "kind": str, "projects": list, "check": str}
+# Arrays of tables: each item's keys and types, and the key every item needs.
+TABLE_ARRAYS = {"rules": (RULE_KEYS, "id"), "projects": (PROJECT_KEYS, "name"), "sensors": (SENSOR_KEYS, "id"),
+                "surfaces": (SURFACE_KEYS, "name")}
 
 
 def _suggest(key, known):
@@ -55,24 +88,28 @@ def _check(value, default, where):
                 raise RailError(f"config: unknown key '{where}.{key}'{_suggest(key, default)}")
             merged[key] = _check(item, default[key], f"{where}.{key}")
         return merged
+    if isinstance(default, float) and isinstance(value, int) and not isinstance(value, bool):
+        return float(value)  # an amount of money: 40 is as good as 40.0
     if isinstance(value, bool) != isinstance(default, bool) or not isinstance(value, type(default)):
-        raise RailError(f"config: {where} must be {type(default).__name__}")
+        raise RailError(f"config: {where} must be {'a number' if isinstance(default, float) else type(default).__name__}")
     if isinstance(default, list) and not all(isinstance(v, str) for v in value):
         raise RailError(f"config: {where} must be a list of strings")
     return value
 
 
-def _check_rule(rule, n):
-    if not isinstance(rule, dict):
-        raise RailError(f"config: rules[{n}] must be a table")
-    for key, value in rule.items():
-        if key not in RULE_KEYS:
-            raise RailError(f"config: unknown key 'rules[{n}].{key}'{_suggest(key, RULE_KEYS)}")
-        if not isinstance(value, RULE_KEYS[key]):
-            raise RailError(f"config: rules[{n}].{key} must be {RULE_KEYS[key].__name__}")
-    if "id" not in rule:
-        raise RailError(f"config: rules[{n}] needs an id")
-    return rule
+def _check_item(name, item, n):
+    """One table of an array of tables, such as a [[rules]] entry."""
+    keys, needed = TABLE_ARRAYS[name]
+    if not isinstance(item, dict):
+        raise RailError(f"config: {name}[{n}] must be a table")
+    for key, value in item.items():
+        if key not in keys:
+            raise RailError(f"config: unknown key '{name}[{n}].{key}'{_suggest(key, keys)}")
+        if not isinstance(value, keys[key]):
+            raise RailError(f"config: {name}[{n}].{key} must be {keys[key].__name__}")
+    if needed not in item:
+        raise RailError(f"config: {name}[{n}] needs {'an' if needed[0] in 'aeiou' else 'a'} {needed}")
+    return item
 
 
 def _check_ladder(config):
@@ -88,6 +125,13 @@ def _check_ladder(config):
                             f" with an effort of {', '.join(EFFORTS)}; got \"{rung}\"")
 
 
+def timeout(config, step):
+    """The seconds a command may run: setup and verify may have a limit of their own; 0, and every other command,
+    takes timeout_secs."""
+    step = step.split(":", 1)[0]  # a project's own setup:NAME and verify:NAME take the same limits
+    return config["commands"].get(f"{step}_timeout_secs") or config["commands"]["timeout_secs"]
+
+
 def load(root):
     path = os.path.join(root, ".rail", "config.toml")
     if not os.path.exists(path):
@@ -100,10 +144,13 @@ def load(root):
     packs_dir = os.path.join(root, ".rail", "packs")
     config = copy.deepcopy(DEFAULTS)
     for key, value in raw.items():
-        if key == "rules":
+        if key in TABLE_ARRAYS:
             if not isinstance(value, list):
-                raise RailError("config: rules must be an array of tables ([[rules]])")
-            config["rules"] = [_check_rule(r, n) for n, r in enumerate(value)]
+                raise RailError(f"config: {key} must be an array of tables ([[{key}]])")
+            config[key] = [_check_item(key, item, n) for n, item in enumerate(value)]
+        elif key == "tools":
+            from . import tools
+            config[key] = tools.check(value)
         elif key in DEFAULTS:
             config[key] = _check(value, DEFAULTS[key], key)
         elif isinstance(value, dict) and os.path.isdir(os.path.join(packs_dir, key)):
@@ -111,4 +158,43 @@ def load(root):
         else:
             raise RailError(f"config: unknown key '{key}'{_suggest(key, DEFAULTS)}")
     _check_ladder(config)
+    for kind in config["approve_contract"]:
+        if kind not in KINDS:
+            raise RailError(f"config: approve_contract names '{kind}', which is no kind{_suggest(kind, KINDS)}."
+                            f" The kinds: {', '.join(KINDS)}")
+    for n, entry in enumerate(config["projects"]):
+        for key in ("paths", "uses"):
+            if not all(isinstance(item, str) for item in entry.get(key, [])):
+                raise RailError(f"config: projects[{n}].{key} must be a list of strings")
+        if not entry["name"].strip() or entry["name"] in [e["name"] for e in config["projects"][:n]]:
+            raise RailError(f"config: projects[{n}] needs a name no other entry has; got '{entry['name']}'")
+    for n, sensor in enumerate(config["sensors"]):
+        if not sensor.get("command", "").strip():
+            raise RailError(f"config: sensors[{n}] needs a command")
+        for key in ("ok_exit", "violations_exit"):
+            if not all(isinstance(code, int) and not isinstance(code, bool) for code in sensor.get(key, [])):
+                raise RailError(f"config: sensors[{n}].{key} must be a list of exit codes")
+        if not all(isinstance(path, str) for path in sensor.get("paths", [])):
+            raise RailError(f"config: sensors[{n}].paths must be a list of strings")
+    from . import product
+    for n, surface in enumerate(config["surfaces"]):
+        if not surface["name"].strip() or ":" in surface["name"] or "/" in surface["name"] \
+                or surface["name"] in [s["name"] for s in config["surfaces"][:n]]:
+            raise RailError(f"config: surfaces[{n}] needs a name no other surface has, with no ':' or '/' in it;"
+                            f" got '{surface['name']}'")
+        if surface.get("kind") not in product.KINDS:
+            raise RailError(f"config: surfaces[{n}].kind is '{surface.get('kind', '')}', which is no kind of surface"
+                            f"{_suggest(surface.get('kind', ''), product.KINDS)}. The kinds: {', '.join(product.KINDS)}")
+        if not all(isinstance(name, str) for name in surface.get("projects", [])):
+            raise RailError(f"config: surfaces[{n}].projects must be a list of strings")
+        path = product.check_path(surface)
+        if path.startswith(("/", "..")):
+            raise RailError(f"config: surfaces[{n}].check is the path of a script in the repository; got"
+                            f" '{surface['check']}'")
+        # A driving check is a test: a change that edits one is held against the base's version of it (rail docs
+        # triage). Nothing is written: the path counts for as long as the surface names it.
+        if path and path not in config["tests"]["paths"]:
+            config["tests"]["paths"] = [*config["tests"]["paths"], path]
+    if config["product"]["ready_secs"] <= 0:
+        raise RailError("config: product.ready_secs must be above 0")
     return config

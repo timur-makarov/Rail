@@ -26,6 +26,10 @@ The engine passes it to the command as `ANTHROPIC_MODEL`, which the `claude` CLI
 for any other command. Empty leaves the command's own default. The model that answered is stored with each
 run and shown in the pull request's Evidence table. `[consult] model` does the same for consult.
 
+The seed sets the reviewer to `claude-opus-5-5` and consult to `claude-fable-5-2`, both at high effort. The
+effort is the `--effort high` flag in each command, since the engine passes a model and no effort. The refuter,
+the security seat and the sweep's review run through `[review] command`, so they get the same model and effort.
+
 The brief holds the ticket, the diff, the matching `## Areas` rows, the project's own part of `AGENTS.md`
 (never the `## Rail` section), the project's `REVIEW.md` files, what to look for, and the do-not-report
 list. On an AUTO ticket, what to look for includes a security checklist. On a re-review the brief also
@@ -33,16 +37,41 @@ holds the earlier findings and your answers.
 
 **`REVIEW.md`** is review guidance a project writes for itself: what to always flag, what never to report.
 The brief takes the one at the repository root and one in each directory above a file the change touches
-(`src/api/REVIEW.md` when `src/api/x.py` changed), root first, from the ticket's branch. Together they are
+(`src/api/REVIEW.md` when `src/api/x.py` changed), root first. Together they are
 cut at 8,000 characters, and the brief names the files that were cut. Every run gets them: the review, the
 security seat and the refuter.
+
+**What the reviewer is told comes from the base branch, not from the ticket.** The `REVIEW.md` files are read
+from the base, so one that a ticket adds or edits counts from the next ticket on; the ticket's own review sees
+that change only in the diff. Before each run the engine also writes the base's `.rail/engine/reviewer.md` and
+`.rail/engine/review-v1.json` to a temporary folder and passes their paths as `RAIL_REVIEW_PROMPT` and
+`RAIL_REVIEW_SCHEMA`; the seed's command reads them from there. The command runs in the ticket's worktree,
+where those two files are the ticket's own copies: a command that names them by their path there lets a change
+rewrite the prompt of its own review, and `rail doctor` says so.
+
+**Flaky checks.** When a `verify` or `Check:` command both failed and passed on the patch under review, the
+brief of the review and of the security seat lists it under "Flaky checks on this change": it may be an old
+flake, or a race the change brought in (`rail docs retries`).
+
+**Sensor markers.** A `SENSOR(NN): why` comment tells a sensor that its violation on that line is wrong or
+accepted (`rail docs sensors`). The brief of the review and of the security seat lists each marker the change
+adds under "Sensor markers this change adds", and asks for the reason to be judged. Before the review, the
+triage question `sensor-exempt` has already asked a fresh run whether each reason holds (`rail docs triage`).
+
+**Changes to what checks the change.** A change can edit the things that judge it. The brief of the review
+and of the security seat lists them under "Changes to what checks this change": each changed file that matches
+`[tests] paths`, with whether the base branch had it; each changed `REVIEW.md` (the guidance in the brief is
+the base's, so the reviewer of the ticket that changes it is the one who sees the change); what the checks did
+with the base's version of the edited tests (the `base_tests` event); and how the triage step's `old-test`
+question was answered (`rail docs triage`). These go to the reviewer and not to a person's "Read these" list: a
+changed test can be undone. The section's wording has not been tested with a model run.
 
 **When the checks can't show the work.** When every `Check:` line already passed on the base branch before
 the work began (the `base_checks` event, `rail docs loop`), the review run's brief says so, and asks the
 reviewer to look at whether the change is tested.
 
 **After an amend nobody approved.** When `rail amend` changed the Done Contract or the scope after the ticket was
-first accepted, and no person approved it (an AUTO ticket), the review run's brief also holds the contract as first
+first accepted, and no person approved it (any ticket but one whose kind `approve_contract` names), the review run's brief also holds the contract as first
 accepted: its `Check:` lines and its scope. The reviewer blocks when the amend dropped or weakened a check so that a
 fault now passes, and lets an amend that corrects a wrong check go.
 
@@ -55,7 +84,9 @@ command the reviewer ran and its output.
 - `advisory`: worth fixing, safe to merge.
 - `parked`: a real problem this change didn't cause.
 
-Answer every finding:
+Answer every blocking finding. An advisory finding doesn't hold the ticket: fix and answer it in the same
+round, or leave it unanswered; it is listed in the pull request, and [the sweep](sweep.md) gathers it after
+the merge.
 
 ```text
 rail answer NN F1 fixed "what you changed"
@@ -66,9 +97,9 @@ rail answer NN F3 parked "a real problem this change didn't cause"
 You can't decline or park a blocking finding: either answer disputes it, and a fresh refuter decides at the
 next `advance`. The refuter's brief has the location, the claim and the evidence, and leaves your argument out. It works in
 the ticket's worktree, so the argument is in the journal there if it looks; make the code show your point. It dismisses
-the finding, parks it (the problem is real, but this change didn't cause it), or upholds it. If it upholds
-the finding and you still can't fix it, a person decides, with `rail answer NN F1 declined "why" --owner`
-or `rail answer NN F1 parked "why" --owner`.
+the finding, parks it (the problem is real, but this change didn't cause it), or upholds it. An upheld finding stands, on a PERSON ticket too: fix it. Disputing it again is refused. A person may
+still decide one, with `rail answer NN F1 declined "why" --owner` or `rail answer NN F1 parked "why" --owner`,
+and no wait asks them to.
 
 When you fix a finding, `advance` ships the fix and reviews the whole change again. A finding marked fixed
 counts only once a later run doesn't repeat it.
@@ -76,19 +107,26 @@ counts only once a later run doesn't repeat it.
 ## PERSON tickets
 
 A PERSON ticket adds a security seat: a second run whose brief asks only about security. Each blocking
-finding it reports goes to a refuter at once. A person merges a PERSON ticket.
+finding it reports goes to a refuter at once. A person merges a PERSON ticket, and that merge is the one act
+it takes (`rail docs kinds`).
 
-**The reviewer may ask for a person.** A review or security run can return `needs_person`: one sentence on
-why a person should see the change before it merges although no finding blocks it, such as a pattern other
-code will copy. On an AUTO ticket the engine writes `tier_raised` with the reason `reviewer`, and the ticket
-is PERSON from then on: the security seat runs next, and a person merges. A later run that doesn't ask
-never lowers it. On a PERSON ticket the sentence is only recorded. Either way the sentence is kept with the
-run and shown in the pull request's Risk section and in the wait for a person. A refuter's is ignored.
+**The reviewer lists what a revert doesn't undo.** A review or security run returns `kinds`: each thing in the
+change of a kind in `rail docs kinds`, as `{kind, file, line, why}`, on every ticket. The engine checks each
+`kind` against the list, and an unknown id makes the output invalid: the run is started once more and counts
+against no one. On an AUTO ticket a non-empty `kinds` writes `tier_raised` with the reason `reviewer` and the
+kinds, and the ticket is PERSON from then on: the security seat runs next, and a person merges. A later run
+with none never lowers it. On a PERSON ticket the kinds are only recorded. Either way they are kept with the
+run and shown in the pull request's Risk section and in the wait for a person. A refuter's are ignored. A
+change that is large or new but can be reverted is not a kind: the reviewer reports its problems as findings.
 
-Don't rely on it for a path you already know a person must see. In test runs the reviewer asked for a
-person on about half of the changes that added a project's first cache or first permission check, and on
-every change that added a dependency. Put such paths (the auth code, the dependency manifests) in
-`person_paths`: that rule is a path match and always fires.
+The reviewer's prompt says what the common kinds look like, not only their ids. In a test of 136 model runs,
+a prompt with the ids alone listed a permission check the ticket asked to widen (`access`) in 1 of 4 runs;
+the prompt as it is listed each of six planted kinds in 4 of 4 runs, and 20 of 20 runs on changes with no
+kind listed none.
+
+Don't rely on it for a path you already know holds a kind. The reviewer reads the diff and can miss one; put
+such paths in `[kinds]` under their kind (the auth code under `access`, the dependency manifests under
+`licence`): that rule is a path match and always fires.
 
 ## What the reviewer costs and finds
 

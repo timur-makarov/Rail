@@ -4,38 +4,68 @@ import os
 
 from . import gitx
 from .project import NON_PRODUCT, ticket_path
-from .ticket import TIERS, Ticket, highest, lint
-from .util import globs_overlap, match_any, minutes_since
+from .ticket import KINDS, TIERS, Ticket, highest, lint
+from .util import family, globs_overlap, match_any, minutes_since
 
 OPEN = ("implementing", "reviewing", "in-ci", "merge-ready")  # claimed and not finished
 SHIP_STEPS = ("rebase", "ticket-lint", "assumptions", "scope", "change", "rules", "migration", "size", "doc-lint", "verify",
-              "checks")
+              "checks", "sensors", "product")
+
+
+def kind_paths(config):
+    """(kind, globs, key) for each place the config names paths of a kind, in the order of KINDS: `[kinds]`, and the
+    two older keys, `migration_paths` for `data-loss` and `person_paths` for `controls`."""
+    found = []
+    for kind in KINDS:
+        if config["kinds"].get(kind):
+            found.append((kind, config["kinds"][kind], "kinds"))
+        if kind == "data-loss":
+            found.append((kind, config["migration_paths"], "migration_paths"))
+        if kind == "controls":
+            found.append((kind, config["person_paths"], "person_paths"))
+    return found
 
 
 def floor(project, scope):
-    """The tier the person and migration paths set for a scope, and why. Matched at add."""
-    cfg = project.config
+    """The tier the paths of a scope set, and each kind they reach as (kind, path, key): the path is a tracked file
+    both match, or else the scope glob. Matched at add and amend."""
     if not hasattr(project, "_tracked"):
         listing = gitx.git(["ls-tree", "-r", "--name-only", project.base_ref], project.root, check=False)
         project._tracked = listing.stdout.splitlines()
 
-    def hits(globs):
-        if any(globs_overlap(s, g) for s in scope for g in globs):
-            return True
-        return any(match_any(scope, f) and match_any(globs, f) for f in project._tracked)
+    inside = [f for f in project._tracked if match_any(scope, f)]
+    origins = getattr(project, "origins", {})
 
-    for key in ("migration_paths", "person_paths"):
-        if hits(cfg[key]):
-            return "PERSON", key
-    return "AUTO", None
+    def could(s, g):
+        # A glob a profile brought is its own glob under one project's path (api/** and **/alembic/versions/** give
+        # api/**/alembic/versions/**), and the text of that would match every scope under the path: the scope is
+        # held against the two parts instead.
+        if g in origins:
+            path, glob = origins[g]
+            return globs_overlap(s, path) and globs_overlap(s, glob)
+        return globs_overlap(s, g)
+
+    def hit(globs):
+        path = next((f for f in inside if match_any(globs, f)), None)
+        return path or next((s for s in scope for g in globs if could(s, g)), None)
+
+    found = [(kind, path, key) for kind, globs, key in kind_paths(project.config) if (path := hit(globs))]
+    return ("PERSON" if found else "AUTO"), found
 
 
 def raised_tier(project, files):
-    """The tier the changed files need, and why. Used at ship."""
-    for key in ("migration_paths", "person_paths"):
-        if any(match_any(project.config[key], f) for f in files):
-            return "PERSON", key
-    return "AUTO", None
+    """The tier the changed files need, and each kind they hold as (kind, [files], key). Used at ship."""
+    found = []
+    for kind, globs, key in kind_paths(project.config):
+        hits = [f for f in files if match_any(globs, f)]
+        if hits:
+            found.append((kind, hits, key))
+    return ("PERSON" if found else "AUTO"), found
+
+
+def ticket_kinds(project, ticket):
+    """The kinds a ticket holds as filed: those its person_reason names, in order, and those its scope's paths reach."""
+    return list(dict.fromkeys(ticket.kinds + [k for k, _, _ in floor(project, ticket.scope)[1]]))
 
 
 class Facts:
@@ -52,33 +82,34 @@ class Facts:
         self.claimed = sorted(claims, key=lambda e: e.get("at", ""))[-1] if claims else None  # of equal times, the later
         # A drop is an event in the journal, and a mark in the counter branch for when the journal's branch is gone.
         self.dropped_event = t.last("dropped") or ({"event": "dropped"} if t.dropped_mark else None)
+        # Dropped in its journal, with no mark on the counter branch yet: the drop keeps the ticket's worktree, branches
+        # and pull request until the mark is written, so a drop never leaves no record at all.
+        self.drop_pending = bool(t.last("dropped")) and not t.dropped_mark
         self.contract_merged = False
         self.patch_id = None
         self.dirty = []
         self.shipped = None
         self.last_fail = None
+        self.machine_stuck = None
         self.split = None
         self.setup_failed = None
         self.after_open = []
         self.after_dropped = []
         self.overlaps = []
         self.open_assumptions = []
+        self.open_questions = []
         from .review import Ledger, load_doc
         self.ledger = Ledger(t.events, load_doc(t.review_text, t.id))
         self._budgets(project, t.events)
         # The forge's side: the ticket's PR, its labels, CI on its head, and a merge the engine requested.
         forge = getattr(project, "forge", None)
         self.forge = forge if forge is not None and forge.ok else None
-        self.pr = self.forge.pr(t.name) if self.forge and t.name else None
-        if self.forge and not t.name and t.on_base:
-            # Its branch is gone. Only a merged pull request from that branch shows the ticket reached the base
-            # branch by its own pull request, and not inside another ticket's merge.
-            self.pr = self.forge.merged_from(t.id)
-        self.labels = self.forge.labels(self.pr) if self.pr else set()
         self.ci, self.ci_failing, self.conflict, self.behind, self.pushed = None, [], False, False, None
         self.merge_note = project.cache_read("merge", t.id)
         self.red_base = None
         self.sweep = bool(self.ticket) and (self.ticket.get("external_id") or "").startswith("sweep#")
+        # The ticket the engine files to ask about the folders inside no project: its ship is all there is to it.
+        self.asks_coverage = bool(self.ticket) and (self.ticket.get("external_id") or "").startswith("coverage#")
         # A sweep is done once its review run is stored, or once its harvest step passed when nothing needed one.
         harvest = [e for e in t.events if e.get("event") == "step" and e.get("step") == "harvest"
                    and e.get("result") == "pass"]
@@ -93,15 +124,92 @@ class Facts:
             self.tier = highest(author, floor(project, self.ticket.scope)[0])
         else:
             self.tier = author
-        self.auto = self.tier == "AUTO"  # the engine accepts its contract and merges it; a person does both for PERSON
+        self.auto = self.tier == "AUTO"  # the engine merges it; a person merges a PERSON ticket
+        # A person approves the contract before the build only for a kind the project names in approve_contract.
+        self.kinds = list(dict.fromkeys(
+            (ticket_kinds(project, self.ticket) if self.ticket and not self.ticket.errors else [])
+            + list((self.accepted or {}).get("kinds") or [])
+            + [k for e in t.events if e.get("event") == "tier_raised" for k in (e.get("kinds") or [e.get("kind")]) if k]))
+        self.approve_first = not self.auto and any(k in project.config["approve_contract"] for k in self.kinds)
+        # A pull request is opened at the claim, or at add for a PERSON ticket's contract: only then is one that the
+        # list of the newest pull requests lacks worth a call of its own.
+        self.pr = self.forge.pr(t.name, expected=bool(claims) or self.approve_first) if self.forge and t.name else None
+        if self.forge and not t.name and t.on_base:
+            # Its branch is gone. Only a merged pull request from that branch shows the ticket reached the base
+            # branch by its own pull request, and not inside another ticket's merge.
+            self.pr = self.forge.merged_from(t.id)
+        self.labels = self.forge.labels(self.pr) if self.pr else set()
+        # A person's mark that rail next takes this ticket before the others: the line in the ticket, or the label on
+        # its pull request. The label on the issue a ticket came from is read where the order is made (cli.first_ids).
+        self.first = (bool(self.ticket) and self.ticket.get("priority") == "first") or "rail:first" in self.labels
+        self.stopped = self._stop()
+        self.tools_missing = project.tools_missing()
+        self.revert = self._revert(project)
         self._needs_review = None
+        # A triage answer that holds the ticket for a person, and after the person's act the engine's part of it.
+        from .triage import waiting
+        held, where = waiting(t.events)
+        self.triage_wait = held if where == "wait" else None
+        self.restart_due = held if where == "restart" else None
+        self._diagnosis(project)
         self.state = self._state()
+
+    def _revert(self, project):
+        """For a revert ticket with a worktree, what its brief says: the reverted ticket and its squash commit, whether
+        the worktree holds exactly the reverse of that change, whether the reverse still applies to the base, and
+        whether verify has failed on it."""
+        from . import revert
+        found = revert.target(project, self.ticket, project.tickets()) if self.ticket else None
+        if not found:
+            return None
+        nn, sha = found
+        tree = self.t.worktree if self.t.worktree and os.path.isdir(self.t.worktree) else None
+        if not sha or not tree:
+            return {"ticket": nn, "sha": sha, "exact": False, "applies": False, "failed": False}
+        base = gitx.git(["merge-base", project.base_ref, "HEAD"], tree, check=False).stdout.strip()
+        wanted = revert.exact(project, sha)
+        return {"ticket": nn, "sha": sha, "exact": revert.in_worktree(project, tree) == wanted,
+                "applies": bool(base) and revert.applies(project, sha, base), "base": base,
+                "failed": revert.failed_verify(self.t.events, wanted)}
+
+    def _stop(self):
+        """The rail:stop issue that stops this ticket, or None: one with no paths stops every ticket, one with paths
+        those whose scope can name a path the issue names. A revert ticket is never stopped: a brake can't block its
+        own way out."""
+        if self.ticket and self.ticket.get("kind") == "revert":
+            return None
+        scope = self.ticket.scope if self.ticket else []
+        for stop in (self.forge.stops() if self.forge else []):
+            if not stop["paths"] or any(globs_overlap(a, b) for a in scope for b in stop["paths"]):
+                return stop
+        return None
+
+    def _diagnosis(self, project):
+        """The one diagnosis a ticket gets at its retry cap (rail docs retries). `diagnose_due`: the cap is reached and
+        the question has no answer yet; two runs that gave none count as `cannot-tell`. `diagnosed`: its answer, while
+        what the answer leads to is still to do, which is until something gives the ticket a fresh budget. A ticket
+        that reaches the cap again after that is handled as one with no diagnosis."""
+        from . import triage
+        q = self.diagnosis = triage.diagnosis(self.t.events)
+        answer = q["answer"] if q else None
+        self.diagnose_due = bool(self.capped) and bool(triage.command(project)[0]) and not answer and not (
+            q and q["runs_without_answer"] >= triage.STUCK_RUNS)
+        self.diagnosed = (answer["answer"] if answer and self.capped and answer["at_index"] > self.fresh_at
+                          and triage.diagnosed(q) else None)
+        if self.diagnosed == "approach" and not self.restart_due:
+            self.restart_due = q  # the branch starts again from the base, with no person
+        if self.diagnosed == "machine" and not self.machine_stuck:
+            step = self.capped[0]
+            last = [e for e in self.t.events if e.get("event") == "step" and e.get("step") == step
+                    and e.get("result") == "fail"]
+            self.machine_stuck = (last[-1] if last else {"step": step}, self.attempts.get(step, 0))
 
     def _budgets(self, project, events):
         """Retry budgets and the waits derived from the journal. A step is stuck when it fails the same way
         retry.budget times in a row; whatever the failures, retry.cap of them since it last passed wait for a person."""
         budget, cap = project.config["retry"]["budget"], project.config["retry"]["cap"]
         attempts, same, seen, consulted, since, failing = {}, {}, {}, {}, 0, None
+        faults = {}      # step: [what failed, times in a row the same way, times in a row] for the machine's failures
         passed = None    # a step whose last event passed: its counts reset once the run leaves that step
 
         def settle():
@@ -111,28 +219,54 @@ class Facts:
                 attempts[passed] = same[passed] = 0
                 seen.pop(passed, None)
                 consulted.pop(passed, None)
+                faults.pop(passed, None)
 
         accepted_at = amended_at = shipped_at = continued_at = -1
+        fresh = -1       # where the budget and cap last started again: a person's act, or a diagnosis's remedy
+        remedy = None    # the answer of the diagnosis of a stuck ticket, until what it leads to is done
         self.amend_reason = ""
+        spent = {}  # what the ticket's runs reported they cost since a person last acted, by what ran
         for i, e in enumerate(events):
             kind = e.get("event")
+            if e.get("cost_usd") and kind in ("worked", "step"):
+                what = (f"worker {e.get('model') or '(model not reported)'}" if kind == "worked"
+                        else e.get("step") or "?")
+                spent[what] = spent.get(what, 0.0) + e["cost_usd"]
             if passed is not None and not (kind == "step" and e.get("step") == passed):
                 settle()
                 passed = None
+            if kind == "answered" and e.get("type") == "stuck" and e.get("evidence_ok") is not False:
+                remedy = e.get("answer")
+            if (kind == "amended" and remedy == "contract") or (kind == "restarted" and e.get("type") == "stuck"):
+                # What the diagnosis of a stuck ticket led to is done, the amended contract or the branch started
+                # again: a fresh budget and a fresh cap, with no person. What the runs cost still counts.
+                attempts, same, seen, consulted, remedy, fresh = {}, {}, {}, {}, None, i
+                faults.clear()
             if kind == "continued" or (kind == "accepted" and e.get("by") == "person"):
                 # A person's act gives a fresh budget and a fresh cap, whether it continues a wait or approves.
                 attempts, same, seen, consulted, since = {}, {}, {}, {}, i
-                if kind == "continued":
-                    continued_at = i
-                else:
+                fresh = i
+                spent = {}
+                faults.clear()
+                if kind == "accepted":
                     accepted_at = i
+                elif e.get("wait") != "BUDGET":  # going on past the budget is no approval of the merge
+                    continued_at = i
             elif kind == "step" and e.get("status") in ("ran", "could_not_run"):
                 step = e.get("step")
                 if e.get("result") == "pass":
                     passed = step
                 else:
                     passed = None
-                if e.get("result") != "pass" and e.get("counted", True):
+                if (e.get("result") != "pass" and e.get("counted") is False and family(step) in SHIP_STEPS
+                        and (e.get("status") == "could_not_run" or e.get("tools_down"))):
+                    # The machine's failure, not the change's: a program the shell could not start, or a declared
+                    # tool out of reach. It spends no attempt; the same one twice in a row waits for a person.
+                    what = sorted(e["tools_down"]) if e.get("tools_down") else e.get("signature") or e.get("detail")
+                    was = faults.get(step) or [None, 0, 0]
+                    faults[step] = [what, was[1] + 1 if was[0] == what else 1, was[2] + 1, e]
+                elif e.get("result") != "pass" and e.get("counted", True):
+                    faults.pop(step, None)
                     # The same failure as the last one at this step, or a new one, which is progress. An event with
                     # no signature, from an older engine, is the same failure as its neighbour.
                     sig, last = e.get("signature"), seen.get(step)
@@ -153,10 +287,13 @@ class Facts:
             elif kind == "shipped":
                 shipped_at = i
         settle()
+        self.fresh_at = fresh
         self.consults = sum(1 for e in events if e.get("event") == "consulted")
         pack = os.path.join(project.root, ".rail", "packs", "consult", "bin", "consult")
         can_consult = os.path.exists(pack) and self.consults < 3
         self.attempts, self.same = attempts, same
+        # (the failed step's event, times in a row), or None. The cap bounds failures that each look new.
+        self.machine_stuck = next(((x[3], x[2]) for x in faults.values() if x[1] >= 2 or x[2] >= cap), None)
         self.failing = failing if attempts.get(failing) else None  # the step the ticket is failing now, if any
         # Why each step waits for a person: the cap, the attempt after consult, or the budget with
         # no consult to ask.
@@ -172,9 +309,16 @@ class Facts:
         self.advised = [s for s, n in consulted.items() if n == 0]  # consult advised, and no attempt followed yet
         self.consult_due = next((s for s, n in same.items() if n >= budget and s not in consulted and can_consult
                                  and s not in self.capped_why), None)
-        runs = [e for e in events[since:] if e.get("event") == "step" and e.get("step") in ("review", "security", "refuter")]
-        # Two review runs in a row with no verdict, timed out or with invalid output: neither counts against the author.
+        runs = [e for e in events[since:] if e.get("event") == "step"
+                and e.get("step") in ("review", "security", "refuter", "triage")]
+        # Two review or triage runs in a row with no verdict, timed out or with invalid output: neither counts
+        # against the author. `stuck_run` names the step of the last one.
         self.stuck_review = len(runs) >= 2 and all(e.get("counted") is False for e in runs[-2:])
+        self.stuck_run = runs[-1].get("step") if self.stuck_review else None
+        self.spent_by = {what: round(usd, 4) for what, usd in spent.items()}
+        self.spent = round(sum(spent.values()), 4)
+        limit = project.config["worker"]["ticket_usd"]
+        self.over_budget = bool(limit) and self.spent > limit
         self.amend_pending = amended_at > accepted_at
         self.merge_approved = continued_at > shipped_at >= 0
         # A person's note from `accept` goes into the agent's briefs until the next ship.
@@ -280,13 +424,17 @@ class Facts:
                 with open(copy) as f:
                     self.open_assumptions = Ticket(f.read()).open_assumptions()
         steps = [e for e in t.events if e.get("event") == "step"]
-        setups = [e for e in steps if e.get("step") == "setup"]
+        setups = [e for e in steps if family(e.get("step")) == "setup"]
         if setups and setups[-1].get("result") == "fail":
             self.setup_failed = setups[-1]
-        # The last word on the current patch: a shipped event, a split offered, or a ship step that failed.
-        verdicts = [e for e in t.events if e.get("patch_id") == self.patch_id and (
+        # The last word on the current patch: a shipped event, a split offered, a ship step that failed, or a triage
+        # answer that stops the change (a triage run with no answer is not the change's failure).
+        # A branch the engine started again from the base has nothing of the old one's work: what was said of a patch
+        # there says nothing of this one, even where the two are the same, such as no change at all.
+        again = max((i for i, e in enumerate(t.events) if e.get("event") == "restarted"), default=-1)
+        verdicts = [e for e in t.events[again + 1:] if e.get("patch_id") == self.patch_id and (
             e.get("event") in ("shipped", "split_offered") or (e.get("event") == "step" and e.get("result") == "fail"
-                                                              and e.get("step") in SHIP_STEPS))]
+                                                              and (family(e.get("step")) in SHIP_STEPS or _stops(e))))]
         if verdicts and verdicts[-1].get("event") == "shipped":
             self.shipped = verdicts[-1]
         elif verdicts and verdicts[-1].get("event") == "split_offered":
@@ -313,11 +461,21 @@ class Facts:
                 self.ci, self.ci_failing = self.forge.checks(tip)
             if self.conflict or self.ci == "red":
                 return "implementing"  # a red required check or a conflict with base returns the ticket
+        # A question the engine raised about this patch comes before any review of it.
+        from .triage import open_questions
+        self.open_questions = open_questions(t.events, self.patch_id)
+        if self.open_questions:
+            return "reviewing"
         if self.needs_review and not self.ledger.complete(self.patch_id, self.tier):
             return "reviewing"
         if project.remote and (self.behind or not (self.pr_open and self.pushed and self.ci == "green")):
             return "in-ci"  # also green and behind its base: GitHub refuses that merge, so it is rebased first
         return "merge-ready"
+
+
+def _stops(e):
+    """A `triage` step that failed because the answer stops the change."""
+    return e.get("step") == "triage" and e.get("status") == "ran" and e.get("counted", True)
 
 
 def derive(project, tickets):

@@ -3,6 +3,9 @@
 Rail keeps coding agents on a railroad: it says what is legal next, what counts as done, and when a person
 must act. The agent writes the code; the engine owns ticket state. It is built for git, GitHub and Claude
 Code, first of all for Claude Code cloud sessions, and for macOS and Linux, with Python 3.11 or newer.
+It serves projects in Python, TypeScript, Rust and Go first, and one repository may hold several of them: Rail
+finds the projects from the tracked manifests each time, and a ticket sets up and checks only the ones its
+change reaches (`rail docs languages`).
 
 ## How it works
 
@@ -33,23 +36,28 @@ new -> accepted -> implementing -> reviewing -> in-ci -> merge-ready -> merged
 
 - a Done Contract: commands that must pass (`Check:` lines);
 - `scope_paths`: the only paths the change may touch;
-- a tier, `AUTO` or `PERSON`: who accepts the contract and who merges.
+- a tier, `AUTO` or `PERSON`: who merges.
 
 The contract freezes when the ticket is accepted. From then on the agent can't weaken a check or widen the
-scope quietly: a change goes through `rail amend`, which is recorded, and a changed Done Contract on a
-PERSON ticket waits for a person.
+scope quietly: a change goes through `rail amend`, which is recorded and shown to the reviewer, and on a
+PERSON ticket to the person who merges.
 
 **The engine decides what "done" means.** `rail advance` commits the change and runs the ship checks in
 order: a rebase onto the base branch, ticket lint, open assumptions, scope, structure rules, the migration
 fields of a migration ticket (`reversibility` and `rollback`), size, the architecture map (the `## Areas`
-table in `ARCHITECTURE.md`), the project's own `verify` command (tests, lint, scans), and each `Check:` line. A failure sends the ticket back with the output. A failure counts as stuck only when it
+table in `ARCHITECTURE.md`), the project's own `verify` command (tests, lint, scans), each `Check:` line, and any
+sensor the project has set up (a tool whose findings fail only on the lines the change adds). A failure sends the ticket back with the output. A failure counts as stuck only when it
 repeats: when a step fails the same way twice in a row, a second opinion (`rail consult`) advises once, and
-after one more failure the ticket waits for a person. Five failures at one step wait for a person whatever
-they were.
+after one more failure the ticket is stuck. Five failures at one step are stuck whatever they were. A stuck
+ticket gets one diagnosis from a run that did not write the change: the contract is wrong (the contract writer
+amends it), the work is too large (it is split), the attempts share a mistake (the branch starts again), or the
+machine is at fault (a person mends it). When the diagnosis can't tell, a stuck AUTO
+ticket is dropped with a record (nothing merged, so nothing needs undoing), and its issue says why; label the issue
+again to retry. A stuck PERSON ticket waits for a person.
 
 **A fresh agent reviews every change, and the author can't steer it.** The engine starts the reviewer
 itself, in the ticket's worktree, with a brief built from the ticket and the diff, and binds the result to
-the exact patch. A blocking finding holds the merge. The author answers every finding. When it disputes a
+the exact patch. A blocking finding holds the merge. The author answers every blocking finding. When it disputes a
 blocking one, a second fresh agent, the refuter, decides: it sees the finding and its evidence, not the
 author's argument. The only changes that skip the reviewer are those to paths you list in
 `[review] skip_paths`, such as docs, and a sweep reads those afterwards.
@@ -58,17 +66,19 @@ author's argument. The only changes that skip the reviewer are those to paths yo
 
 | | AUTO | PERSON |
 |---|---|---|
-| Accepts the contract | The engine, once the ticket is well formed | A person |
+| Accepts the contract | The engine, once the ticket is well formed | The engine; a person, for a kind the project names in `approve_contract` |
 | Review | The reviewer, with a security checklist | The reviewer and a security seat |
 | Merges | The engine, once CI is green | A person |
 
 In a project with no remote there is no CI and no pull request: the engine merges both tiers, and a PERSON
 ticket waits for a person's `rail accept NN` first.
 
-A ticket is PERSON when its author says so, when it touches `person_paths` (the paths you name, such as
-auth, payments and infrastructure, plus Rail's own files and the CI workflows) or a migration, or when the
-change grows past `[size] cap` (600 changed lines) and the agent doesn't split it when the first ship offers a
-split, or when the reviewer asks for one. The engine raises a
+A person is asked only about what a revert doesn't undo: deleted data, a data shape, credentials, code that runs
+with secrets, Rail's own gates, money and the rest of the kinds in `rail docs kinds`. A ticket is PERSON when its
+author names such a kind in `person_reason`, when it touches the paths `[kinds]` lists for one (the paths you
+name, such as auth, schemas and infrastructure, plus the CI workflows and agent settings), `person_paths` (Rail's
+own files) or a migration, or when the reviewer finds something of a kind in the change. Size raises no tier: a change past `[size] cap`
+(600 changed lines) is offered a split once, because a reviewer checks a small change better. The engine raises a
 tier and never lowers one.
 
 **GitHub is the wall.** Every ticket is a pull request. The `rail` workflow runs `rail ci`, which repeats
@@ -97,14 +107,17 @@ the next ticket.
 table of every step that ran, and a `Review:` trailer that says who reviewed it. `rail status` lists every
 ticket and what it waits for. `rail stats` counts, over the merged tickets, how many needed a person, how
 many were reverted, which steps failed, what the reviewer cost and how often its findings ended in a fix, and how the grilling went. Every 20
-merged tickets, a sweep gathers the findings reviewers parked and the checks they proposed, reads any changes
-that merged with no review, and turns what it finds into tickets. A source does the same for any other
+merged tickets, a sweep reads the areas those tickets changed and any changes that merged with no review,
+gathers what the tickets left behind (parked findings, proposed checks, the problems workers noticed, a
+person's notes, stale `TODO` comments), and turns what it finds into tickets. A source does the same for any other
 signal, such as failed CI runs or last week's merges: a prompt in `.rail/sources/` that files tickets and
 never edits.
 
-**What Rail leaves to others.** It starts no agents: a session or a cloud scheduled task does, and one
-person owns that task for a repository (`rail docs cloud` says why). It doesn't say how
-to write, test or debug code: that is the agent's craft. It doesn't deploy: a ticket ends at its merge.
+**What Rail leaves to others.** It schedules nothing: a session or a cloud scheduled task starts the work,
+and one person owns that task for a repository (`rail docs cloud` says why). Inside that session the engine
+can start the worker for a ticket itself (`rail work`), on the model and effort it names, as it starts the
+reviewer. It doesn't say how to write, test or debug code: that is the agent's craft. It doesn't deploy: a
+ticket ends at its merge.
 
 ## Start in a Claude Code cloud session
 
@@ -112,7 +125,7 @@ A cloud session is Rail's standard place to work. Open one on your repository an
 
 > Set this repository up for Rail, from https://github.com/timur-makarov/Rail
 
-Claude clones the framework, runs `rail init`, writes the project's checks, map and `person_paths`, installs what
+Claude clones the framework, runs `rail init`, writes the project's checks, map and `[kinds]`, installs what
 the checks need, and opens one pull request. Then three things are yours:
 
 1. Merge the pull request.
@@ -120,7 +133,9 @@ the checks need, and opens one pull request. Then three things are yours:
    message, and delete merged branches. The ruleset is one file,
    [`seed/ruleset.json`](seed/ruleset.json) here and `.rail/ruleset.json` in your project: download it and
    choose it under Settings > Rules > Rulesets > New ruleset > Import a ruleset. `rail doctor` links each page.
-3. Approve the environment's setup script when Claude proposes it, so later sessions start ready.
+3. Approve the environment's setup script when Claude proposes it, so later sessions start ready. Or paste it
+   yourself: it is one file, [`engine/environment-setup.sh`](engine/environment-setup.sh), the same for every
+   project.
 
 After that, hand work over: say what you want in a session, or label a GitHub issue `rail`. Claude runs
 `rail next`, does what the brief says, and runs `rail advance`, until a ticket needs you. Tickets that need
@@ -162,7 +177,10 @@ says which tickets wait for a person and what each one needs.
 ```
 
 Don't add "edited" or "synchronized" triggers: the engine edits its own pull requests, and each edit would
-start a run. To stop a ticket, add the label `rail:hold` to its pull request. `rail docs cloud` has the rest.
+start a run. To stop a ticket, add the label `rail:hold` to its pull request. To stop everything, open an issue
+with the label `rail:stop`: nothing moves until you close it. To take a merged ticket out again, add the label
+`rail:revert` to its merged pull request: Rail files the revert as a ticket. To have a ticket taken before
+the others, add the label `rail:first` to its pull request or its issue. `rail docs cloud` has the rest.
 
 ## Start on your own machine
 
@@ -178,7 +196,7 @@ cd /path/to/project && rail init
 adds a `## Rail` section to `AGENTS.md`, merges hooks and guard rules into `.claude/settings.json`, and adds
 the `rail` workflow. It never overwrites a file of yours. Then open Claude Code in the project and ask it to
 run `rail next`: the first answer is the init task, which proposes the project's checks, its map and its
-`person_paths` for you to confirm. On your own machine Rail installs nothing: you install the tools the checks
+`[kinds]` for you to confirm. On your own machine Rail installs nothing: you install the tools the checks
 need, and the guard asks before `sudo` and other commands that could hurt your machine.
 
 ## Use it
@@ -189,12 +207,13 @@ session is for work you are there for; unattended work runs in the cloud (`rail 
 with `rail adopt BRANCH`: the agent writes its ticket, and its checks must fail on the base and pass on the
 branch.
 
-**Guides and skills.** `rail init` adds Claude Code skills to `.claude/skills/`: some help a person turn
-an idea into a ticket (`rail-blast-radius`, `rail-grill`, `rail-slice`), and
-some are craft for the work itself, such as building a ticket, debugging a repeated failure or answering
-review findings. The `[guides]` table in `.rail/config.toml` names the right one in the brief when its
-situation comes up. A guide is a hint: nothing fails when an agent ignores it, and `rail stats` shows whether
-it helps. [`guides`](engine/docs/guides.md) has the situations and how to write a page.
+**Guides and skills.** Whatever Rail wants an agent to read, the engine puts in the brief: a page of craft
+for building a ticket, debugging a repeated failure, answering review findings or resolving a conflict. The
+`[guides]` table in `.rail/config.toml` says which page, or which of its sections, each situation's brief
+carries. `rail init` also adds Claude Code skills to `.claude/skills/` that help a person turn an idea into a
+ticket (`rail-blast-radius`, `rail-grill`, `rail-slice`), and one that walks an agent through adding a tool
+(`rail-tool`). A guide is a hint: nothing fails when an agent
+ignores it, and `rail stats` shows whether it helps. [`guides`](engine/docs/guides.md) has the situations and how to write a page.
 
 Everything else is in the docs that ship with the engine, readable before `rail init` too. `rail docs` lists
 the pages, which are also in [`engine/docs/`](engine/docs):
@@ -206,9 +225,13 @@ the pages, which are also in [`engine/docs/`](engine/docs):
 | How to write a ticket, and the tiers | [`tickets`](engine/docs/tickets.md), [`contract`](engine/docs/contract.md) |
 | Questioning a request into a ticket, from a session or a chat bot | [`grill`](engine/docs/grill.md), [`bots`](engine/docs/bots.md) |
 | The review, findings and the refuter | [`review`](engine/docs/review.md) |
+| Questions the engine raises about a shipped change, and the run that answers them | [`triage`](engine/docs/triage.md) |
 | States, retries and waits | [`states`](engine/docs/states.md), [`retries`](engine/docs/retries.md) |
 | Cloud sessions, and running with no session open | [`cloud`](engine/docs/cloud.md), [`github-runner`](engine/docs/github-runner.md) |
 | GitHub settings and pull requests | [`github`](engine/docs/github.md) |
+| Structure rules and sensors | [`rules`](engine/docs/rules.md), [`sensors`](engine/docs/sensors.md) |
+| Starting the product and driving it at ship | [`product`](engine/docs/product.md) |
+| Services, keys and MCP servers the work uses | [`tools`](engine/docs/tools.md) |
 | The guards | [`guards`](engine/docs/guards.md) |
 | Guides named in the brief, and the skills | [`guides`](engine/docs/guides.md) |
 | The journal's files and events | [`journal`](engine/docs/journal.md) |
@@ -219,5 +242,14 @@ the pages, which are also in [`engine/docs/`](engine/docs):
 
 `engine/` is copied into each project by `rail init`; `seed/` holds the files it copies once; `packs/` holds
 optional features; `tests/` holds the end-to-end tests: `python3 tests/run.py` runs them on several workers,
-and `python3 -m unittest discover -s tests` one after another.
+and `python3 -m unittest discover -s tests` one after another. `python3 tests/run.py --languages` takes a
+small real project in each language from `rail init` through a ticket for each feature, with stand-ins for
+the worker and the reviewer; a check whose tool the machine lacks is left out and printed as "not run". [`tests/tools.sh`](tests/tools.sh) installs those tools on a machine
+made for the work, and on your own machine only lists what is missing. A cloud environment for work on Rail
+itself needs one line as its setup script:
+
+```bash
+[ -f Rail/tests/tools.sh ] && RAIL_CLOUD=1 bash Rail/tests/tools.sh || true
+```
+
 `CHANGELOG.md` says why each change was made.

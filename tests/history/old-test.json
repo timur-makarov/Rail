@@ -1,0 +1,462 @@
+{
+ "more-itertools": {
+  "url": "https://github.com/more-itertools/more-itertools.git",
+  "head": "aa9977698a5e6ae15d3fdfac08a5fc5621c4e179",
+  "profile": "python",
+  "command": "python3 -m unittest discover -q",
+  "commits_read": 400,
+  "edit_tests": 151,
+  "green": 130,
+  "red": 21,
+  "red_with_own_tests": 0,
+  "results": [
+   {
+    "commit": "737c261c2127",
+    "subject": "Merge pull request #1314 from more-itertools/version-11.2.0",
+    "files": [
+     "M tests/test_recipes.py"
+    ],
+    "result": "red",
+    "output": "ValueError: Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize.\n\n======================================================================\nERROR: test_negative_start_and_stop (tests.test_recipes.IterIndexTests.test_negative_start_and_stop) (kwargs={'stop': -2}, wrapper=<built-in function iter>)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 1053, in test_negative_start_and_stop\n    actual = list(\n        mi.iter_index(wrapper(iterable), 'A', **kwargs)\n    )\n  File \"more-itertools/more_itertools/recipes.py\", line 898, in iter_index\n    iterator = islice(iterable, start, stop)\nValueError: Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize.\n\n======================================================================\nERROR: test_negative_start_and_stop (tests.test_recipes.IterIndexTests.test_negative_start_and_stop) (kwargs={'start': -5, 'stop': -1}, wrapper=<built-in function iter>)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 1053, in test_negative_start_and_stop\n    actual = list(\n        mi.iter_index(wrapper(iterable), 'A', **kwargs)\n    )\n  File \"more-itertools/more_itertools/recipes.py\", line 898, in iter_index\n    iterator = islice(iterable, start, stop)\nValueError: Stop argument for islice() must be None or an integer: 0 <= x <= sys.maxsize.\n\n======================================================================\nFAIL: test_sized_negative (tests.test_recipes.TailTests.test_sized_negative)\nNegative tail sizes should raise for sized iterables.\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 107, in test_sized_negative\n    self.assertRaises(ValueError, lambda: list(mi.tail(-1, 'ABCDEFG')))\n    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: ValueError not raised by <lambda>\n\n----------------------------------------------------------------------\nRan 933 tests in 16.821s\n\nFAILED (failures=1, errors=4, skipped=5)",
+    "answer": "contract",
+    "why": "Old test_sized_negative and IterIndexTests.test_negative_start_and_stop check the PR 1194/1182 behaviours that the merged commits '98562ca Revert PR 1194 changes to tail' and '0ab351d Revert PR 1182 changes to iter_index' remove on purpose."
+   },
+   {
+    "commit": "f9cdcb990dbb",
+    "subject": "Merge pull request #1216 from more-itertools/numeric-range-equality",
+    "files": [
+     "M tests/test_more.py"
+    ],
+    "result": "red",
+    "output": "======================================================================\nFAIL: test_hash (tests.test_more.NumericRangeTests.test_hash)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 2945, in test_hash\n    self.assertEqual(expected, hash(mi.numeric_range(*args)))\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 8740772866217860059 != 6875513283643521867\n\n----------------------------------------------------------------------\nRan 898 tests in 12.162s\n\nFAILED (failures=1, skipped=5)",
+    "answer": "contract",
+    "why": "Old NumericRangeTests.test_hash expects the old hash values, and the PR is titled 'Issue 1214: Update __eq__ and __hash__ for numeric_range'."
+   },
+   {
+    "commit": "5b43c0dc5f67",
+    "subject": "Merge pull request #1136 from more-itertools/version-11.0.0",
+    "files": [
+     "M tests/test_more.py",
+     "M tests/test_recipes.py"
+    ],
+    "result": "red",
+    "output": "TypeError: unhashable type: 'list'\n\n======================================================================\nERROR: test_basic (tests.test_more.WindowedTests.test_basic) (n=0)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 835, in test_basic\n    actual = list(mi.windowed(iterable, n))\n  File \"more-itertools/more_itertools/more.py\", line 1049, in windowed\n    raise ValueError('n must be > 0')\nValueError: n must be > 0\n\n======================================================================\nERROR: test_unhashable (tests.test_recipes.UniqueEverseenTests.test_unhashable)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 416, in test_unhashable\n    self.assertEqual(list(u), ['a', [1, 2, 3]])\n                     ~~~~^^^\n  File \"more-itertools/more_itertools/recipes.py\", line 477, in unique_everseen\n    for element in filterfalse(seen.__contains__, iterable):\n                   ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: unhashable type: 'list'\n\n======================================================================\nERROR: test_unhashable_key (tests.test_recipes.UniqueEverseenTests.test_unhashable_key)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 421, in test_unhashable_key\n    self.assertEqual(list(u), ['a', [1, 2, 3]])\n                     ~~~~^^^\n  File \"more-itertools/more_itertools/recipes.py\", line 483, in unique_everseen\n    if k not in seen:\n       ^^^^^^^^^^^^^\nTypeError: unhashable type: 'list'\n\n----------------------------------------------------------------------\nRan 879 tests in 11.408s\n\nFAILED (errors=4, skipped=5)",
+    "answer": "contract",
+    "why": "Old UniqueEverseenTests.test_unhashable/test_unhashable_key and WindowedTests.test_basic(n=0) fail because merged PRs say 'Eliminate quadratic fallback' in unique_everseen and 'Raise exception for invalid size in windowed()'."
+   },
+   {
+    "commit": "e4d2a4a2a972",
+    "subject": "Merge pull request #1126 from veeceey/fix/issue-813-replace-marker",
+    "files": [
+     "M tests/test_more.py"
+    ],
+    "result": "red",
+    "output": "ERROR: test_window_size_large (tests.test_more.LocateTests.test_window_size_large)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 3220, in test_window_size_large\n    actual = list(mi.locate(iterable, pred, window_size=5))\n  File \"more-itertools/more_itertools/more.py\", line 2544, in <genexpr>\n    (pred(*(x for x in w if x is not _marker)) for w in it),\n     ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: LocateTests.test_window_size_large.<locals>.<lambda>() missing 1 required positional argument: 'e'\n\n======================================================================\nERROR: test_window_size_large (tests.test_more.ReplaceTests.test_window_size_large)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 3978, in test_window_size_large\n    actual = list(mi.replace(iterable, pred, substitutes, window_size=5))\n  File \"more-itertools/more_itertools/more.py\", line 3423, in replace\n    if args and pred(*args):\n                ~~~~^^^^^^^\nTypeError: ReplaceTests.test_window_size_large.<locals>.<lambda>() missing 1 required positional argument: 'e'\n\n======================================================================\nERROR: test_window_size_large (tests.test_more.RlocateTests.test_window_size_large)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 3919, in test_window_size_large\n    actual = list(mi.rlocate(iterable, pred, window_size=5))\n                  ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"more-itertools/more_itertools/more.py\", line 3365, in rlocate\n    return reversed(list(locate(iterable, pred, window_size)))\n                    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"more-itertools/more_itertools/more.py\", line 2544, in <genexpr>\n    (pred(*(x for x in w if x is not _marker)) for w in it),\n     ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: RlocateTests.test_window_size_large.<locals>.<lambda>() missing 1 required positional argument: 'e'\n\n----------------------------------------------------------------------\nRan 879 tests in 13.049s\n\nFAILED (errors=3, skipped=5)",
+    "answer": "contract",
+    "why": "Old test_window_size_large (Locate/Replace/Rlocate) expects the predicate to receive _marker padding, which the commit 'prevent _marker from being passed to user predicates' (Fixes #813) removes."
+   },
+   {
+    "commit": "6a6d1364d8dc",
+    "subject": "Merge branch 'assaf127-feature/sized_iterator'",
+    "files": [
+     "M tests/test_more.py",
+     "M tests/test_recipes.py"
+    ],
+    "result": "red",
+    "output": "======================================================================\nERROR: test_invalid_r (tests.test_more.NthCombinationWithReplacementTests.test_invalid_r)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 4877, in test_invalid_r\n    mi.nth_combination_with_replacement([], r, 0)\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^\n  File \"more-itertools/more_itertools/more.py\", line 4279, in nth_combination_with_replacement\n    raise IndexError\nIndexError\n\n======================================================================\nERROR: test_invalid_r (tests.test_recipes.NthCombinationTests.test_invalid_r)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 699, in test_invalid_r\n    mi.nth_combination([], r, 0)\n    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^\n  File \"more-itertools/more_itertools/recipes.py\", line 659, in nth_combination\n    raise IndexError\nIndexError\n\n======================================================================\nERROR: test_invalid_r (tests.test_recipes.NthPermutationTests.test_invalid_r)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 755, in test_invalid_r\n    mi.nth_permutation(iterable, r, 0)\n    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^\n  File \"more-itertools/more_itertools/more.py\", line 4240, in nth_permutation\n    raise IndexError\nIndexError\n\n----------------------------------------------------------------------\nRan 859 tests in 13.066s\n\nFAILED (errors=3, skipped=5)",
+    "answer": "contract",
+    "why": "Old test_invalid_r for nth_combination/nth_permutation/nth_combination_with_replacement expects the old exception, and the merged commits say 'Fix incorrect exception'."
+   },
+   {
+    "commit": "8fa3b81c8dd9",
+    "subject": "Merge pull request #1076 from more-itertools/rhettinger-update_3_10",
+    "files": [
+     "M tests/test_more.py",
+     "M tests/test_recipes.py"
+    ],
+    "result": "red",
+    "output": "ensure an iterable will return pairwise\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 281, in test_base_case\n    p = mi.pairwise([1, 2, 3])\n        ^^^^^^^^^^^\nAttributeError: module 'more_itertools' has no attribute 'pairwise'\n\n======================================================================\nERROR: test_coverage (tests.test_recipes.PairwiseTests.test_coverage)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 292, in test_coverage\n    p = recipes._pairwise([1, 2, 3])\n        ^^^^^^^^^^^^^^^^^\nAttributeError: module 'more_itertools.recipes' has no attribute '_pairwise'. Did you mean: 'pairwise'?\n\n======================================================================\nERROR: test_short_case (tests.test_recipes.PairwiseTests.test_short_case)\nensure an empty iterator if there's not enough values to pair\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 286, in test_short_case\n    p = mi.pairwise(\"a\")\n        ^^^^^^^^^^^\nAttributeError: module 'more_itertools' has no attribute 'pairwise'\n\n======================================================================\nERROR: test_vs_statistics_median_windowed (tests.test_recipes.RunningMedianTests.test_vs_statistics_median_windowed)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 1548, in test_vs_statistics_median_windowed\n    expected = list(map(mean, mi.pairwise(data)))\n                              ^^^^^^^^^^^\nAttributeError: module 'more_itertools' has no attribute 'pairwise'\n\n----------------------------------------------------------------------\nRan 857 tests in 8.247s\n\nFAILED (errors=8, skipped=6)",
+    "answer": "contract",
+    "why": "Old PairwiseTests and RunningMedianTests use mi.pairwise, which the merged commit '196acd2 Remove pairwise()' removes on purpose (minimum version 3.10 PR)."
+   },
+   {
+    "commit": "cea037c78630",
+    "subject": "Merge pull request #999 from ben42code/u/ben42code/islice_extended_memory_usage2",
+    "files": [
+     "M tests/test_more.py"
+    ],
+    "result": "red",
+    "output": "----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 3447, in test_elements_lifecycle\n    self.assertEqual(aliveStates, testCase.expectedAliveStates)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: [[True, True, True, True, True], [False, Tr[89 chars]lse]] != [[1, 1, 1, 1, 1], [1, 1, 1, 1, 1], [0, 0, 1[20 chars], 0]]\n\nFirst differing element 1:\n[False, True, True, True, True]\n[1, 1, 1, 1, 1]\n\n+ [[1, 1, 1, 1, 1], [1, 1, 1, 1, 1], [0, 0, 1, 1, 1], [0, 0, 0, 0, 0]]\n- [[True, True, True, True, True],\n-  [False, True, True, True, True],\n-  [False, False, False, True, True],\n-  [False, False, False, False, False]]\n\n======================================================================\nFAIL: test_elements_lifecycle (tests.test_more.IsliceExtendedTests.test_elements_lifecycle) [14] (testCase=TestCase(initialSize=5, slice=(1, -1, 2), expectedAliveStates=[[1, 1, 1, 1, 1], [0, 1, 1, 1, 1], [0, 0, 0, 1, 1], [0, 0, 0, 0, 0]]))\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 3447, in test_elements_lifecycle\n    self.assertEqual(aliveStates, testCase.expectedAliveStates)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: [[True, True, True, True, True], [False, Fa[91 chars]lse]] != [[1, 1, 1, 1, 1], [0, 1, 1, 1, 1], [0, 0, 0[20 chars], 0]]\n\nFirst differing element 1:\n[False, False, True, True, True]\n[0, 1, 1, 1, 1]\n\n+ [[1, 1, 1, 1, 1], [0, 1, 1, 1, 1], [0, 0, 0, 1, 1], [0, 0, 0, 0, 0]]\n- [[True, True, True, True, True],\n-  [False, False, True, True, True],\n-  [False, False, False, False, True],\n-  [False, False, False, False, False]]\n\n----------------------------------------------------------------------\nRan 839 tests in 5.552s\n\nFAILED (failures=4, skipped=6)",
+    "answer": "contract",
+    "why": "Old test_elements_lifecycle expects elements to be alive one step longer, and the PR is 'Improve islice_extended memory usage' (release elements asap)."
+   },
+   {
+    "commit": "50cde16acafb",
+    "subject": "Merge pull request #951 from rhettinger/one",
+    "files": [
+     "M tests/test_more.py"
+    ],
+    "result": "red",
+    "output": "----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 625, in test_too_short\n    mi.one(it, too_short=too_short)\n    ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"more-itertools/more_itertools/more.py\", line 568, in one\n    raise too_short or ValueError('too few items in iterable (expected 1)')\nValueError: too few items in iterable (expected 1)\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 628, in test_too_short\n    self.assertIn('StopIteration', formatted_exc)\n    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'StopIteration' not found in 'Traceback (most recent call last):\\n  File \"more-itertools/tests/test_more.py\", line 625, in test_too_short\\n    mi.one(it, too_short=too_short)\\n    ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \"more-itertools/more_itertools/more.py\", line 568, in one\\n    raise too_short or ValueError(\\'too few items in iterable (expected 1)\\')\\nValueError: too few items in iterable (expected 1)\\n'\n\n======================================================================\nFAIL: test_too_short (tests.test_more.OneTests.test_too_short) (too_short=<class 'IndexError'>)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 625, in test_too_short\n    mi.one(it, too_short=too_short)\n    ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"more-itertools/more_itertools/more.py\", line 568, in one\n    raise too_short or ValueError('too few items in iterable (expected 1)')\nIndexError\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 628, in test_too_short\n    self.assertIn('StopIteration', formatted_exc)\n    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'StopIteration' not found in 'Traceback (most recent call last):\\n  File \"more-itertools/tests/test_more.py\", line 625, in test_too_short\\n    mi.one(it, too_short=too_short)\\n    ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \"more-itertools/more_itertools/more.py\", line 568, in one\\n    raise too_short or ValueError(\\'too few items in iterable (expected 1)\\')\\nIndexError\\n'\n\n----------------------------------------------------------------------\nRan 826 tests in 11.278s\n\nFAILED (failures=2, skipped=6)",
+    "answer": "contract",
+    "why": "Old OneTests.test_too_short asserts a 'StopIteration' cause in the traceback, which the PR 'Clean up one() and fix over-specified test' deliberately drops."
+   },
+   {
+    "commit": "ff319944dbb5",
+    "subject": "Merge pull request #943 from more-itertools/release-2025",
+    "files": [
+     "M tests/test_more.py",
+     "M tests/test_recipes.py"
+    ],
+    "result": "red",
+    "output": "======================================================================\nERROR: test_r (tests.test_more.DistinctDerangementsTests.test_r) (iterable=[], r=4)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 841, in test_r\n    actual = list(mi.distinct_derangements(iterable, r))\n                  ^^^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: module 'more_itertools' has no attribute 'distinct_derangements'\n\n======================================================================\nERROR: test_range (tests.test_more.DistinctDerangementsTests.test_range)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 708, in test_range\n    actual = set(mi.distinct_derangements(range_in))\n                 ^^^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: module 'more_itertools' has no attribute 'distinct_derangements'\n\n======================================================================\nERROR: test_set_range (tests.test_more.DistinctDerangementsTests.test_set_range)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 744, in test_set_range\n    actual = set(mi.distinct_derangements(set_in))\n                 ^^^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: module 'more_itertools' has no attribute 'distinct_derangements'\n\n======================================================================\nERROR: test_tuple_range (tests.test_more.DistinctDerangementsTests.test_tuple_range)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 732, in test_tuple_range\n    actual = set(mi.distinct_derangements(tuple_in))\n                 ^^^^^^^^^^^^^^^^^^^^^^^^\nAttributeError: module 'more_itertools' has no attribute 'distinct_derangements'\n\n----------------------------------------------------------------------\nRan 849 tests in 5.999s\n\nFAILED (errors=53, skipped=6)",
+    "answer": "lost",
+    "why": "Old DistinctDerangementsTests fail because derangements/distinct_derangements vanish from more.py, while the release 10.6.0 message and changelog list nothing about removing them (an apparent accidental loss from the release branch)."
+   },
+   {
+    "commit": "e733192454b7",
+    "subject": "Issue 916: lt only for is_sorted (#917)",
+    "files": [
+     "M tests/test_more.py"
+    ],
+    "result": "red",
+    "output": "more-itertools/more_itertools/more.py:1740: DeprecationWarning: zip_equal will be removed in a future version of more-itertools. Use the builtin zip function with strict=True instead.\n  warnings.warn(\nmore-itertools/more_itertools/more.py:1740: DeprecationWarning: zip_equal will be removed in a future version of more-itertools. Use the builtin zip function with strict=True instead.\n  warnings.warn(\n======================================================================\nFAIL: test_basic (tests.test_more.IsSortedTests.test_basic) (iterable=[0, 'nan', 0, 'nan'], key=<class 'float'>, reverse=False, strict=True)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 4394, in test_basic\n    self.assertEqual(mi_result, expected)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\nAssertionError: False != True\n\n======================================================================\nFAIL: test_basic (tests.test_more.IsSortedTests.test_basic) (iterable=['nan', 0, 'nan', 0], key=<class 'float'>, reverse=True, strict=True)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 4394, in test_basic\n    self.assertEqual(mi_result, expected)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^\nAssertionError: False != True\n\n----------------------------------------------------------------------\nRan 818 tests in 3.319s\n\nFAILED (failures=2, skipped=6)",
+    "answer": "contract",
+    "why": "Old IsSortedTests.test_basic with nan and strict=True expects the old comparison result, and the commit is 'Issue 916: lt only for is_sorted'."
+   },
+   {
+    "commit": "afd2e3b42c43",
+    "subject": "Merge pull request #874 from more-itertools/issue-869-circular-steps",
+    "files": [
+     "M tests/test_more.py"
+    ],
+    "result": "red",
+    "output": "more-itertools/more_itertools/more.py:1744: DeprecationWarning: zip_equal will be removed in a future version of more-itertools. Use the builtin zip function with strict=True instead.\n  warnings.warn(\n======================================================================\nFAIL: test_duplicates (tests.test_more.CircularShiftsTests.test_duplicates)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 3502, in test_duplicates\n    self.assertEqual(\n    ~~~~~~~~~~~~~~~~^\n        mi.circular_shifts([0, 1, 0, 1]),\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        [(0, 1, 0, 1), (1, 0, 1, 0), (0, 1, 0, 1), (1, 0, 1, 0)],\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\nAssertionError: <generator object circular_shifts at 0x7f2d610e0b80> != [(0, 1, 0, 1), (1, 0, 1, 0), (0, 1, 0, 1), (1, 0, 1, 0)]\n\n======================================================================\nFAIL: test_simple_circular_shifts (tests.test_more.CircularShiftsTests.test_simple_circular_shifts)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 3495, in test_simple_circular_shifts\n    self.assertEqual(\n    ~~~~~~~~~~~~~~~~^\n        mi.circular_shifts(range(4)),\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        [(0, 1, 2, 3), (1, 2, 3, 0), (2, 3, 0, 1), (3, 0, 1, 2)],\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\nAssertionError: <generator object circular_shifts at 0x7f2d610e0d60> != [(0, 1, 2, 3), (1, 2, 3, 0), (2, 3, 0, 1), (3, 0, 1, 2)]\n\n----------------------------------------------------------------------\nRan 808 tests in 2.374s\n\nFAILED (failures=2, skipped=6)",
+    "answer": "lost",
+    "why": "Old CircularShiftsTests compare mi.circular_shifts(...) to a list, but it now returns a generator; the PR 'Add a steps argument to circular_shifts' asks only for steps, not a changed return type (the docstring flips to 'Yield', so this is a borderline call)."
+   },
+   {
+    "commit": "399df10fca8a",
+    "subject": "Merge pull request #793 from james-wasson/ichunked",
+    "files": [
+     "M tests/test_more.py"
+    ],
+    "result": "red",
+    "output": "more-itertools/more_itertools/more.py:1678: DeprecationWarning: zip_equal will be removed in a future version of more-itertools. Use the builtin zip function with strict=True instead.\n  warnings.warn(\n======================================================================\nERROR: test_memory_in_order (tests.test_more.IchunkedTests.test_memory_in_order)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 3995, in test_memory_in_order\n    self.assertEqual(len(first_chunk._cache), 0)\n                         ^^^^^^^^^^^^^^^^^^\nAttributeError: 'generator' object has no attribute '_cache'\n\n----------------------------------------------------------------------\nRan 777 tests in 1.155s\n\nFAILED (errors=1, skipped=5)",
+    "answer": "moved",
+    "why": "Old IchunkedTests.test_memory_in_order inspects the private _chunk._cache, which the speed-up removes; the merged commit 'Modify tests to work without _cache exposure' keeps the no-caching-in-order behaviour checked another way."
+   },
+   {
+    "commit": "5d130e559cba",
+    "subject": "Merge pull request #755 from pochmann/patch-5",
+    "files": [
+     "M tests/test_more.py"
+    ],
+    "result": "red",
+    "output": "more-itertools/more_itertools/more.py:1647: DeprecationWarning: zip_equal will be removed in a future version of more-itertools. Use the builtin zip function with strict=True instead.\n  warnings.warn(\n======================================================================\nFAIL: test_empty_stop_iteration (tests.test_more.FirstTests.test_empty_stop_iteration)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 117, in test_empty_stop_iteration\n    mi.first([])\n    ~~~~~~~~^^^^\n  File \"more-itertools/more_itertools/more.py\", line 204, in first\n    raise ValueError(\n    ...<2 lines>...\n    )\nValueError: first() was called on an empty iterable, and no default value was provided.\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 120, in test_empty_stop_iteration\n    self.assertIn('StopIteration', formatted_exc)\n    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'StopIteration' not found in 'Traceback (most recent call last):\\n  File \"more-itertools/tests/test_more.py\", line 117, in test_empty_stop_iteration\\n    mi.first([])\\n    ~~~~~~~~^^^^\\n  File \"more-itertools/more_itertools/more.py\", line 204, in first\\n    raise ValueError(\\n    ...<2 lines>...\\n    )\\nValueError: first() was called on an empty iterable, and no default value was provided.\\n'\n\n----------------------------------------------------------------------\nRan 742 tests in 1.544s\n\nFAILED (failures=1, skipped=5)",
+    "answer": "contract",
+    "why": "Old FirstTests.test_empty_stop_iteration expects 'StopIteration' in the traceback, and the PR 'Optimize/simplify first' includes 'Remove obsolete from e' and 'Adjust first([]) test to new implementation'."
+   },
+   {
+    "commit": "5c1fb20d4b91",
+    "subject": "Merge pull request #734 from more-itertools/issue-732-isqrt",
+    "files": [
+     "M tests/test_recipes.py"
+    ],
+    "result": "red",
+    "output": "  File \"more-itertools/tests/test_recipes.py\", line 1033, in test_m_by_n\n    self.assertEqual(actual, expected)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: [(29, 47, 20, 38, 33), (76, 122, 53, 82, 90), (33, 53, 23, 36, 39)] != [[29, 47, 20, 38, 33], [76, 122, 53, 82, 90], [33, 53, 23, 36, 39]]\n\nFirst differing element 0:\n(29, 47, 20, 38, 33)\n[29, 47, 20, 38, 33]\n\n- [(29, 47, 20, 38, 33), (76, 122, 53, 82, 90), (33, 53, 23, 36, 39)]\n?  ^                  ^  ^                   ^  ^                  -\n\n+ [[29, 47, 20, 38, 33], [76, 122, 53, 82, 90], [33, 53, 23, 36, 39]]\n?  ^                  ^  ^                   ^  ^                   +\n\n\n======================================================================\nFAIL: test_n_by_n (tests.test_recipes.MatMulTests.test_n_by_n)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 1022, in test_n_by_n\n    self.assertEqual(actual, expected)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: [(49, 80), (41, 60)] != [[49, 80], [41, 60]]\n\nFirst differing element 0:\n(49, 80)\n[49, 80]\n\n- [(49, 80), (41, 60)]\n?  ^      ^  ^      -\n\n+ [[49, 80], [41, 60]]\n?  ^      ^  ^       +\n\n\n----------------------------------------------------------------------\nRan 737 tests in 1.517s\n\nFAILED (failures=8, errors=2, skipped=4)",
+    "answer": "contract",
+    "why": "Old MatMulTests.test_n_by_n/test_m_by_n expect lists, and the 10.0.0 changelog in the diff says 'batched and matmul now yield tuples instead of lists'."
+   },
+   {
+    "commit": "4b0fac94edd7",
+    "subject": "Merge pull request #731 from more-itertools/sync-cpython-20220711",
+    "files": [
+     "M tests/test_recipes.py"
+    ],
+    "result": "red",
+    "output": "more-itertools/more_itertools/more.py:1644: DeprecationWarning: zip_equal will be removed in a future version of more-itertools. Use the builtin zip function with strict=True instead.\n  warnings.warn(\nmore-itertools/more_itertools/recipes.py:876: DeprecationWarning: batched will be removed in a future version of more-itertools. Use the standard library itertools.batched function instead\n  warnings.warn(\n======================================================================\nERROR: test_basic (tests.test_recipes.SlidingWindowTests.test_basic) (expected=[()])\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 840, in test_basic\n    actual = list(mi.sliding_window(iterable, n))\n  File \"more-itertools/more_itertools/recipes.py\", line 787, in sliding_window\n    window = deque(islice(it, n - 1), maxlen=n)\n                   ~~~~~~^^^^^^^^^^^\nValueError: Stop argument for islice() must be None or an integer: 0 <= x <= sys.maxsize.\n\n----------------------------------------------------------------------\nRan 736 tests in 1.304s\n\nFAILED (errors=1, skipped=4)",
+    "answer": "contract",
+    "why": "Old SlidingWindowTests.test_basic(n=0, [()]) fails because the PR 'Update recipes with CPython PRs: 105403 and 106371' syncs sliding_window with the new CPython recipe, which drops n=0 (the test line is removed)."
+   },
+   {
+    "commit": "719a333bccd2",
+    "subject": "Merge pull request #720 from elliotwutingfeng/unique_in_window",
+    "files": [
+     "M tests/test_more.py"
+    ],
+    "result": "red",
+    "output": "more-itertools/more_itertools/more.py:1644: DeprecationWarning: zip_equal will be removed in a future version of more-itertools. Use the builtin zip function with strict=True instead.\n  warnings.warn(\nmore-itertools/more_itertools/recipes.py:877: DeprecationWarning: batched will be removed in a future version of more-itertools. Use the standard library itertools.batched function instead\n  warnings.warn(\n======================================================================\nFAIL: test_basic (tests.test_more.UniqueInWindowTests.test_basic) (expected=[1, 2, 3, 4])\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 4886, in test_basic\n    self.assertEqual(actual, expected)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: [1, 2, 3, 4, 4, 4] != [1, 2, 3, 4]\n\nFirst list contains 2 additional elements.\nFirst extra element 4:\n4\n\n- [1, 2, 3, 4, 4, 4]\n?           ------\n\n+ [1, 2, 3, 4]\n\n----------------------------------------------------------------------\nRan 734 tests in 1.121s\n\nFAILED (failures=1, skipped=4)",
+    "answer": "contract",
+    "why": "Old UniqueInWindowTests.test_basic expects n=1 to dedupe consecutive repeats, and the PR is 'Fix unique_in_window to match described behavior'."
+   },
+   {
+    "commit": "146113bb4bbe",
+    "subject": "Merge pull request #714 from pochmann/patch-6",
+    "files": [
+     "M tests/test_more.py"
+    ],
+    "result": "red",
+    "output": "\n- ((),)\n+ ()\n\n======================================================================\nFAIL: test_one_iterator (tests.test_more.PartialProductTests.test_one_iterator)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 5331, in test_one_iterator\n    self.assertEqual(\n    ~~~~~~~~~~~~~~~~^\n        tuple(mi.partial_product('ABCD')),\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    ...<5 lines>...\n        ),\n        ^^\n    )\n    ^\nAssertionError: Tuples differ: (('A',), ('B',), ('C',), ('D',)) != ('A', 'B', 'C', 'D')\n\nFirst differing element 0:\n('A',)\n'A'\n\n- (('A',), ('B',), ('C',), ('D',))\n+ ('A', 'B', 'C', 'D')\n\n======================================================================\nFAIL: test_two_iterators (tests.test_more.PartialProductTests.test_two_iterators)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 5342, in test_two_iterators\n    with self.assertRaises(ValueError):\n         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^\nAssertionError: ValueError not raised\n\n----------------------------------------------------------------------\nRan 733 tests in 1.110s\n\nFAILED (failures=3, skipped=4)",
+    "answer": "contract",
+    "why": "Old PartialProductTests.test_one_iterator/test_two_iterators expect the old behaviour, and the PR is 'Issue #713: Fix partial_product (fix bugs, simplify)'."
+   },
+   {
+    "commit": "ffcfe0b4e63c",
+    "subject": "Merge pull request #647 from more-itertools/version-9.0.0",
+    "files": [
+     "M tests/test_more.py",
+     "M tests/test_recipes.py"
+    ],
+    "result": "red",
+    "output": "    expected = list(mi.collate(*iterables, key=lambda x: -x))\n                    ^^^^^^^^^^\nAttributeError: module 'more_itertools' has no attribute 'collate'. Did you mean: 'collapse'?\n\n======================================================================\nERROR: test_one (tests.test_more.CollateTests.test_one)\nWork when only 1 iterable is passed.\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 72, in test_one\n    self.assertEqual([0, 1], list(mi.collate(range(2))))\n                                  ^^^^^^^^^^\nAttributeError: module 'more_itertools' has no attribute 'collate'. Did you mean: 'collapse'?\n\n======================================================================\nERROR: test_reverse (tests.test_more.CollateTests.test_reverse)\nTest the `reverse` kwarg.\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 81, in test_reverse\n    expected = list(mi.collate(*iterables, reverse=True))\n                    ^^^^^^^^^^\nAttributeError: module 'more_itertools' has no attribute 'collate'. Did you mean: 'collapse'?\n\n======================================================================\nERROR: test_legacy_order (tests.test_recipes.GrouperTests.test_legacy_order)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 343, in test_legacy_order\n    list(mi.grouper(3, 'ABCDEF')),\n         ~~~~~~~~~~^^^^^^^^^^^^^\n  File \"more-itertools/more_itertools/recipes.py\", line 372, in grouper\n    args = [iter(iterable)] * n\n            ~~~~^^^^^^^^^^\nTypeError: 'int' object is not iterable\n\n----------------------------------------------------------------------\nRan 696 tests in 1.323s\n\nFAILED (errors=7, skipped=4)",
+    "answer": "contract",
+    "why": "Old CollateTests and GrouperTests.test_legacy_order use mi.collate and grouper(int, ...), which the 9.0.0 changelog lists as removed ('collate has been removed', 'grouper no longer accepts an integer')."
+   },
+   {
+    "commit": "d63ed69ad429",
+    "subject": "Merge pull request #646 from more-itertools/rename-batched",
+    "files": [
+     "M tests/test_more.py",
+     "M tests/test_recipes.py"
+    ],
+    "result": "red",
+    "output": "('Beautiful is better than ugly', 'Explic[155 chars]nse')\n\nSecond list contains 1 additional elements.\nFirst extra element 1:\n('Readability counts',)\n\n- [['Beautiful is better than ugly',\n?  ^\n\n+ [('Beautiful is better than ugly',\n?  ^\n\n    'Explicit is better than implicit',\n    'Simple is better than complex',\n    'Complex is better than complicated',\n    'Flat is better than nested',\n-   'Sparse is better than dense',\n+   'Sparse is better than dense'),\n?                                +\n\n-   'Readability counts']]\n?  ^                     -\n\n+  ('Readability counts',)]\n?  ^                    ++\n\n\n======================================================================\nFAIL: test_strict (tests.test_more.BatchedTests.test_strict)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 5202, in test_strict\n    with self.assertRaises(ValueError):\n         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^\nAssertionError: ValueError not raised\n\n----------------------------------------------------------------------\nRan 695 tests in 0.879s\n\nFAILED (failures=7, errors=2, skipped=4)",
+    "answer": "contract",
+    "why": "Old BatchedTests.test_strict calls mi.batched with the constrained-batching semantics, but the PR 'Rename batched to constrained_batches, add batched recipe' deliberately gives batched new meaning (public rename is the stated goal)."
+   },
+   {
+    "commit": "d971c8663591",
+    "subject": "Merge pull request #599 from more-itertools/grouper-update",
+    "files": [
+     "M tests/test_recipes.py"
+    ],
+    "result": "red",
+    "output": "more-itertools/more_itertools/more.py:444: DeprecationWarning: collate is no longer part of more_itertools, use heapq.merge\n  warnings.warn(\nmore-itertools/more_itertools/more.py:1668: DeprecationWarning: zip_equal will be removed in a future version of more-itertools. Use the builtin zip function with strict=True instead.\n  warnings.warn(\nmore-itertools/more_itertools/more.py:444: DeprecationWarning: collate is no longer part of more_itertools, use heapq.merge\n  warnings.warn(\n======================================================================\nERROR: test_fill_value (tests.test_recipes.GrouperTests.test_fill_value)\nTest that the fill value is used to pad the final group\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_recipes.py\", line 285, in test_fill_value\n    list(mi.grouper('ABCDE', 3, 'x')),\n         ~~~~~~~~~~^^^^^^^^^^^^^^^^^\n  File \"more-itertools/more_itertools/recipes.py\", line 371, in grouper\n    raise ValueError('Expected fill, strict, or ignore')\nValueError: Expected fill, strict, or ignore\n\n----------------------------------------------------------------------\nRan 655 tests in 1.089s\n\nFAILED (errors=1, skipped=4)",
+    "answer": "lost",
+    "why": "Old GrouperTests.test_fill_value passes the fill value positionally as grouper('ABCDE', 3, 'x'), which now hits the new 'incomplete' parameter and raises; the PR 'Add new features to grouper' does not ask to break the positional fillvalue (borderline, since the signature change is deliberate)."
+   },
+   {
+    "commit": "2641f21a17b2",
+    "subject": "Merge pull request #573 from more-itertools/lazy-strictly-n",
+    "files": [
+     "M tests/test_more.py"
+    ],
+    "result": "red",
+    "output": "======================================================================\nFAIL: test_too_long_custom (tests.test_more.StrictlyNTests.test_too_long_custom)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 4818, in test_too_long_custom\n    self.assertEqual(actual, expected)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\nAssertionError: <generator object strictly_n at 0x7f213f03fc40> != ['b', 'c']\n\n======================================================================\nFAIL: test_too_long_default (tests.test_more.StrictlyNTests.test_too_long_default)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 4801, in test_too_long_default\n    with self.assertRaises(ValueError):\n         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^\nAssertionError: ValueError not raised\n\n======================================================================\nFAIL: test_too_short_custom (tests.test_more.StrictlyNTests.test_too_short_custom)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 4810, in test_too_short_custom\n    self.assertEqual(actual, expected)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\nAssertionError: <generator object strictly_n at 0x7f213f03f840> != ['a', 'b', 'c', 'd', '?', '?']\n\n======================================================================\nFAIL: test_too_short_default (tests.test_more.StrictlyNTests.test_too_short_default)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"more-itertools/tests/test_more.py\", line 4795, in test_too_short_default\n    with self.assertRaises(ValueError):\n         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^\nAssertionError: ValueError not raised\n\n----------------------------------------------------------------------\nRan 648 tests in 1.232s\n\nFAILED (failures=5, skipped=4)",
+    "answer": "contract",
+    "why": "Old StrictlyNTests expect eager return and too_short/too_long receiving and returning the items, and the PR is 'Make strictly_n lazy' with 'too_short and too_long get item counts'."
+   }
+  ],
+  "answers": {
+   "contract": 17,
+   "lost": 3,
+   "moved": 1
+  }
+ },
+ "pflag": {
+  "url": "https://github.com/spf13/pflag.git",
+  "head": "7b3c6eb4194a1d06e9e0eec9c24860a9c0045ad2",
+  "profile": "go",
+  "command": "go test ./...",
+  "commits_read": 240,
+  "edit_tests": 112,
+  "green": 32,
+  "red": 5,
+  "red_with_own_tests": 75,
+  "results": [
+   {
+    "commit": "00f25b95f69b",
+    "subject": "Merge pull request #469 from reuvenharrison/friendly-parse-errors",
+    "files": [
+     "M flag_test.go"
+    ],
+    "result": "red",
+    "output": "--- FAIL: TestParse (0.00s)\n    flag_test.go:403: expected error \"invalid argument \\\"abcdefg\\\" for \\\"--bool\\\" flag: strconv.ParseBool: parsing \\\"abcdefg\\\": invalid syntax\", got \"invalid argument \\\"abcdefg\\\" for \\\"--bool\\\" flag: must be true or false\"\n--- FAIL: TestFlagSetParse (0.00s)\n    flag_test.go:403: expected error \"invalid argument \\\"abcdefg\\\" for \\\"--bool\\\" flag: strconv.ParseBool: parsing \\\"abcdefg\\\": invalid syntax\", got \"invalid argument \\\"abcdefg\\\" for \\\"--bool\\\" flag: must be true or false\"\nFAIL\nFAIL\tgithub.com/spf13/pflag\t0.027s\nFAIL",
+    "answer": "contract",
+    "why": "Old TestParse/TestFlagSetParse expected the raw strconv.ParseBool text, but the merged commit's stated purpose is 'Replace raw stdlib parse errors in typed flag Set methods' with 'must be true or false'."
+   },
+   {
+    "commit": "6fcfbc9910e1",
+    "subject": "Merge pull request #453 from alimpfard/bool-flag-help",
+    "files": [
+     "M flag_test.go",
+     "M printusage_test.go"
+    ],
+    "result": "red",
+    "output": "              --IP ip                     IP address with no default\n              --IPMask ipMask             Netmask address with no default\n              --IPNet ipNet               IP network with no default\n              --Ints ints                 int slice with zero default\n              --N int                     a non-zero int (default 27)\n              --ND1 string[=\"bar\"]        a string with NoOptDefVal (default \"foo\")\n              --ND2 num[=4321]            a num with NoOptDefVal (default 1234)\n              --StringArray stringArray   string array with zero default\n              --StringSlice strings       string slice with zero default\n              --Z int                     an int that defaults to zero\n              --custom custom             custom Value implementation\n              --custom-with-val custom    custom value which has been set from command line while help is shown\n              --customP custom            a VarP with default (default 10)\n              --maxT timeout              set timeout for dial\n          -v, --verbose count             verbosity\n        \n--- FAIL: TestPrintUsage (0.00s)\n    printusage_test.go:33: Expected \n              --long-form    Some description\n              --long-form2   Some description\n                               with multiline\n          -s, --long-name    Some description\n          -t, --long-name2   Some description with\n                               multiline\n         \n        Actual \n              --long-form[=true|false]    Some description\n              --long-form2[=true|false]   Some description\n                                            with multiline\n          -s, --long-name[=true|false]    Some description\n          -t, --long-name2[=true|false]   Some description with\n                                            multiline\n--- FAIL: TestPrintUsage_2 (0.00s)\n    printusage_test.go:72: Expected \n        \"      --long-form                    Some description\\n      --long-form2                   Some description\\n                                       with multiline\\n  -s, --long-name                    Some description\\n  -t, --long-name2                   Some description with\\n                                       multiline\\n  -o, --other-very-long-arg string   Some very long description having\\n                                     break the limit (default\\n                                     \\\"long-default-value\\\")\\n  -l, --some-very-long-arg string    Some very long description having\\n                                     break the limit (default \\\"test\\\")\\n      --some-very-long-arg2 string   Some very long description\\n                                     with line break\\n                                     multiple (default \\\"very long default\\n                                     value\\\")\\n\" \n        Actual \n        \"      --long-form[=true|false]       Some description\\n      --long-form2[=true|false]      Some description\\n                                       with multiline\\n  -s, --long-name[=true|false]       Some description\\n  -t, --long-name2[=true|false]      Some description with\\n                                       multiline\\n  -o, --other-very-long-arg string   Some very long description having\\n                                     break the limit (default\\n                                     \\\"long-default-value\\\")\\n  -l, --some-very-long-arg string    Some very long description having\\n                                     break the limit (default \\\"test\\\")\\n      --some-very-long-arg2 string   Some very long description\\n                                     with line break\\n                                     multiple (default \\\"very long default\\n                                     value\\\")\\n\"\nFAIL\nFAIL\tgithub.com/spf13/pflag\t0.037s\nFAIL",
+    "answer": "contract",
+    "why": "Old TestPrintDefaults and printusage tests expected bool flags without '[=true|false]', which the commit 'Show correct explicit bool value syntax in help' deliberately adds to the help output."
+   },
+   {
+    "commit": "0491e5702ad2",
+    "subject": "Merge pull request #448 from thaJeztah/fix_go_version",
+    "files": [
+     "M bool_func_test.go",
+     "M func_test.go"
+    ],
+    "result": "red",
+    "output": "FAIL\tgithub.com/spf13/pflag [build failed]\nFAIL\n# github.com/spf13/pflag [github.com/spf13/pflag.test]\n./bool_func_test.go:51:6: TestBoolFuncCompat redeclared in this block\n\t./bool_func_go1.21_test.go:14:6: other declaration of TestBoolFuncCompat\n./func_test.go:65:6: TestFuncCompat redeclared in this block\n\t./func_go1.21_test.go:14:6: other declaration of TestFuncCompat",
+    "answer": "moved",
+    "why": "The behaviour is kept and the tests were moved: old tests do not compile because the commit moved TestBoolFuncCompat/TestFuncCompat into new *_go1.21_test.go files, so putting back the old bool_func_test.go/func_test.go gives 'redeclared in this block' (a duplicate-declaration artifact, not behaviour)."
+   },
+   {
+    "commit": "c78f730fb023",
+    "subject": "Merge pull request #261 from dubrie/master",
+    "files": [
+     "M flag_test.go"
+    ],
+    "result": "red",
+    "output": "FAIL\tgithub.com/spf13/pflag [build failed]\nFAIL\n# github.com/spf13/pflag [github.com/spf13/pflag.test]\n./flag_test.go:454:4: f.ParseErrorsWhitelist undefined (type *FlagSet has no field or method ParseErrorsWhitelist)",
+    "answer": "contract",
+    "why": "Old flag_test.go calls f.ParseErrorsWhitelist, which the commit 'Switching from whitelist to Allowlist terminology. Fixes #294' renames on purpose (compile error: undefined)."
+   },
+   {
+    "commit": "5ca813443bd2",
+    "subject": "Merge pull request #419 from spf13/ci",
+    "files": [
+     "M flag_test.go"
+    ],
+    "result": "red",
+    "output": "FAIL\tgithub.com/spf13/pflag [build failed]\nFAIL\n# github.com/spf13/pflag\n# [github.com/spf13/pflag]\n./flag_test.go:1242:3: fmt.Println arg list ends with redundant newline",
+    "answer": "moved",
+    "why": "The behaviour is kept and the test was rewritten: old flag_test.go fails only the toolchain's go vet check ('fmt.Println arg list ends with redundant newline') run as part of go test; the commit (add github actions, 'fix govet') changes lint-style lines, not behaviour."
+   }
+  ],
+  "answers": {
+   "contract": 3,
+   "moved": 2
+  }
+ },
+ "ufo": {
+  "url": "https://github.com/unjs/ufo.git",
+  "head": "f06c800d0c59f2a4a1b9ba65eb6cb61a84419be6",
+  "profile": "typescript",
+  "command": "{work}/node_modules/.bin/vitest run",
+  "commits_read": 300,
+  "edit_tests": 72,
+  "green": 52,
+  "red": 9,
+  "red_with_own_tests": 11,
+  "results": [
+   {
+    "commit": "69e26f8983a6",
+    "subject": "feat: `joinRelativeURL` (#220)",
+    "files": [
+     "M test/base.test.ts",
+     "M test/join.test.ts"
+    ],
+    "result": "red",
+    "output": "     37|     test(`joinURL(${t.input.map((i) => JSON.stringify(i)).join(\", \")})\u2026\n     38|       expect(joinURL(...(t.input as string[]))).toBe(t.out);\n       |                                                 ^\n     39|     });\n     40|   }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[9/13]\u23af\n\n FAIL  test/join.test.ts > joinURL > joinURL(\"../a\", \"../../../b\") === \"../../b\"\nAssertionError: expected '../a/../../../b' to be '../../b' // Object.is equality\n\nExpected: \u001b[32m\"../../b\"\u001b[39m\nReceived: \u001b[31m\"\u001b[7m../a/../\u001b[27m../../b\"\u001b[39m\n\n \u276f test/join.test.ts:38:49\n     36|   for (const t of tests) {\n     37|     test(`joinURL(${t.input.map((i) => JSON.stringify(i)).join(\", \")})\u2026\n     38|       expect(joinURL(...(t.input as string[]))).toBe(t.out);\n       |                                                 ^\n     39|     });\n     40|   }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[10/13]\u23af\n\n FAIL  test/join.test.ts > joinURL > joinURL(\"../a\", \"../../../../b\") === \"../../../b\"\nAssertionError: expected '../a/../../../../b' to be '../../../b' // Object.is equality\n\nExpected: \u001b[32m\"../../../b\"\u001b[39m\nReceived: \u001b[31m\"\u001b[7m../a/../\u001b[27m../../../b\"\u001b[39m\n\n \u276f test/join.test.ts:38:49\n     36|   for (const t of tests) {\n     37|     test(`joinURL(${t.input.map((i) => JSON.stringify(i)).join(\", \")})\u2026\n     38|       expect(joinURL(...(t.input as string[]))).toBe(t.out);\n       |                                                 ^\n     39|     });\n     40|   }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[11/13]\u23af\n",
+    "answer": "moved",
+    "why": "Old joinURL('../a','../../../b') etc. in join.test.ts fail because the '../' resolving code was moved to the new joinRelativeURL, whose new tests keep the same inputs and expectations (title 'feat: joinRelativeURL'); borderline since joinURL itself stops resolving '../' without the message saying so."
+   },
+   {
+    "commit": "f7d47110af9a",
+    "subject": "refactor(joinURL): rewrite with clear syntax and relative `../` support (#218)",
+    "files": [
+     "M test/base.test.ts",
+     "M test/join.test.ts"
+    ],
+    "result": "red",
+    "output": "     35|       expect(joinURL(...t.input)).toBe(t.out);\n       |                                   ^\n     36|     });\n     37|   }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[4/10]\u23af\n\n FAIL  test/join.test.ts > joinURL > [\"../a\",\"../../../../b\"]\nAssertionError: expected '../../../b' to be '../../b' // Object.is equality\n\nExpected: \u001b[32m\"../../b\"\u001b[39m\nReceived: \u001b[31m\"../../\u001b[7m../\u001b[27mb\"\u001b[39m\n\n \u276f test/join.test.ts:35:35\n     33|   for (const t of tests) {\n     34|     test(JSON.stringify(t.input), () => {\n     35|       expect(joinURL(...t.input)).toBe(t.out);\n       |                                   ^\n     36|     });\n     37|   }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[5/10]\u23af\n\n FAIL  test/join.test.ts > joinURL > [\"/c\",\"../../d\"]\n FAIL  test/join.test.ts > joinURL > [\"/c\",\".././../d\"]\nAssertionError: expected '/d' to be '../d' // Object.is equality\n\nExpected: \u001b[32m\"\u001b[7m..\u001b[27m/d\"\u001b[39m\nReceived: \u001b[31m\"/d\"\u001b[39m\n\n \u276f test/join.test.ts:35:35\n     33|   for (const t of tests) {\n     34|     test(JSON.stringify(t.input), () => {\n     35|       expect(joinURL(...t.input)).toBe(t.out);\n       |                                   ^\n     36|     });\n     37|   }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[6/10]\u23af\n",
+    "answer": "contract",
+    "why": "Old join.test.ts cases such as ['/c','../../d'] -> '../d' and ['../a','../../../../b'] -> '../../b' fail because the commit 'rewrite with clear syntax and relative ../ support' deliberately changes '../' handling and updates those expectations."
+   },
+   {
+    "commit": "d6ce0377da19",
+    "subject": "perf(withFragment): early return when no hash changes required",
+    "files": [
+     "M test/utilities.test.ts"
+    ],
+    "result": "red",
+    "output": "   \u2713 withoutFragment > https://example.com#foo 0ms\n   \u2713 withoutFragment > https://example.com 0ms\n   \u2713 withoutFragment > /foo#bar 8ms\n   \u2713 withoutFragment > /foo/#bar 0ms\n   \u2713 withoutFragment > /foo?bar#baz 0ms\n \u2713 test/normalize.test.ts (65 tests) 111ms\n \u2713 test/base.test.ts (24 tests) 83ms\n \u2713 test/resolve.test.ts (12 tests) 79ms\n \u2713 test/trailing-slash.test.ts (39 tests) 28ms\n \u2713 test/double-slash.test.ts (5 tests) 2ms\n \u2713 test/query.test.ts (29 tests) 36ms\n \u2713 test/punycode.test.ts (24 tests) 28ms\n \u2713 test/is-same.test.ts (5 tests) 14ms\n \u2713 test/join.test.ts (13 tests) 29ms\n \u2713 test/encoding.test.ts (58 tests) 98ms\n\n Test Files  1 failed | 12 passed (13)\n      Tests  1 failed | 424 passed (425)\n   Start at  17:27:38\n   Duration  6.70s (transform 855ms, setup 0ms, collect 2.75s, tests 769ms, environment 2ms, prepare 4.45s)\n\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  test/utilities.test.ts > withFragment > https://example.com#bar + \nAssertionError: expected 'https://example.com#bar' to be 'https://example.com' // Object.is equality\n\nExpected: \u001b[32m\"https://example.com\"\u001b[39m\nReceived: \u001b[31m\"https://example.com\u001b[7m#bar\u001b[27m\"\u001b[39m\n\n \u276f test/utilities.test.ts:305:49\n    303|   for (const t of tests) {\n    304|     test(`${t.input} + ${t.fragment}`, () => {\n    305|       expect(withFragment(t.input, t.fragment)).toBe(t.out);\n       |                                                 ^\n    306|     });\n    307|   }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n",
+    "answer": "contract",
+    "why": "Old withFragment test 'https://example.com#bar + empty fragment' expected the hash to be removed, and the commit body says 'this removed implicit removal behavior' for the early return when no hash change is required."
+   },
+   {
+    "commit": "3cd8c3fead23",
+    "subject": "fix: stringify protocol-relative URLs (#207)",
+    "files": [
+     "M test/parse.test.ts",
+     "M test/utilities.test.ts"
+    ],
+    "result": "red",
+    "output": "\u001b[31m+   Symbol(ufo:protocolRelative): false,\u001b[39m\n\u001b[2m  }\u001b[22m\n\n \u276f test/parse.test.ts:170:33\n    168|   for (const t of tests) {\n    169|     test(t.input.toString(), () => {\n    170|       expect(parseURL(t.input)).toEqual(t.out);\n       |                                 ^\n    171|     });\n    172|   }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[3/9]\u23af\n\n FAIL  test/parse.test.ts > parseURL > https://domain.test:3000#owo\n FAIL  test/parse.test.ts > parseURL > Https://domain.test:3000#owo\n FAIL  test/parse.test.ts > parseURL > \u0000https://invalid.com\nAssertionError: expected { Object (protocol, auth, ...) } to deeply equal { protocol: 'https:', auth: '', \u2026(4) }\n\n\u001b[32m- Expected\u001b[39m\n\u001b[31m+ Received\u001b[39m\n\n\u001b[33m@@ -3,6 +3,7 @@\u001b[39m\n\u001b[2m    \"hash\": \"#owo\",\u001b[22m\n\u001b[2m    \"host\": \"domain.test:3000\",\u001b[22m\n\u001b[2m    \"pathname\": \"\",\u001b[22m\n\u001b[2m    \"protocol\": \"https:\",\u001b[22m\n\u001b[2m    \"search\": \"\",\u001b[22m\n\u001b[31m+   Symbol(ufo:protocolRelative): false,\u001b[39m\n\u001b[2m  }\u001b[22m\n\n \u276f test/parse.test.ts:170:33\n    168|   for (const t of tests) {\n    169|     test(t.input.toString(), () => {\n    170|       expect(parseURL(t.input)).toEqual(t.out);\n       |                                 ^\n    171|     });\n    172|   }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[4/9]\u23af\n",
+    "answer": "contract",
+    "why": "Old parseURL toEqual tests fail only because parseURL output now carries a Symbol(ufo:protocolRelative) key that the fix 'stringify protocol-relative URLs' needs; the fields themselves are unchanged (borderline moved, since the new test just strips the symbol via JSON round trip)."
+   },
+   {
+    "commit": "47f4070ea63f",
+    "subject": "fix(encodeQueryValue): encode the slash character (#198)",
+    "files": [
+     "M test/encoding.test.ts",
+     "M test/normalize.test.ts"
+    ],
+    "result": "red",
+    "output": " Test Files  2 failed | 10 passed (12)\n      Tests  2 failed | 403 passed (405)\n   Start at  17:27:19\n   Duration  6.50s (transform 792ms, setup 0ms, collect 2.39s, tests 579ms, environment 35ms, prepare 4.78s)\n\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 2 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  test/encoding.test.ts > encodeQueryValue > !@#$%^&*()_+{}[]|\\:;<>,./?\nAssertionError: expected '!@%23$%25^%26*()_%2B%7B%7D%5B%5D|%5C:\u2026' to strictly equal '!@%23$%25^%26*()_%2B%7B%7D%5B%5D|%5C:\u2026'\n\nExpected: \u001b[32m\"!@%23$%25^%26*()_%2B%7B%7D%5B%5D|%5C:;%3C%3E,.\u001b[7m/\u001b[27m?\"\u001b[39m\nReceived: \u001b[31m\"!@%23$%25^%26*()_%2B%7B%7D%5B%5D|%5C:;%3C%3E,.\u001b[7m%2F\u001b[27m?\"\u001b[39m\n\n \u276f test/encoding.test.ts:104:52\n    102|   for (const t of tests) {\n    103|     test(t.input.toString(), () => {\n    104|       expect(encodeQueryValue(t.input.toString())).toStrictEqual(t.out\u2026\n       |                                                    ^\n    105|     });\n    106|   }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/2]\u23af\n\n FAIL  test/normalize.test.ts > normalizeURL > http://localhost/?redirect=http://google.com?q=test\nAssertionError: expected 'http://localhost/?redirect=http:%2F%2\u2026' to be 'http://localhost/?redirect=http://goo\u2026' // Object.is equality\n\nExpected: \u001b[32m\"http://localhost/?redirect=http:\u001b[7m//\u001b[27mgoogle.com?q=test\"\u001b[39m\nReceived: \u001b[31m\"http://localhost/?redirect=http:\u001b[7m%2F%2F\u001b[27mgoogle.com?q=test\"\u001b[39m\n\n \u276f test/normalize.test.ts:88:35\n     86|   for (const input in tests) {\n     87|     test(input, () => {\n     88|       expect(normalizeURL(input)).toBe(tests[input]);\n       |                                   ^\n     89|     });\n     90|   }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/2]\u23af\n",
+    "answer": "contract",
+    "why": "Old encodeQueryValue and normalizeURL tests expected '/' unencoded, which the commit 'fix(encodeQueryValue): encode the slash character' deliberately changes."
+   },
+   {
+    "commit": "75a280c9e0d2",
+    "subject": "fix: port should be string",
+    "files": [
+     "M test/parse.test.ts"
+    ],
+    "result": "red",
+    "output": "   \u00d7 parseHost > localhost:3000 10ms\n     \u2192 expected { hostname: 'localhost', port: '3000' } to strictly equal { hostname: 'localhost', port: 3000 }\n   \u2713 parseHost > google.com 0ms\n \u2713 test/punycode.test.ts (24 tests) 8ms\n \u2713 test/double-slash.test.ts (5 tests) 3ms\n \u2713 test/trailing-slash.test.ts (26 tests) 30ms\n \u2713 test/base.test.ts (24 tests) 22ms\n \u2713 test/is-same.test.ts (5 tests) 3ms\n \u2713 test/join.test.ts (9 tests) 10ms\n\n Test Files  1 failed | 10 passed (11)\n      Tests  1 failed | 258 passed (259)\n   Start at  17:28:27\n   Duration  2.63s (transform 384ms, setup 0ms, collect 1.25s, tests 210ms, environment 22ms, prepare 1.64s)\n\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  test/parse.test.ts > parseHost > localhost:3000\nAssertionError: expected { hostname: 'localhost', port: '3000' } to strictly equal { hostname: 'localhost', port: 3000 }\n\n\u001b[32m- Expected\u001b[39m\n\u001b[31m+ Received\u001b[39m\n\n\u001b[2m  {\u001b[22m\n\u001b[2m    \"hostname\": \"localhost\",\u001b[22m\n\u001b[32m-   \"port\": 3000,\u001b[39m\n\u001b[31m+   \"port\": \"3000\",\u001b[39m\n\u001b[2m  }\u001b[22m\n\n \u276f test/parse.test.ts:101:34\n     99|   for (const t of tests) {\n    100|     test(t.input, () => {\n    101|       expect(parseHost(t.input)).toStrictEqual(t.out);\n       |                                  ^\n    102|     });\n    103|   }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n",
+    "answer": "contract",
+    "why": "Old parseHost 'localhost:3000' test expected port 3000 as a number, and the commit is titled 'fix: port should be string'."
+   },
+   {
+    "commit": "4f66249c2a59",
+    "subject": "fix(withProtocol): handle input without protocol (resolves #52)",
+    "files": [
+     "M test/utilities.test.ts"
+    ],
+    "result": "red",
+    "output": "   \u2713 withoutProtocol > ftp://example.com/test?foo 0ms\n   \u2713 withoutProtocol > http://foo.com/test?query=123#hash 0ms\n   \u2713 withoutProtocol > file:///home/user 0ms\n   \u2713 withoutProtocol > tel:1234567890 0ms\n   \u2713 withoutProtocol > mailto:support@example.com 0ms\n   \u2713 withoutProtocol > skype:1234567890 0ms\n   \u2713 withoutProtocol > callto://+1234567890 0ms\n \u2713 test/doubleSlash.test.ts (5 tests) 2ms\n \u2713 test/is-same.test.ts (5 tests) 4ms\n \u2713 test/base.test.ts (18 tests) 6ms\n \u2713 test/punycode.test.ts (24 tests) 5ms\n \u2713 test/join.test.ts (9 tests) 9ms\n\n Test Files  1 failed | 10 passed (11)\n      Tests  1 failed | 232 passed (233)\n   Start at  17:28:24\n   Duration  3.05s (transform 574ms, setup 0ms, collect 1.61s, tests 305ms, environment 1ms, prepare 2.04s)\n\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  test/utilities.test.ts > hasProtocol > tel:\nAssertionError: expected true to be false // Object.is equality\n\n\u001b[32m- Expected\u001b[39m\n\u001b[31m+ Received\u001b[39m\n\n\u001b[32m- false\u001b[39m\n\u001b[31m+ true\u001b[39m\n\n \u276f test/utilities.test.ts:30:42\n     28|     test(t.input.toString(), () => {\n     29|       const [withAcceptRelative, withoutAcceptRelative] = t.out\n     30|       expect(hasProtocol(t.input, true)).toBe(withAcceptRelative)\n       |                                          ^\n     31|       expect(hasProtocol(t.input)).toBe(withoutAcceptRelative)\n     32|     })\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n",
+    "answer": "contract",
+    "why": "Old hasProtocol 'tel:' test expected false, and the commit body states 'side effect: hasProtocol allows [protocol]:$' as part of making withProtocol handle input without protocol."
+   },
+   {
+    "commit": "d66cb646c3a6",
+    "subject": "fix!: hasProtocol additional protocols (#46)",
+    "files": [
+     "M test/utilities.test.ts"
+    ],
+    "result": "red",
+    "output": "   \u2713 stringifyParsedURL > .?foo=123 0ms\n   \u2713 stringifyParsedURL > ./?foo=123#hash 0ms\n   \u2713 stringifyParsedURL > /test?query=123#hash 0ms\n   \u2713 stringifyParsedURL > test?query=123#hash 0ms\n   \u2713 stringifyParsedURL > /%c 0ms\n   \u2713 stringifyParsedURL > /% 0ms\n   \u2713 stringifyParsedURL > http://foo.com/test?query=123#hash 0ms\n   \u2713 stringifyParsedURL > http://localhost:3000 0ms\n   \u2713 stringifyParsedURL > http://my_email%40gmail.com:password@www.my_site.com 0ms\n   \u2713 stringifyParsedURL > /test?query=123,123#hash, test 0ms\n \u2713 test/doubleSlash.test.ts (5 tests) 23ms\n \u2713 test/join.test.ts (9 tests) 3ms\n\n Test Files  1 failed | 10 passed (11)\n      Tests  1 failed | 204 passed (205)\n   Start at  17:27:32\n   Duration  4.77s (transform 736ms, setup 0ms, collect 2.12s, tests 301ms, environment 1ms, prepare 3.27s)\n\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  test/utilities.test.ts > hasProtocol > https://\nAssertionError: expected true to be false // Object.is equality\n\n\u001b[32m- Expected\u001b[39m\n\u001b[31m+ Received\u001b[39m\n\n\u001b[32m- false\u001b[39m\n\u001b[31m+ true\u001b[39m\n\n \u276f test/utilities.test.ts:18:42\n     16|     test(t.input.toString(), () => {\n     17|       const [withAcceptRelative, withoutAcceptRelative] = t.out\n     18|       expect(hasProtocol(t.input, true)).toBe(withAcceptRelative)\n       |                                          ^\n     19|       expect(hasProtocol(t.input)).toBe(withoutAcceptRelative)\n     20|     })\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n",
+    "answer": "lost",
+    "why": "Old hasProtocol 'https://' test expected false but the regex widened for 'additional protocols' (tel:123456, mailto:) makes it true; the title asks for more protocols, not for 'https://' to count, so this looks like an unasked side effect that the commit just rewrote in the test."
+   },
+   {
+    "commit": "f0241d4b1a76",
+    "subject": "chore: update repo and use vitest",
+    "files": [
+     "M test/base.test.ts",
+     "M test/doubleSlash.test.ts",
+     "M test/is-same.test.ts",
+     "M test/join.test.ts",
+     "M test/normalize.test.ts",
+     "M test/punycode.test.ts",
+     "M test/query.test.ts",
+     "M test/resolve.test.ts",
+     "M test/trailing-slash.test.ts",
+     "M test/url.test.ts",
+     "M test/utilities.test.ts"
+    ],
+    "result": "red",
+    "output": "      6|     { input: [], out: '' },\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[8/11]\u23af\n\n FAIL  test/trailing-slash.test.ts [ test/trailing-slash.test.ts ]\nReferenceError: describe is not defined\n \u276f test/trailing-slash.test.ts:4:1\n      2| import { withTrailingSlash, withoutTrailingSlash } from '../src'\n      3| \n      4| describe('withTrailingSlash, queryParams: false', () => {\n       | ^\n      5|   const tests = {\n      6|     '': '/',\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[9/11]\u23af\n\n FAIL  test/url.test.ts [ test/url.test.ts ]\nReferenceError: describe is not defined\n \u276f test/url.test.ts:3:1\n      1| import { parseURL } from '../src'\n      2| \n      3| describe('parseURL', () => {\n       | ^\n      4|   const tests = [\n      5|     { input: '//test', out: { auth: '', hash: '', host: 'test', pathna\u2026\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[10/11]\u23af\n\n FAIL  test/utilities.test.ts [ test/utilities.test.ts ]\nReferenceError: describe is not defined\n \u276f test/utilities.test.ts:3:1\n      1| import { hasProtocol, isRelative, parsePath, stringifyParsedURL } from\u2026\n      2| \n      3| describe('hasProtocol', () => {\n       | ^\n      4|   const tests = [\n      5|     { input: '//', out: [false, false] },\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[11/11]\u23af\n",
+    "answer": "moved",
+    "why": "The behaviour is kept and the tests were rewritten for another runner: every old test file fails with 'ReferenceError: describe is not defined' because the commit switches the runner from jest to vitest and the old files lack the vitest imports; no behaviour is involved."
+   }
+  ],
+  "answers": {
+   "contract": 6,
+   "lost": 1,
+   "moved": 2
+  }
+ }
+}

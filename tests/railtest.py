@@ -10,11 +10,29 @@ import unittest
 
 RAIL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "rail")
 
+# The repository's engine, the one bin/rail runs. A test that imports an engine module in-process imports it from
+# here, never from a fixture's .rail/engine: that copy is deleted with the fixture, and the `rail` package stays in
+# sys.modules pointing at the deleted folder, so every later in-process import in the same worker fails.
+ENGINE = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(RAIL))), "engine")
+
+
+def engine():
+    """Put the repository's engine on sys.path, so that `from rail import ...` works in the test process."""
+    if ENGINE not in sys.path:
+        sys.path.insert(0, ENGINE)
+
 FAKE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_reviewer.py")
+FAKE_WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_worker.py")
 FAKE_GH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_gh.py")
 GITHUB_URL = "https://github.com/acme/app.git"
 
+# The calculator has no manifest, so no project is derived for it: one entry declares the whole fixture as a project
+# with no commands of its own. Without it every folder would be inside no project, and each ship would ask about it
+# (rail docs languages). A config a test writes itself gets the entry too, unless it has a [[projects]] of its own.
+CALC = '[[projects]]\nname = "calc"\npaths = ["**"]\n'
+
 CONFIG = f"""\
+{CALC}
 [commands]
 verify = "python3 -m py_compile src/calc.py"
 timeout_secs = 60
@@ -25,6 +43,10 @@ command = "python3 {FAKE}"
 [consult]
 command = "python3 {FAKE} --consult"
 """
+
+# First in a config, it makes a PERSON ticket of the kind `ticket` names wait for a person's approval of its
+# contract before the build. Without it a person acts once on a PERSON ticket, at the merge (rail docs kinds).
+APPROVE = 'approve_contract = ["data-shape"]\n'
 
 ARCHITECTURE = """\
 # Architecture
@@ -41,8 +63,10 @@ CHECK_ADD = "python3 -c \"import sys; sys.path.insert(0, 'src'); import calc; as
 
 
 def ticket(title="Fix add", tier="AUTO", scope=("src/**",), check=CHECK_ADD, front=(), body=""):
-    """A ticket file, in the format rail add reads."""
+    """A ticket file, in the format rail add reads. A PERSON ticket names a kind, as lint requires."""
     scope_list = ", ".join(f'"{s}"' for s in scope)
+    if tier == "PERSON" and not any(line.startswith("person_reason") for line in front):
+        front = (*front, f'person_reason = "data-shape: {scope[0]}"')
     lines = ["+++", f'title = "{title}"', f'tier = "{tier}"', f"scope_paths = [{scope_list}]", *front, "+++", "",
              "## Why", "add subtracts instead of adding.", "",
              "## Done Contract", f"- Check: `{check}`", ""]
@@ -52,17 +76,21 @@ def ticket(title="Fix add", tier="AUTO", scope=("src/**",), check=CHECK_ADD, fro
 class Fixture:
     """A git project set up with `rail init`, with a test config and a tiny calculator.
 
-    With `remote`, it is a clone of that bare repository instead.
+    With `remote`, it is a clone of that bare repository instead. With `tree`, the project is a copy of that folder
+    and nothing else, not the calculator. `projects=False` leaves a config with no [[projects]] entry as it is.
     """
 
-    def __init__(self, root, config=CONFIG, files=None, remote=None, init=True):
+    def __init__(self, root, config=CONFIG, files=None, remote=None, init=True, tree=None, projects=True):
         self.root = root
         if remote:
             self.git("clone", "--quiet", remote, root, cwd=os.path.dirname(root))
             return
-        os.makedirs(root)
+        if tree:
+            shutil.copytree(tree, root)
+        else:
+            os.makedirs(root)
         self.git("init", "--quiet", "-b", "main")
-        defaults = {
+        defaults = {} if tree else {
             ".gitignore": ".claude/worktrees/\n__pycache__/\n",
             "ARCHITECTURE.md": ARCHITECTURE,
             "src/calc.py": "def add(a, b):\n    return a - b\n",
@@ -74,6 +102,8 @@ class Fixture:
         if not init:
             return
         self.rail("init")
+        if not tree and "[[projects]]" not in config and projects:
+            config = config.rstrip("\n") + "\n\n" + CALC
         self.write(".rail/config.toml", config)
         self.git("add", "-A")
         self.git("commit", "--quiet", "-m", "init")
@@ -103,6 +133,18 @@ class Fixture:
         with open(self.reviews, "w") as f:
             json.dump(list(responses), f)
 
+    def queue_work(self, *items):
+        """What the stand-in worker does in the next `rail work` runs, in order (tests/fake_worker.py)."""
+        with open(self.root + ".worker.json", "w") as f:
+            json.dump(list(items), f)
+
+    def work_log(self):
+        path = self.root + ".worker.log"
+        if not os.path.exists(path):
+            return []
+        with open(path) as f:
+            return [json.loads(line) for line in f]
+
     def briefs(self):
         if not os.path.exists(self.review_log):
             return []
@@ -115,6 +157,9 @@ class Fixture:
         env.pop("GITHUB_ACTIONS", None)
         env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
         env["RAIL_CLOUD"] = "1" if cloud else "0"  # the suite itself may run inside a cloud session
+        # No bytecode files: a check that imports src/calc.py right after a test rewrote it, in the same second and at
+        # the same size, would run the stale .pyc and fail a correct change.
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         # What provision writes on a cloud machine goes to a scratch home and bin folder, never the real ones.
         scratch = os.path.join(os.path.dirname(self.root), "machine")
         env["RAIL_BIN_DIR"] = os.path.join(scratch, "bin")
@@ -126,6 +171,8 @@ class Fixture:
         env["CLAUDE_CODE_SESSION_ID"] = session
         env["RAIL_FAKE_REVIEWS"] = self.reviews
         env["RAIL_FAKE_LOG"] = self.review_log
+        env["RAIL_FAKE_WORKER"] = self.root + ".worker.json"
+        env["RAIL_FAKE_WORKER_LOG"] = self.root + ".worker.log"
         if getattr(self, "github", None):
             env["RAIL_FAKE_GITHUB"] = self.github.state
             env["PATH"] = self.github.bin + os.pathsep + env["PATH"]
@@ -137,7 +184,7 @@ class Fixture:
         if raw:
             return result
         answer = json.loads(result.stdout)
-        check_shape(answer)
+        check_shape(answer, args[0] if args else None)
         return answer
 
     def add(self, text, **kw):
@@ -152,20 +199,30 @@ class Fixture:
     def worktree(self, nn):
         return self.path(".claude", "worktrees", nn)
 
+    def undiagnosed(self, nn="1"):
+        """A ticket at its retry cap gets one diagnosis before it is dropped or waits (rail docs retries). Here the
+        stand-in answers `cannot-tell`, which leaves the ticket where it was: what rail next then answers."""
+        self.queue_reviews({"answer": "cannot-tell", "reason": "Nothing here shows which."})
+        return self.rail("next", "--ticket", nn)
+
     def fix_calc(self, nn):
         self.write("src/calc.py", "def add(a, b):\n    return a + b\n", base=self.worktree(nn))
 
 
-def check_shape(answer):
-    """Every verb answers in the same shape."""
-    assert answer["schema_version"] == 1, answer
+def check_shape(answer, verb=None):
+    """Every verb answers in the same shape, and in the one engine/answer-v1.json describes."""
+    engine()
+    from rail import answers
+    broken = answers.check(answer, verb)
+    assert not broken, "\n".join(["the answer breaks engine/answer-v1.json:", *broken, json.dumps(answer, indent=1)[:3000]])
+    assert answer["schema_version"] == 2, answer
     if not answer["ok"]:
         assert answer["reason"]["code"] and answer["reason"]["message"], answer
         return
     for key in ("ticket", "state", "owner", "cwd", "action", "reason", "steps"):
         assert key in answer, (key, answer)
-    assert answer["owner"] in ("agent", "human", "none"), answer
-    assert answer["action"]["kind"] in ("script", "agent_task", "human_wait", "rest"), answer
+    assert answer["owner"] in ("agent", "person", "none"), answer
+    assert answer["action"]["kind"] in ("script", "agent_task", "person_wait", "rest"), answer
     for step in answer["steps"]:
         assert step["status"] in ("ran", "could_not_run", "not_run", "unavailable"), step
         assert ("result" in step) == (step["status"] in ("ran", "could_not_run")), step

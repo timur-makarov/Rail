@@ -10,34 +10,95 @@ import re
 import subprocess
 import sys
 
-from . import areas, gitx, guard, hooks, rules, steps
-from .project import Project, event, events_path, ticket_path
-from .state import OPEN, derive, floor
-from .table import TRANSITIONS, first_match
-from .ticket import Ticket, branch_name, highest, lint, rank, with_field, with_id, with_tier
-from .forge import ENGINE_MARK, TRUSTED, ForgeError
-from .util import RailError, age, cloud, could_not_run, disposable, match_any, session_url, shell
+from . import areas, gitx, guard, hooks, history, rules, steps, tools
+from .project import NON_PRODUCT, Project, event, events_path, started_again, ticket_path
+from .state import OPEN, derive, floor, ticket_kinds
+from .table import TRANSITIONS, WAIT_KINDS, adopted_line, end_with, first_match
+from .table import render as render_brief
+from .ticket import TIERS, Ticket, branch_name, highest, lint, rank, with_field, with_id, with_tier
+from .forge import ENGINE_MARK, TRUSTED, ForgeError, RateLimited
+from .hidden import strip_hidden
+from .util import RailError, age, cloud, could_not_run, disposable, match_any, parse_iso, session_url, shell
 
 VERBS = ("init", "add", "adopt", "accept", "amend", "answer", "next", "advance", "status", "context", "drop", "doctor", "ci",
-         "consult", "docs", "intake", "sweep", "source", "provision", "save", "stats")
+         "consult", "docs", "intake", "sweep", "source", "provision", "save", "stats", "work")
 STALE_DAYS = 3
 
 
 def answer(ticket=None, state=None, owner="none", action=None, code="NO_WORK", steps_=None, cwd=None, **extra):
     result = {
-        "schema_version": 1, "ok": True, "ticket": ticket, "state": state, "owner": owner, "cwd": cwd,
+        "schema_version": 2, "ok": True, "ticket": ticket, "state": state, "owner": owner, "cwd": cwd,
         "action": action or {"kind": "rest", "brief": ""}, "reason": {"code": code}, "steps": steps_ or [],
     }
     result.update(extra)
     return result
 
 
+LIMIT_SLEEP = 300  # a rate limit that lifts sooner than this many seconds is slept through; a longer one ends the run
+
+
+def github_limit(e):
+    """GitHub's rate limit is used up: a rest, not an outage and not a failure. The command stopped where the limit
+    hit, no attempt is counted, and rail next goes on from the journal once the limit lifts."""
+    import time
+
+    wait = int(e.wait) + 1
+    if wait < LIMIT_SLEEP:
+        command = f"sleep {wait}; rail next"
+        result = answer(owner="agent", code="GITHUB_LIMIT", action={"kind": "script", "brief": command, "command": command})
+    else:
+        back = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(time.time() + wait))
+        result = answer(code="GITHUB_LIMIT", action={"kind": "rest", "brief": (
+            f"GitHub's rate limit is used up until {back}. Nothing is lost: run rail next after that.")})
+    result["reason"]["message"] = str(e)
+    result["wait_secs"] = wait
+    return result
+
+
+def day_budget(project, tickets):
+    """The BUDGET_DAY rest when the runs of the last 24 hours reported more than [worker] daily_usd, else None. The
+    sum is over every ticket's worker and review runs, and over a dropped ticket's whole cost when it was dropped in
+    that time (its journal went with its branch; the drop mark keeps the sum). It lifts by itself as runs get older."""
+    import time
+
+    limit = project.config["worker"]["daily_usd"]
+    if not limit:
+        return None
+    now, costs = time.time(), []
+    for t in tickets.values():
+        found = [e for e in t.events if e.get("event") in ("worked", "step")] or [t.dropped_record or {}]
+        for e in found:
+            if e.get("cost_usd") and e.get("at"):
+                costs.append((parse_iso(e["at"]).timestamp(), e["cost_usd"]))
+    recent = sorted(c for c in costs if c[0] > now - 86400)
+    total = left = sum(usd for _, usd in recent)
+    if total <= limit:
+        return None
+    lifts = now
+    for at, usd in recent:
+        left -= usd
+        if left <= limit:
+            lifts = at + 86400
+            break
+    back = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(lifts))
+    return answer(code="BUDGET_DAY", wait_secs=max(1, int(lifts - now) + 1), spent_usd=round(total, 2), action={
+        "kind": "rest", "brief": f"The runs of the last 24 hours reported ${total:.2f}, over [worker] daily_usd"
+                                 f" (${limit:g}). No ticket changed. It lifts by itself at about {back}: run rail next"
+                                 " after that."})
+
+
+# The agent tasks that are the contract writer's.
+CONTRACT_WORK = ("TICKET_LINT", "SWEEP_TICKETS", "AFTER_DROPPED", "STUCK_CONTRACT", "STUCK_SPLIT")
+
+
 def worker(f, action, code=None):
     """The model and effort an agent_task for a ticket's work names: the tier's ladder, one rung per failed attempt at
-    the step the ticket is failing, capped at the last rung. Writing a contract (TICKET_LINT) names worker.contract
-    when it is set. The engine starts no agent; the session that runs the loop may start one on them."""
+    the step the ticket is failing, capped at the last rung. Writing a contract (TICKET_LINT), filing a sweep's
+    tickets (SWEEP_TICKETS), deciding on a dropped `after` (AFTER_DROPPED) and what the diagnosis of a stuck ticket
+    asks of the contract (STUCK_CONTRACT, STUCK_SPLIT) name worker.contract when it is set.
+    `rail work` starts [worker] command on them; a session a person drives may ignore them."""
     ladder = f.project.config["worker"]["person_ladder" if f.tier == "PERSON" else "ladder"]
-    if code == "TICKET_LINT" and f.project.config["worker"]["contract"]:
+    if code in CONTRACT_WORK and f.project.config["worker"]["contract"]:
         ladder = [f.project.config["worker"]["contract"]]
     if action.get("kind") == "agent_task" and ladder:
         model, _, effort = ladder[min(f.attempts.get(f.failing, 0), len(ladder) - 1)].rpartition(":")
@@ -51,18 +112,25 @@ GUIDED = {"IMPLEMENT": "start", "STEP_FAILED": "stuck", "ANSWER_FINDINGS": "find
 
 
 def guide(project, code, action, f=None):
-    """The [guides] page for the brief's situation: a line in the brief, and the first time for a ticket a `guided`
-    event. A hint only: a page that isn't there names nothing, and `rail doctor` says so. `start` is named once per
-    ticket, and `stuck` only once the same failure has repeated. Returns {situation, path}, or None."""
+    """The [guides] page for the brief's situation: its text (or the sections the key names) at the end of the
+    brief, and the first time for a ticket a `guided` event. The engine puts the text in front of the agent rather
+    than naming a page it may not open. A page or section that isn't there adds nothing, and `rail doctor` says so.
+    `start` is given once per ticket, and `stuck` only once the same failure has repeated. Returns {situation,
+    path}, or None."""
+    from . import docs
+
     situation = GUIDED.get(code)
+    if code == "TICKET_LINT" and f and f.ticket and (f.ticket.get("external_id") or "").startswith("coverage:"):
+        situation = "setup"  # the contract of a ticket that covers a folder is a set of checks to choose
     path = project.config["guides"][situation] if situation else ""
     given = {e.get("situation") for e in f.t.events if e.get("event") == "guided"} if f else set()
     if not path or (situation == "start" and "start" in given) or (
             situation == "stuck" and f.same.get(f.failing, 0) < 2):
         return None
-    if not os.path.isfile(os.path.join(f.t.worktree if f and f.t.worktree else project.root, path)):
+    text = docs.read_part(path, f.t.worktree if f and f.t.worktree else project.root)
+    if not text:
         return None
-    action["brief"] += f"\n\nGuide: read {path} and follow it."
+    end_with(code, action, "guide", text)
     if f and situation not in given and not f.rebasing:  # mid-rebase the engine writes nothing to the ticket
         ensure_local(project, f.t)
         project.append_events(f.t, [event(f.id, "guided", situation=situation, path=path)], f"guide: {situation}")
@@ -72,7 +140,7 @@ def guide(project, code, action, f=None):
 def from_facts(f, steps_=None, code=None, **extra):
     row_code, owner, action = first_match(f)
     worker(f, action, row_code)
-    if owner == "human" or person_next(f):
+    if row_code not in ("STOPPED", "TOOL_MISSING") and (owner == "person" or person_next(f)):
         label_wait(f.project, f, row_code)  # the person's inbox is this label, whichever command met the wait
     named = guide(f.project, row_code, action, f)
     if named:
@@ -170,6 +238,12 @@ def make_ready(project, t, run, fresh=False):
         found = steps.base_checks(project, t) if fresh and run.ok else None
         if found:
             project.append_events(t, [found], "base checks")
+        from . import revert
+        reverted = revert.target(project, t.ticket, project.tickets()) if fresh and run.ok else None
+        if reverted and reverted[1]:
+            # A revert's work is the engine's where it can be: the reverse goes into the worktree's files, for the
+            # ship to commit. Where it no longer applies, the brief asks an agent to undo the change by hand.
+            revert.apply(project, reverted[1], t.worktree)
 
 
 def contract_pr(f):
@@ -216,6 +290,55 @@ def restart_on_base(project, f, run):
                              f" (git rebase --onto {project.base} {merged_head[:12]}), then run: rail next")
 
 
+def restart_branch(project, f, run):
+    """Start the ticket's branch again from the base branch, under a new name. Either the old branch's commits hold a
+    secret, and the secret scan reads every commit of a branch, so it would fail there for good; or the diagnosis of
+    a stuck ticket judged that its attempts share a mistake. The new branch has one commit on the base's tip, with
+    the ticket and its journal as the old branch had them; none of the work comes along, since the work is where the
+    secret or the mistake is. The old branch and its pull request are closed."""
+    t, q = f.t, f.restart_due
+    ensure_local(project, t)
+    root, old, old_remote = project.root, t.branch, t.remote_branch
+    old_tip, base_tip = gitx.rev(t.ref, root), gitx.rev(project.base_ref, root)
+    taken = {line.rsplit("/", 1)[-1] for line in gitx.out(["for-each-ref", "--format=%(refname)"], root).splitlines()}
+    name = started_again(old)
+    while name in taken:
+        name = started_again(name)
+    # What the branch added under .rail/tickets and .rail/journal, and nothing the base has changed since.
+    fork = gitx.out(["merge-base", base_tip, old_tip], root).strip()
+    kept = gitx.out(["diff", "--name-only", "--diff-filter=AM", fork, old_tip, "--", *NON_PRODUCT], root).splitlines()
+    blobs = gitx.read_blobs([f"{old_tip}:{path}" for path in kept], root)
+    commit = gitx.commit_files(root, base_tip, {path: blobs[f"{old_tip}:{path}"] or "" for path in kept},
+                               f"{t.id}: start again from {project.base}")
+    gitx.update_ref(root, f"refs/heads/{name}", commit, None)
+    if t.worktree:
+        if gitx.dirty(t.worktree):
+            # Work nobody committed stays on this machine, out of the new branch: it may hold the secret too, or the
+            # mistake the attempts shared.
+            gitx.git(["stash", "push", "--quiet", "--include-untracked", "-m",
+                      f"rail: ticket {t.id} before its branch was started again"], t.worktree, check=False)
+        gitx.git(["checkout", "--quiet", "--force", name], t.worktree)
+    gitx.git(["branch", "-D", old], root, check=False)
+    fact, stuck = q.get("fact") or {}, q["type"] == "stuck"
+    note = (q.get("answer") or {}).get("evidence") if stuck else None
+    record = event(t.id, "restarted", question=q["id"], type=q["type"], branch=old, to=name,
+                   **{key: fact[key] for key in ("rule", "file") if fact.get(key)}, **({"note": note} if note else {}))
+    t.branch, t.ref, t.remote_branch = name, f"refs/heads/{name}", None
+    project.append_events(t, [record], f"start again from {project.base}")
+    if f.pr_open:
+        why = ("its attempts here kept failing, and a diagnosis judged that they share a mistake" if stuck else
+               "this branch's commits hold a secret a person has rotated")
+        project.forge.comment(f.pr["number"], f"Ticket {t.id} goes on, on the branch `{name}`: {why}, so the work starts"
+                                              f" again from `{project.base}`.\n{ENGINE_MARK}")
+        project.forge.update_pr(f.pr["number"], state="closed")
+    if old_remote and project.remote and project.online and not cloud():
+        # Not from a cloud session, whose git access can't delete a branch: there the old branch stays on the
+        # remote, closed, and the engine reads the new one.
+        gitx.push(root, project.remote, f":refs/heads/{old_remote}")
+    run.steps.append({"step": "restart", "status": "ran", "result": "pass", "detail": f"{old} -> {name}"})
+    return True
+
+
 def ensure_pr(project, f, receipts):
     """Every wait after add has a PR to label: a contract PR at add for a PERSON ticket, and a PR at claim for
     an AUTO one."""
@@ -226,8 +349,8 @@ def ensure_pr(project, f, receipts):
             f"refs/remotes/{project.remote}/{t.name}", project.root):
         return f.pr
     if f.state == "new":
-        if f.lint_errors or f.auto:
-            return None
+        if f.lint_errors or not f.approve_first:
+            return None  # only a contract a person approves before the build has a pull request of its own
         title, body = contract_pr(f)
     elif f.state in OPEN:
         title = f"{t.id}: {f.ticket.title}"
@@ -270,21 +393,33 @@ def person_comments(project, f):
         return ""
     moves = [e["at"] for e in f.t.events if e.get("event") != "saved" and e.get("at")]  # a save isn't a move
     since = moves[-1] if moves else ""
-    said = [c["body"].strip() for c in project.forge.comments(f.pr["number"])
-            if c.get("created_at", "") >= since and c.get("body") and c.get("author_association") in TRUSTED
-            and ENGINE_MARK not in c["body"]]
-    return "\n".join(said)
+    def theirs(c):
+        return (c.get("created_at", "") >= since and c.get("body") and c.get("author_association") in TRUSTED
+                and ENGINE_MARK not in c["body"])
+
+    said = [strip_hidden(c["body"])[0].strip() for c in project.forge.comments(f.pr["number"]) if theirs(c)]
+    # A comment on a line of the diff, such as an answer to a "Read these" item, is the person's word too.
+    for c in project.forge.line_comments(f.pr["number"]):
+        text = strip_hidden(c["body"])[0].strip() if theirs(c) else ""
+        if text:
+            said.append(f"{c.get('path')}:{c.get('line') or c.get('original_line')}: {text}")
+    return "\n".join(s for s in said if s)  # what GitHub hides in a comment, its reader didn't write for the agent
+
+
+def wait_code(f):
+    """The code of the wait for a person the ticket is at, or "": what the table says with a rail:go left out. A
+    person's act records it, so rail stats can say which waits take the time."""
+    labels, f.labels = f.labels, f.labels - {"rail:go"}
+    try:
+        code, owner, _ = first_match(f)
+        return code if owner == "person" else ""
+    finally:
+        f.labels = labels
 
 
 def answers_wait(f):
-    """Whether a rail:go on the ticket answers a wait for a person: what the table says with the label left out."""
-    if "rail:go" not in f.labels:
-        return False
-    labels, f.labels = f.labels, f.labels - {"rail:go"}
-    try:
-        return first_match(f)[1] == "human"
-    finally:
-        f.labels = labels
+    """Whether a rail:go on the ticket answers a wait for a person."""
+    return "rail:go" in f.labels and bool(wait_code(f))
 
 
 def transition(project, f, code):
@@ -294,7 +429,7 @@ def transition(project, f, code):
     project.busy(t.id, wait=True)  # no save while the engine moves the ticket's branch or worktree
     if code == "ACCEPT_AUTO":
         ensure_local(project, t)
-        project.append_events(t, [accepted_event(t.id, f.ticket, f.tier, "engine", "lint")], "accept")
+        project.append_events(t, [accepted_event(project, t.id, f.ticket, f.tier, "engine", "lint")], "accept")
     elif code == "CONSULT":
         from . import consult
         ensure_local(project, t)
@@ -303,6 +438,26 @@ def transition(project, f, code):
                     " should the agent proceed, change its approach, or stop and ask a person?")
         consult.ask(project, f, "retry_cap", f.consult_due, question, last[-1].get("detail", "") if last else "", run)
         commit(project, f, run, "consult")
+    elif code == "RESTART":
+        restart_branch(project, f, run)
+    elif code == "DIAGNOSE":
+        # One run that did not write the change says why the ticket is stuck, before it is dropped or waits.
+        from . import triage
+        from .table import stuck_reason
+        ensure_local(project, t)
+        q = f.diagnosis
+        if not q:
+            record = triage.raise_stuck(f, stuck_reason(f)[0], list(f.capped))
+            run.events.append(record)
+            q = dict(record, answers=[], answer=None)
+        # The run's worktree is put back as the branch has it afterwards: work nobody committed is kept aside.
+        aside = bool(gitx.dirty(t.worktree, exclude=[".rail/journal"])) and gitx.git(
+            ["stash", "push", "--quiet", "--include-untracked", "-m", f"rail: ticket {t.id} during its diagnosis"],
+            t.worktree, check=False).returncode == 0
+        triage.run(project, f, run, q)
+        if aside:
+            gitx.git(["stash", "pop", "--quiet"], t.worktree, check=False)
+        commit(project, f, run, "diagnosis")
     elif code == "CLAIM":
         if not claim(project, t):
             return False, run
@@ -318,7 +473,7 @@ def transition(project, f, code):
             t.branch, t.ref = name, f"refs/heads/{name}"
         ensure_local(project, t)
         restart_on_base(project, f, run)
-        run.events.append(accepted_event(t.id, f.ticket, f.tier, "person", "merge"))
+        run.events.append(accepted_event(project, t.id, f.ticket, f.tier, "person", "merge", wait="APPROVE_CONTRACT"))
         project.append_events(t, run.events, "accept: the contract was merged")
         run.events = []
         run.steps.append({"step": "contract", "status": "ran", "result": "pass",
@@ -327,11 +482,12 @@ def transition(project, f, code):
         # A person's rail:go: it approves a contract or an amend, or continues any other wait.
         note = person_comments(project, f) or None
         ensure_local(project, t)
-        waited = answers_wait(f)
-        if f.state == "new" or f.amend_pending:
-            record = accepted_event(t.id, f.ticket, f.tier, "person", "label", note)
+        waited = wait_code(f)
+        if waited != "BUDGET" and (f.state == "new" or f.amend_pending):
+            record = accepted_event(project, t.id, f.ticket, f.tier, "person", "label", note, wait=waited)
         else:
-            record = event(t.id, "continued", via="label", **({"note": note} if note else {}))
+            record = event(t.id, "continued", via="label", **({"wait": waited} if waited else {}),
+                           **({"note": note} if note else {}))
         project.append_events(t, [record], "continue")
         for label in ("rail:go", "rail:needs-you", "rail:hold"):
             project.forge.remove_label(f.pr["number"], label)
@@ -364,6 +520,15 @@ def transition(project, f, code):
                     forge.expire()  # the pull request's head moved, by their push
                     run.steps[:] = [s for s in run.steps if s["step"] not in ("push", "rebase")]
                     run.steps.append({"step": "rebase", "status": "not_run", "detail": "another session rebased it first"})
+    elif code == "STUCK":
+        # Dropped with a record: the dropped event, the mark, the pull request closed and the issue told why. The
+        # worktree and branches go once the mark is written; until then the ticket rests (DROP_PENDING).
+        from .table import stuck_reason
+        reason, step, signature = stuck_reason(f)
+        drop(project, f, "engine", reason, run.steps, step=step, signature=signature)
+        tickets, facts = load(project)
+        if not facts[t.id].drop_pending:
+            steps.remove_ticket(project, facts[t.id].t)
     elif code == "RESUME":
         ensure_local(project, t)
         if f.claimed_elsewhere and not claim(project, t, takeover=True):
@@ -382,6 +547,8 @@ def settle(project, nn, explicit):
         f = facts[nn]
         f.explicit = explicit
         code, owner, action = first_match(f)
+        if code == "STOPPED":
+            return f, receipts  # a person's brake: nothing is claimed, moved or repaired
         if code == "SETUP_FAILED" and explicit and not reran_setup:
             # `next --ticket NN` runs a failed setup again, once (the SETUP_FAILED brief says so).
             run = steps.Run(project, f.t)
@@ -412,8 +579,14 @@ def settle(project, nn, explicit):
 def cleanup(project, tickets, facts):
     leftovers = []
     for nn, f in facts.items():
-        if f.state == "dropped" and f.pr and not f.dropped_event:
-            release_issue(project, f)  # a PR closed by hand gets the same cleanup as rail drop
+        if f.state == "dropped" and f.pr and not f.dropped_event and f.t.name:
+            # A pull request closed by hand is a person's drop: it gets the same cleanup as rail drop, and the same
+            # mark, so rail stats still counts it once the branch is gone.
+            closed = {"by": "person", "reason": "its pull request was closed without a merge"}
+            if not finish_drop(project, f, [], closed):
+                continue
+        if f.drop_pending and not finish_drop(project, f, []):
+            continue  # still no mark: the drop keeps everything
         if f.state in ("merged", "dropped"):
             leftovers += steps.remove_ticket(project, f.t)
     return leftovers
@@ -435,28 +608,46 @@ def requested_event(nn, ticket, via, channel, **extra):
     return event(nn, "requested", **fields)
 
 
-def create_ticket(project, text, via="add", channel="session", parent=None, key=None, **extra):
+def with_kinds(project, text):
+    """The ticket text with the tier its scope's paths set, and, when they set one, a person_reason naming every kind
+    they reach, each as "kind: path" with the first path that reaches it, parts separated by "; ", unless the ticket
+    has one already. Text whose front matter or tier is malformed is left to lint."""
+    ticket = Ticket(text)
+    if ticket.errors or ticket.tier not in TIERS:
+        return text
+    tier, found = floor(project, ticket.scope)
+    if not found:
+        return text
+    if tier != ticket.tier:
+        text = with_tier(text, tier)
+    if not ticket.get("person_reason"):
+        first = {}
+        for kind, path, _ in found:
+            first.setdefault(kind, path)
+        text = with_field(text, "person_reason", "; ".join(f"{kind}: {path}" for kind, path in first.items()))
+    return text
+
+
+def create_ticket(project, text, via="add", channel="session", parent=None, key=None, approved=False, **extra):
     """Take the next ID and make the ticket's branch with the ticket file, without touching any checkout. The
-    journal starts with a `requested` event; an AUTO ticket that passes lint is accepted at once. The branch starts
-    from the base branch, or from `parent` (an adopted branch's head). Returns (id, branch, push result)."""
+    journal starts with a `requested` event; an AUTO ticket that passes lint is accepted at once, and so is a PERSON
+    one a person `approved` by asking for it with a label. The branch starts from the base branch, or from `parent`
+    (an adopted branch's head). Returns (id, branch, push result)."""
     base_tip = gitx.rev(project.base_ref, project.root)
     if not base_tip:
         raise RailError(f"the base branch '{project.base}' has no commits yet")
     tickets = project.tickets()
 
     def build(nn):
-        body = with_id(text, nn)
+        # A kind's paths raise the tier: the ticket says so, with the kind in person_reason, and that tier freezes.
+        body = with_kinds(project, with_id(text, nn))
         ticket = Ticket(body)
         files = {ticket_path(nn): body}
         events = []
-        if not lint(ticket):
-            tier = highest(ticket.tier, floor(project, ticket.scope)[0])
-            if tier != ticket.tier:  # a person or migration path raised it: the ticket says so, and that tier freezes
-                body = with_tier(body, tier)
-                ticket = Ticket(body)
-                files[ticket_path(nn)] = body
-            if tier == "AUTO":
-                events.append(accepted_event(nn, ticket, tier, "engine", "lint"))
+        if not lint(ticket) and ticket.tier == "AUTO":
+            events.append(accepted_event(project, nn, ticket, "AUTO", "engine", "lint"))
+        elif not lint(ticket) and approved:
+            events.append(accepted_event(project, nn, ticket, ticket.tier, "person", "label", wait="APPROVE_CONTRACT"))
         events.insert(0, requested_event(nn, ticket, via, channel, **extra))
         files[events_path(nn)] = "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events)
         return gitx.commit_files(project.root, parent or base_tip, files, f"{nn}: add ticket: {ticket.title}")
@@ -473,12 +664,18 @@ def create_ticket(project, text, via="add", channel="session", parent=None, key=
     return nn, branch, pushed
 
 
+# The last line of `rail add`'s answer. Its move is CLAIM, and a session that filed a person's request would go on and
+# build it in the same turn.
+STOP_LINE = "If a person asked you for this work, stop here and tell them the ticket number: another session builds it."
+
+
 def cmd_add(project, args):
     if args.file == "-":
         text = sys.stdin.read()
     else:
         with open(args.file) as f:
             text = f.read()
+    text = with_kinds(project, text)
     errors = lint(Ticket(text))
     if errors:
         return answer(owner="agent", code="TICKET_LINT",
@@ -500,7 +697,7 @@ def cmd_add(project, args):
     if ensure_pr(project, f, receipts):
         tickets, facts = load(project)
         f = facts[nn]
-    return from_facts(f, receipts, branch=branch)
+    return from_facts(f, receipts, branch=branch) | {"note": STOP_LINE}
 
 
 def cmd_adopt(project, args):
@@ -524,7 +721,7 @@ def cmd_adopt(project, args):
                       action={"kind": "agent_task", "brief": adopt.brief(project, branch, head, rows, size, tier, why,
                                                                          path)})
     with open(args.file) as f:
-        text = f.read()
+        text = with_kinds(project, f.read())
     errors = lint(Ticket(text))
     if errors:
         return answer(owner="agent", code="TICKET_LINT", action={"kind": "agent_task", "brief": (
@@ -559,23 +756,31 @@ def cmd_adopt(project, args):
     if ensure_pr(project, facts[nn], receipts):
         tickets, facts = load(project)
     f = facts[nn]
-    said = f"Ticket {nn} holds the work of branch {branch} ({head[:12]}), on its own branch {name}."
+    was = {"branch": branch, "head": head[:12]}
+    said = adopted_line(nn, name, was)
     if first_match(f)[0] == "IMPLEMENT":
         command = f"rail advance {nn}"
         return answer(nn, f.state, "agent", {"kind": "script", "brief": f"{said} Next: {command}", "command": command},
                       "ADOPTED", receipts, f.cwd, tier=f.tier, branch=name, adopted=branch, checks=checks)
     result = from_facts(f, receipts, branch=name, adopted=branch, checks=checks)
-    result["action"]["brief"] = f"{said}\n\n{result['action']['brief']}"
+    action = result["action"]
+    if "facts" in action:
+        action["facts"]["adopted"] = was
+        action["brief"] = render_brief(result["reason"]["code"], action["facts"])
+    else:
+        action["brief"] = f"{said}\n\n{action['brief']}"
     return result
 
 
-def stub(title, request, external_id, caused_by=""):
-    """An intake ticket: the request verbatim, with the contract and tier for the agent to write."""
+def stub(title, request, external_id, caused_by="", after=(), why=""):
+    """An intake ticket: the request verbatim, with the contract and tier for the agent to write. `after` and `why`
+    come from the engine, for the fix after a failed dev deploy."""
     # The request is quoted: a heading in it ("## Done Contract") must not become a section of the ticket.
     quoted = "\n".join(("> " + line).rstrip() for line in request.strip().splitlines())
     return "\n".join(["+++", f"title = {json.dumps(title)}", 'tier = ""', "scope_paths = []",
+                      *([f"after = {json.dumps(list(after))}"] if after else []),
                       f"external_id = {json.dumps(external_id)}", f"caused_by = {json.dumps(caused_by)}", "+++", "",
-                      "## Request", quoted, "", "## Why", "", "## Done Contract", ""])
+                      "## Request", quoted, "", "## Why", *([why] if why else []), "", "## Done Contract", ""])
 
 
 def caused_by(project, request):
@@ -588,7 +793,7 @@ def caused_by(project, request):
     return ticket.group(1) if ticket else ""
 
 
-def intake_one(project, facts, title, request, external_id, channel, trusted=False, filed_by=None):
+def intake_one(project, facts, title, request, external_id, channel, trusted=False, filed_by=None, smoke=None):
     """Make a ticket unless a ticket for this external id is open or merged. Returns its id, or None.
 
     A request that is a whole ticket (it starts with the `+++` front matter, as a grilling bot files it) becomes the
@@ -598,29 +803,184 @@ def intake_one(project, facts, title, request, external_id, channel, trusted=Fal
     for f in facts.values():
         if f.ticket and f.ticket.get("external_id") == external_id and f.state != "dropped":
             return None
+    # The person who handed this over read it rendered, where an HTML comment doesn't show: what they couldn't see
+    # goes into no ticket.
+    request, hidden = strip_hidden(request)
     if request.lstrip().startswith("+++"):
         text = request.lstrip()
         try:
-            text = with_field(text, "external_id", external_id)
+            text = with_kinds(project, with_field(text, "external_id", external_id))
             errors = lint(Ticket(text)) if trusted else ["the issue's author can't push to the repository"]
         except StopIteration:
             errors = ["the front matter has no closing '+++' line"]
         if not errors:
-            nn, _, _ = create_ticket(project, text, via="intake", channel=channel, filed_by=filed_by, key=external_id)
+            nn, _, _ = create_ticket(project, text, via="intake", channel=channel, filed_by=filed_by, key=external_id,
+                                     hidden_removed=hidden)
             return nn
         extra = {"filed_by": filed_by, "not_taken": "; ".join(errors)}  # why the ticket became a request
     else:
         extra = {"filed_by": filed_by}
-    nn, _, _ = create_ticket(project, stub(title, request, external_id, caused_by(project, request)), via="intake",
-                             channel=channel, key=external_id, **extra)
+    extra["hidden_removed"] = hidden
+    smoke = smoke or {}
+    extra.update({k: smoke[k] for k in ("smoke", "opened") if smoke.get(k)})
+    text = stub(title, request, external_id, caused_by(project, request), smoke.get("after", ()), smoke.get("why", ""))
+    nn, _, _ = create_ticket(project, text, via="intake", channel=channel, key=external_id, **extra)
     return nn
 
 
+def cover_ticket(project, folder, request):
+    """The ticket that covers a folder inside no project (rail docs languages), unless one that is not dropped is
+    there already. It is PERSON from the start: its work is in .rail/config.toml, which is the kind `controls`. Its
+    contract is the contract writer's to write. Returns its id, or None."""
+    key = f"coverage:{folder}"
+    _, facts = load(project)
+    if any(f.ticket and f.ticket.get("external_id") == key and f.state != "dropped" for f in facts.values()):
+        return None
+    quoted = "\n".join(("> " + line).rstrip() for line in request.strip().splitlines())
+    text = "\n".join(["+++", f"title = {json.dumps(f'Cover {folder} with checks')}", 'tier = "PERSON"',
+                      'scope_paths = [".rail/config.toml"]',
+                      'person_reason = "controls: .rail/config.toml holds the checks every ticket runs"',
+                      f"external_id = {json.dumps(key)}", "+++", "", "## Request", quoted, "", "## Why", "",
+                      "## Done Contract", ""])
+    nn, _, _ = create_ticket(project, text, via="intake", channel="engine", key=key)
+    return nn
+
+
+def ask_coverage(project, facts):
+    """When the base branch has moved by a commit no ticket made, and it holds a folder inside no project that
+    nothing was answered about: one ticket whose ship asks (rail docs languages). A ticket's own ship asks about
+    what that ticket adds; this is for what arrived with no ticket. Returns its id, or None."""
+    from . import triage
+    base = gitx.rev(project.base_ref, project.root)
+    seen = project.cache_read("coverage", "base")
+    if not base or seen == base:
+        return None
+    project.cache_write("coverage", "base", base)
+    span = f"{seen}..{base}" if seen and gitx.rev(seen, project.root) else base
+    bodies = gitx.out(["log", "--first-parent", "--format=%B%x1e", span], project.root).split("\x1e")
+    if seen and all(re.search(r"^Ticket: \d+", body, re.M) for body in bodies if body.strip()):
+        return None  # only tickets merged: each asked at its own ship
+    loose = project.layout(base).unanswered()
+    covered = triage.covering(project)
+    folders = [folder for folder in loose if folder not in covered]
+    asking = any(f.asks_coverage and f.state not in ("merged", "dropped") for f in facts.values())
+    if not folders or asking:
+        return None
+    text = "\n".join([
+        "+++", 'title = "Ask what the folders inside no project hold"', 'tier = "AUTO"',
+        'scope_paths = [".rail/journal/**"]', f'external_id = "coverage#{base[:12]}"', "+++", "",
+        "## Why", f"The base branch holds tracked files inside no project, under {', '.join(folders)}, and nothing has"
+                  " been answered about them, so no check reads them. They arrived with no ticket. This ticket"
+                  " changes no file of the project's: its ship asks what each folder holds, records the answers, and"
+                  " files a ticket for each folder that needs checks.", "",
+        "## Done Contract",
+        "- Check: `test -z \"$(git diff --name-only \"$RAIL_BASE\"...HEAD -- . ':(exclude).rail')\"`", ""])
+    nn, _, _ = create_ticket(project, text, via="coverage", channel="engine", key=f"coverage#{base[:12]}")
+    return nn
+
+
+SMOKE_MARK = "<!-- rail-smoke: {number} -->"   # on the brake the engine sets after a failed dev deploy
+CHAIN_MARK = "<!-- rail-smoke-chain -->"       # on the comment that says the engine files no second fix
+
+
+def smoke_first(project, facts, issue):
+    """An issue that starts with `Commit: <sha>` reports a failed dev deploy of the ticket that commit merged. The
+    change comes out first: a revert ticket, and a brake on what that ticket's scope holds until the revert merges.
+    The fix ticket then does the work again, after the revert. A chain ends: when the failed change was itself the
+    fix after a failed deploy, or a revert, the engine files no further fix and a person decides.
+    Returns (what the fix ticket gets, or None when none is to be filed; the ids of the tickets made here)."""
+    from . import revert
+    from .forge import ForgeError
+
+    number, forge = issue["number"], project.forge
+    cause = facts.get(caused_by(project, issue.get("body") or ""))
+    if not cause or not cause.t.merged or not cause.ticket:
+        return {}, []
+    made, key, sha, title = [], f"smoke#{number}", cause.t.merged, cause.ticket.title
+    opened = {"smoke": True, "opened": issue.get("created_at")}
+    was_revert = cause.ticket.get("kind") == "revert"
+    chained = was_revert or bool((cause.t.last("requested") or {}).get("smoke"))
+    if any(f.ticket and f.ticket.get("external_id") == f"github#{number}" and f.state != "dropped" for f in facts.values()):
+        return {}, []  # this issue was taken in before: the fix is there, and so is whatever went with it
+    rev = next((f for f in facts.values() if f.ticket and (
+        f.ticket.get("external_id") == key or (f.ticket.get("kind") == "revert" and f.state != "dropped"
+                                                and str(f.ticket.get("reverts")) == cause.id))), None)
+    rev_id, rev_open = (rev.id, rev.state not in ("merged", "dropped")) if rev else (None, False)
+    paths = revert.files(project, sha)
+    if not rev and paths and not was_revert:  # reversing a revert would put the reverted change back
+        why = (f"The dev smoke check failed on a deploy of commit {sha[:12]}, which merged ticket {cause.id} ({title}):"
+               f" issue #{number}. This ticket takes that change out again, so that dev works while the fix is made.")
+        rev_id, _, _ = create_ticket(project, revert.text(cause.id, title, sha, paths, key, why), via="intake",
+                                     channel="github", key=key, opened=issue.get("created_at"))
+        rev_open = bool(rev_id)
+        made += [rev_id] if rev_id else []
+    try:
+        if rev_open and not any(stop.get("smoke") == number for stop in forge.stops()):
+            forge.open_issue(
+                f"Rail stopped work on what ticket {cause.id} changed: its deploy to dev failed (#{number})",
+                f"The dev smoke check failed on commit {sha[:12]}, which merged ticket {cause.id} ({title}): issue"
+                f" #{number}. Ticket {rev_id} reverts that change. Until it merges, no other ticket whose scope overlaps"
+                f" these paths is worked on, so that nothing is built on the change that failed. Rail closes this"
+                f" issue when the revert has merged or was dropped; closing it yourself lifts the brake at once.\n\n"
+                f"paths: {', '.join(cause.ticket.scope or paths)}\n\n{SMOKE_MARK.format(number=number)}\n{ENGINE_MARK}",
+                ["rail:stop"])
+            forge.forget_stops()
+        if chained and not any(CHAIN_MARK in (c.get("body") or "") for c in forge.comments(number)):
+            what = (f"ticket {cause.id} is a revert, and reversing it would put back the change it took out" if was_revert
+                    else f"ticket {cause.id} was itself the fix after a failed deploy, so the same work failed on dev twice")
+            did = f"Ticket {rev_id} reverts the change. " if rev_id else ""
+            forge.comment(number, f"{did}Rail files no fix for this one: {what}. A person decides what comes next."
+                                  f" Label this issue `rail` again to have an agent try once more.\n\n{CHAIN_MARK}\n"
+                                  f"{ENGINE_MARK}")
+            forge.add_labels(number, ["rail:needs-you"])
+            forge.remove_label(number, "rail")
+            return None, made
+    except ForgeError:
+        return None, made  # GitHub is out of reach for a moment: the next run goes on from here, the fix included
+    redo = (f"The dev smoke check failed on a deploy of commit {sha[:12]}, which merged ticket {cause.id} ({title})."
+            + (f" Ticket {rev_id} takes that change out first. This ticket does ticket {cause.id}'s work again, so that"
+               f" the smoke check passes." if rev_id else ""))
+    return dict(opened, after=[rev_id] if rev_open else [], why=redo), made
+
+
+def close_smoke_stops(project, facts):
+    """The brake the engine set after a failed dev deploy lifts when its revert has merged or was dropped."""
+    from .forge import ForgeError
+
+    forge = project.forge
+    if not (forge and forge.ok):
+        return False
+    closed = False
+    for stop in forge.stops():
+        if stop.get("smoke") is None:
+            continue
+        rev = next((f for f in facts.values() if f.ticket and f.ticket.get("external_id") == f"smoke#{stop['smoke']}"), None)
+        if rev and rev.state not in ("merged", "dropped"):
+            continue
+        try:
+            forge.close_issue(stop["number"])
+            closed = True
+        except ForgeError:
+            pass
+    if closed:
+        forge.forget_stops()
+    return closed
+
+
 def intake_issue(project, facts, issue):
+    """Take one issue in. Returns the ids of the tickets it made: the fix after a failed dev deploy comes with the
+    revert that goes first."""
     from .forge import TRUSTED
 
-    return intake_one(project, facts, issue["title"], issue.get("body") or "", f"github#{issue['number']}", "github",
-                      trusted=issue.get("author_association") in TRUSTED, filed_by=(issue.get("user") or {}).get("login"))
+    smoke, made = smoke_first(project, facts, issue)
+    if smoke is None:
+        return made
+    if made:
+        _, facts = load(project)
+    nn = intake_one(project, facts, issue["title"], issue.get("body") or "", f"github#{issue['number']}", "github",
+                    trusted=issue.get("author_association") in TRUSTED, filed_by=(issue.get("user") or {}).get("login"),
+                    smoke=smoke)
+    return made + ([nn] if nn else [])
 
 
 def cmd_intake(project, args):
@@ -634,8 +994,9 @@ def cmd_intake(project, args):
             raise RailError("the forge can't be reached: rail intake github needs a GitHub remote and gh", code="UNAVAILABLE")
         for issue in project.forge.issues("rail"):
             key = f"github#{issue['number']}"
-            nn = intake_issue(project, facts, issue)
-            (created if nn else skipped).append(nn or key)
+            made = intake_issue(project, facts, issue)
+            created += made
+            skipped += [] if made else [key]
             tickets, facts = load(project)
     elif args.source:
         raise RailError(f"unknown intake source '{args.source}'; use github, or --external-id with --title and --brief")
@@ -653,10 +1014,13 @@ def cmd_intake(project, args):
                           **({"command": "rail next"} if created else {})}, created=created, skipped=skipped)
 
 
-def accepted_event(nn, ticket, tier, by, via, note=None):
-    """An accepted event. It also keeps the scope and the Done Contract's own hash, so amend can say what changed."""
+def accepted_event(project, nn, ticket, tier, by, via, note=None, wait=""):
+    """An accepted event. It also keeps the scope and the Done Contract's own hash, so amend can say what changed,
+    and the kinds the ticket holds (rail docs kinds). `wait` is the code of the wait a person's approval answered."""
     fields = {"by": by, "via": via, "tier": tier, "contract": ticket.contract_hash(), "done": ticket.done_hash(),
-              "scope_paths": sorted(ticket.scope)}
+              "scope_paths": sorted(ticket.scope), "kinds": ticket_kinds(project, ticket)}
+    if wait:
+        fields["wait"] = wait
     if note:
         fields["note"] = note
     return event(nn, "accepted", **fields)
@@ -669,15 +1033,18 @@ def cmd_accept(project, args):
     nn = project.find(args.ticket or requested(project, args), tickets).id
     f = facts[nn]
     note = args.note or None
-    if f.state == "new":
+    waited = wait_code(f)  # with a rail:go already on the pull request the table reads that label first: left out here
+    if waited == "BUDGET":
+        # Going on past the budget approves nothing else: a contract or an amend that waits still waits.
+        events = [event(nn, "continued", via="accept", wait=waited, **({"note": note} if note else {}))]
+    elif f.state == "new":
         if f.lint_errors:
             raise RailError(f"ticket {nn} fails ticket lint: {'; '.join(f.lint_errors)}", code="TICKET_LINT")
-        events = [accepted_event(nn, f.ticket, f.tier, "person", "accept", note)]
+        events = [accepted_event(project, nn, f.ticket, f.tier, "person", "accept", note, wait=waited)]
     elif f.amend_pending:
-        events = [accepted_event(nn, f.ticket, f.tier, "person", "accept", note)]
-    elif f.state in OPEN and (first_match(f)[1] == "human" or answers_wait(f)):
-        # With a rail:go already on the pull request the table reads that label first: it is the same answer.
-        events = [event(nn, "continued", via="accept", **({"note": note} if note else {}))]
+        events = [accepted_event(project, nn, f.ticket, f.tier, "person", "accept", note, wait=waited)]
+    elif f.state in OPEN and waited:
+        events = [event(nn, "continued", via="accept", wait=waited, **({"note": note} if note else {}))]
     else:
         raise RailError(f"ticket {nn} is {f.state}, and nothing waits for a person", code="NOTHING_TO_ACCEPT")
     ensure_local(project, f.t)
@@ -704,20 +1071,54 @@ def cmd_answer(project, args):
     if args.outcome == "declined" and not args.reason:
         raise RailError("a decline needs a reason")
     by = "owner" if args.owner else "author"
+    if not args.reason.strip() and by == "author":
+        # An agent's decision with no reason can't be learned from: the next review run, the sweep and rail stats
+        # would see only that something happened. A person's word is its own reason.
+        raise RailError({
+            "fixed": f"say what you changed: rail answer {f.id} {fid} fixed \"what you changed\". The next review run"
+                     " reads it to check the fix.",
+            "parked": f"say why this change didn't cause it: rail answer {f.id} {fid} parked \"why\". The sweep makes"
+                      " a ticket from a parked finding, and the reason is where that ticket starts.",
+        }[args.outcome], code="NO_REASON")
     if args.outcome in ("declined", "parked") and by == "author" and f.ledger.findings[fid].get("severity") == "blocking":
         # The author can't close a blocking finding: declining or parking it disputes it, and a fresh refuter
         # decides whether it holds and whether this change caused it.
-        record = event(f.id, "finding", id=fid, outcome="open", by="author", disputed=True, reason=args.reason or "")
+        records = [event(f.id, "finding", id=fid, outcome="open", by="author", disputed=True, reason=args.reason or "")]
+        if f.ledger.upheld_before(fid):
+            # No person settles a second dispute: the refuter's verdict stands. The finding comes back to the author
+            # as a failed review, which counts toward the retry cap.
+            run = steps.Run(project, f.t)
+            run.record("refuter", False, f.patch_id, f"{fid} upheld before: it stands",
+                       output=f"refuter: {fid} was upheld before")
+            records = run.events + [event(f.id, "finding", id=fid, outcome="open", by="engine", reason=(
+                "a refuter upheld it before, and its verdict stands: fix it"))]
     else:
-        record = event(f.id, "finding", id=fid, outcome=args.outcome, by=by, reason=args.reason or "")
+        records = [event(f.id, "finding", id=fid, outcome=args.outcome, by=by, reason=args.reason or "")]
     ensure_local(project, f.t)
-    project.append_events(f.t, [record], f"answer {fid}")
+    project.append_events(f.t, records, f"answer {fid}")
     tickets, facts = load(project)
     return from_facts(facts[f.id])
 
 
+def first_ids(project, facts):
+    """The ids of the tickets a person marked to go first: a `priority = "first"` line in the ticket, the label
+    rail:first on its pull request, or that label on the issue the ticket came from. The issues are read in one
+    call, and only when an unfinished ticket came from one."""
+    marked = {nn for nn, f in facts.items() if f.first}
+    issues = {}
+    for nn, f in facts.items():
+        external = (f.ticket.get("external_id") or "") if f.ticket else ""
+        if nn not in marked and f.state not in ("merged", "dropped") and re.fullmatch(r"github#\d+", external):
+            issues[nn] = int(external[len("github#"):])
+    if issues and project.forge and project.forge.ok:
+        labelled = project.forge.firsts()
+        marked |= {nn for nn, number in issues.items() if number in labelled}
+    return marked
+
+
 def cmd_amend(project, args):
-    """Change a frozen contract: the Done Contract, the scope or the tier, which only rises."""
+    """Change a frozen contract: the Done Contract, the scope or the tier, which only rises. A change to `after` or
+    to `priority` goes the same way, and needs no approval."""
     project.sync()
     tickets, facts = load(project)
     f = facts[project.find(args.ticket or requested(project, args), tickets).id]
@@ -735,6 +1136,7 @@ def cmd_amend(project, args):
         raise RailError("edit the ticket in its worktree, or pass the new ticket with --file")
     if Ticket(text).id != t.id and not Ticket(text).errors:
         text = with_id(text, t.id)  # the engine owns the id, as at add
+    text = with_kinds(project, text)  # a kind's paths the new scope reaches raise the tier, as at add
     new = Ticket(text)
     errors = lint(new, expect_id=t.id)
     if errors:
@@ -748,20 +1150,26 @@ def cmd_amend(project, args):
         changed = [name for name, differs in (
             ("done_contract", new.done_hash() != last.get("done")),
             ("scope", sorted(new.scope) != last.get("scope_paths")),
-            ("tier", rank(new.tier) > rank(last.get("tier")))) if differs]
+            ("tier", rank(new.tier) > rank(last.get("tier"))),
+            ("after", f.ticket is not None and sorted(new.after) != sorted(f.ticket.after)),
+            ("priority", f.ticket is not None and new.get("priority", "") != f.ticket.get("priority", ""))) if differs]
         if not changed:
             raise RailError(f"the contract of ticket {t.id} matches the accepted one; there is nothing to amend",
                             code="NOTHING_TO_AMEND")
-        tier = highest(new.tier, last.get("tier"), floor(project, new.scope)[0])
-        if tier != new.tier:
-            text = with_tier(text, tier)
-            new = Ticket(text)
-        needs = "done_contract" in changed and tier != "AUTO"  # a person approved the old one, so approves the new
+        if not (args.reason or "").strip():
+            raise RailError(f"say why the contract changes: rail amend {t.id} \"why\". The journal keeps the reason:"
+                            " it is how whoever reads this ticket later tells a contract that was wrong from one that"
+                            " was weakened to pass.", code="NO_REASON")
+        tier = new.tier
+        # Where a person approved the old contract, a person approves the new one. Any other amend the engine
+        # accepts, and the pull request's "Read these" names it to whoever merges.
+        kinds = set(ticket_kinds(project, new)) | set(f.kinds)
+        needs = "done_contract" in changed and tier != "AUTO" and bool(kinds & set(project.config["approve_contract"]))
         added_paths = [p for p in new.scope if p not in (last.get("scope_paths") or [])]
         events.append(event(t.id, "amended", contract=new.contract_hash(), changed=changed, added_paths=added_paths,
                             needs_approval=needs, **({"reason": args.reason} if args.reason else {})))
         if not needs:
-            events.append(accepted_event(t.id, new, tier, "engine", "amend"))
+            events.append(accepted_event(project, t.id, new, tier, "engine", "amend"))
     ensure_local(project, t)
     if path:
         with open(path, "w") as fh:
@@ -781,7 +1189,7 @@ def cmd_amend(project, args):
     project.sync()
     tickets, facts = load(project)
     nf, receipts = facts[t.id], []
-    if nf.state == "new" and not nf.lint_errors and not nf.auto:
+    if nf.state == "new" and not nf.lint_errors and nf.approve_first:
         # A contract a person has yet to approve: its pull request shows the contract as it now stands. A ticket
         # from intake gets its contract pull request here, once the agent has written the contract.
         from .forge import ForgeError
@@ -831,7 +1239,7 @@ def cmd_sweep(project, args):
 def cmd_source(project, args):
     """`rail source NAME`: run the source's fetch and hand the agent a brief that files tickets from its output.
     With no name, the sources and how many of each one's tickets are open."""
-    from . import sources
+    from . import docs, sources
     from .util import run_shell, tail
 
     project.sync()
@@ -843,7 +1251,7 @@ def cmd_source(project, args):
             open_ = sum(state not in sources.ENDED for _, _, state in sources.tickets_of(facts, name))
             rows.append({"name": name, "open": open_, "max_open": source.max_open})
         text = "\n".join(f"{r['name']}: {r['open']}/{r['max_open']} open" for r in rows) or \
-            f"No sources: add one as {sources.DIR}/NAME.md (rail docs sources)."
+            f"No sources: add one as {sources.DIR}/NAME.md.\n\n" + docs.read_part("sources.md#Sources", docs.DOCS)
         return answer(code="SOURCES", sources=rows, text=text)
     source = sources.load(project, args.name)
     mine = sources.tickets_of(facts, source.name)
@@ -867,8 +1275,10 @@ def cmd_source(project, args):
         return answer(code="SOURCE_EMPTY", steps_=[step], source=source.name, action={"kind": "rest", "brief": (
             f"The fetch of source {source.name} printed nothing, so there is nothing to file.")})
     step = {"step": "fetch", "status": "ran", "result": "pass", "detail": f"{len(output)} characters"}
+    spec = f"{project.base_ref}:.rail/tickets/TEMPLATE.md"
+    template = gitx.read_blobs([spec], project.root).get(spec) or ""
     return answer(owner="agent", code="SOURCE", steps_=[step], source=source.name, room=room,
-                  action={"kind": "agent_task", "brief": sources.brief(source, output, room, mine)})
+                  action={"kind": "agent_task", "brief": sources.brief(source, output, room, mine, template)})
 
 
 def cmd_consult(project, args):
@@ -896,9 +1306,14 @@ def red_base_ticket(project, facts):
     if not red or red != gitx.rev(project.base_ref, project.root):
         return None
     output = project.cache_read("red-base", "output") or ""
-    request = f"verify fails on {project.base} at {red[:12]}:\n\n```\n{output}\n```"
-    return intake_one(project, facts, f"Make verify pass on {project.base} again", request, f"red-base#{red[:12]}",
-                      "engine")
+    step = project.cache_read("red-base", "step") or "verify"  # a project's own verify:NAME, or the repository's
+    request = f"{step} fails on {project.base} at {red[:12]}:\n\n```\n{output}\n```"
+    title = f"Make {step} pass on {project.base} again"
+    if step == "product":
+        request = (f"The product does not start on {project.base} at {red[:12]} ([product] start and ready in"
+                   f" .rail/config.toml):\n\n```\n{output}\n```")
+        title = f"Make the product start on {project.base} again"
+    return intake_one(project, facts, title, request, f"red-base#{red[:12]}", "engine")
 
 
 def auto_intake(project, facts):
@@ -915,10 +1330,61 @@ def auto_intake(project, facts):
     receipts = []
     for issue in issues:
         key = f"github#{issue['number']}"
-        nn = intake_issue(project, facts, issue)
-        if nn:
+        made = intake_issue(project, facts, issue)
+        for nn in made:
             receipts.append({"step": "intake", "status": "ran", "result": "pass", "detail": f"ticket {nn} from {key}"})
+        if made:
             _, facts = load(project)
+    return receipts
+
+
+def file_reverts(project, facts):
+    """The label rail:revert on a merged pull request files a ticket that reverts the ticket it merged, once: the
+    label comes off when the pull request has been looked at, whatever came of it. Only someone who may triage the
+    repository can set a label, so it is a person's word, and it approves the revert's contract. Returns receipts."""
+    from . import revert
+    from .forge import ENGINE_MARK, TRUSTED, ForgeError
+
+    forge = project.forge
+    if not (forge and forge.ok):
+        return []
+    receipts = []
+    try:
+        asked = forge.asked_reverts()
+    except ForgeError:
+        return []
+    for pr in asked:
+        number, key = pr["number"], f"revert#{pr['number']}"
+        sha = pr.get("merge_commit_sha")
+        target = next((f for f in facts.values() if sha and f.t.merged == sha), None) or \
+            facts.get(revert.branch_ticket((pr.get("head") or {}).get("ref")))
+        paths = revert.files(project, target.t.merged) if target and target.t.merged else []
+        filed = next((f.id for f in facts.values()
+                      if f.ticket and f.ticket.get("external_id") == key and f.state != "dropped"), None)
+        try:
+            if filed:
+                said = None  # a second label while its revert is open or merged asks for nothing new
+            elif not paths:
+                said = ("Rail filed no revert: this pull request merged no ticket's change to the project's files"
+                        " that the base branch still holds as one commit.")
+                receipts.append({"step": "revert", "status": "not_run",
+                                 "detail": f"pull request #{number} merged no ticket's change: nothing to reverse"})
+            else:
+                comments = revert.said_after_merge(forge.comments(number), pr.get("merged_at"), TRUSTED, ENGINE_MARK,
+                                                   strip_hidden)
+                text = revert.text(target.id, target.ticket.title if target.ticket else target.t.label,
+                                   target.t.merged, paths, number, comments)
+                nn, _, _ = create_ticket(project, text, via="revert", channel="github", key=key, approved=True)
+                if nn:
+                    receipts.append({"step": "revert", "status": "ran", "result": "pass",
+                                     "detail": f"ticket {nn} reverts ticket {target.id}, from pull request #{number}"})
+                    _, facts = load(project)
+                said = f"Rail filed ticket {nn}, which reverts this pull request's change." if nn else None
+            if said:
+                forge.comment(number, f"{said}\n\n{ENGINE_MARK}")
+            forge.remove_label(number, revert.LABEL)
+        except ForgeError:
+            continue  # GitHub is out of reach for a moment: the label stays, and the next run reads it again
     return receipts
 
 
@@ -932,10 +1398,30 @@ def cmd_next(project, args):
         return task
     tickets, facts = load(project)
     took_in = auto_intake(project, facts)
-    if took_in or red_base_ticket(project, facts):
+    tools.sync_issues(project, project.tools_missing())
+    asked = file_reverts(project, facts)
+    took_in += asked
+    if took_in:
+        tickets, facts = load(project)
+    # The engine's own brake lifts once its revert has merged; a ticket it held may go on in this same run.
+    if close_smoke_stops(project, facts) or red_base_ticket(project, facts) or ask_coverage(project, facts):
         tickets, facts = load(project)
     leftovers = cleanup(project, tickets, facts)
     explicit = requested(project, args)
+    stop = next((s for s in project.forge.stops() if not s["paths"]), None)
+    stopped = None
+    if stop:
+        found = {"stop": stop, "wait": {"kind": WAIT_KINDS["STOPPED"], "issue": stop["url"]}}
+        stopped = answer(owner="person", code="STOPPED", steps=took_in, leftovers=leftovers,
+                         action={"kind": "person_wait", "brief": render_brief("STOPPED", found), "facts": found})
+    # The whole repository is stopped: no ticket is looked at, but a revert, which a brake never stops. With
+    # --ticket NN the ticket's own row says so.
+    reverting = any(f.revert and f.state not in ("merged", "dropped") for f in facts.values())
+    if stopped and not explicit and not reverting:
+        return stopped
+    rest = day_budget(project, tickets)
+    if rest:
+        return dict(rest, steps=took_in, leftovers=leftovers)
     if explicit:
         nn = project.find(explicit, tickets).id
         f, receipts = settle(project, nn, explicit=True)
@@ -957,7 +1443,12 @@ def cmd_next(project, args):
     # A person's inbox is the label: every wait gets it now, not only when the agent runs dry.
     for f in facts.values():
         code, owner, _ = first_match(f)
-        if owner == "human" or person_next(f):
+        # A ship whose pull request GitHub didn't let it write (a rate limit, an outage) left the old title and
+        # description there, and a person's merge squashes with what the pull request says.
+        update_pr(project, f, took_in)
+        if code in ("STOPPED", "TOOL_MISSING"):
+            continue  # the person set the brake and knows; a missing tool gets one issue of its own, not one a ticket
+        if owner == "person" or person_next(f):
             label_wait(project, f, code)
         elif owner == "agent" and f.pr_open and "rail:needs-you" in f.labels:
             # The wait ended without a rail:go (the base moved under a pull request that waited for its merge, say):
@@ -969,14 +1460,16 @@ def cmd_next(project, args):
                 pass
 
     # Any ticket the agent can act on comes first: this session's own, then tickets no session holds (shipped ones,
-    # which the engine moves from anywhere, and work an ended session left), then new work in ID order.
+    # which the engine moves from anywhere, and work an ended session left), then new work in ID order. Within each
+    # of these, a ticket a person marked to go first comes before the others.
     mine = [f for f in facts.values() if f.state in OPEN and not f.claimed_elsewhere]
     free = [f for f in facts.values() if f.state in OPEN and f.claimed_elsewhere and not f.held]
     # Another session's ticket that waited for a person, and has its answer: that session rested at the wait, and
     # the label is removed once read, so the run that reads it goes on.
     answered = [f for f in facts.values() if f.state in OPEN and f.held and answers_wait(f)]
     fresh = [f for f in facts.values() if f.state in ("new", "accepted")]
-    for candidate in mine + free + answered + fresh:
+    first = first_ids(project, facts)
+    for candidate in [f for group in (mine, free, answered, fresh) for f in sorted(group, key=lambda f: f.id not in first)]:
         if first_match(candidate)[1] != "agent":
             continue
         f, receipts = settle(project, candidate.id, explicit=False)
@@ -985,15 +1478,17 @@ def cmd_next(project, args):
                 continue  # another session noted it first: it writes this contract
             return from_facts(f, took_in + receipts, leftovers=leftovers)
 
+    if stopped:
+        return stopped  # the reverts that went on have nothing for an agent now
     tickets, facts = load(project)
     waits, held, ci, resting = [], [], [], []
     for f in facts.values():
         code, owner, action = first_match(f)
         if owner == "none" and f.state in ("new", "accepted") + OPEN and code != "CLAIMED_ELSEWHERE":
             resting.append(f"- {f.id}: {action['brief']}")  # so a runner offered none of them knows why
-        if owner == "human":
-            waits.append({"ticket": f.id, "needs": code, "brief": action["brief"],
-                          **({"pr": f.pr["html_url"]} if f.pr else {})})
+        if owner == "person":
+            waits.append({"ticket": f.id, "needs": code, "kind": WAIT_KINDS[code], "brief": action["brief"],
+                          **({"pr": f.pr["html_url"]} if f.pr else {}), "wait": action["facts"]["wait"]})
         elif f.held:  # also with a rail:go on it that answers no wait: the session at work reads it
             held.append({"ticket": f.id, "quiet_minutes": f.quiet_minutes,
                          **({"session": f.claimed["session_url"]} if f.claimed.get("session_url") else {})})
@@ -1014,10 +1509,18 @@ def cmd_next(project, args):
             return answer(fresh_push[0].id, fresh_push[0].state, "agent",
                           {"kind": "script", "brief": command, "command": command}, "CI_WAIT", took_in, **extra)
     others = ("\nNothing for an agent on these now:\n" + "\n".join(resting)) if resting else ""
+    if waits and all(w["needs"] == "TOOL_MISSING" for w in waits):
+        # One thing is missing, however many tickets wait for it: say it once.
+        gone = project.tools_missing()
+        found = {"tickets": [w["ticket"] for w in waits], "tools_missing": gone, "machine": tools.machine(),
+                 "resting": resting, "wait": {"kind": WAIT_KINDS["TOOL_MISSING"],
+                                              "set": sorted({name for names in gone.values() for name in names})}}
+        return answer(owner="person", code="TOOL_MISSING", steps_=took_in, **extra,
+                      action={"kind": "person_wait", "brief": render_brief("TOOL_MISSING", found), "facts": found})
     if waits:
-        brief = "Tickets wait for a person:\n" + "\n".join(f"- {w['ticket']}: {w['brief']}" for w in waits) + others
-        return answer(owner="human", code="WAITING_HUMAN", action={"kind": "human_wait", "brief": brief},
-                      steps_=took_in, **extra)
+        found = {"waits": waits, "resting": resting}
+        return answer(owner="person", code="WAITING_PERSON", steps_=took_in, **extra,
+                      action={"kind": "person_wait", "brief": render_brief("WAITING_PERSON", found), "facts": found})
     from . import sweep
     is_due, _, commits, merged = sweep.due(project)
     if is_due and not held:
@@ -1058,11 +1561,30 @@ def person_next(f):
     return f.state == "in-ci" and not f.auto and f.pr_open and f.pushed and not f.behind
 
 
+def show_read_these(project, f):
+    """Put each "Read these" item on its line of the pull request, as a review comment, once per patch. Nothing
+    marks an AUTO ticket for a person to read afterwards: the list stays in its description and squash message, for
+    whoever chooses to look."""
+    from . import readthese
+    from .forge import ForgeError
+
+    if not f.pr_open or project.cache_read("read-these", f.id) == f.patch_id:
+        return
+    found = readthese.items(project, f.t, f.ticket, f.tier, f.ledger, project.changed_files(f.t.ref))
+    try:
+        readthese.post(project, f.t, f.pr, found)
+        project.cache_write("read-these", f.id, f.patch_id)
+    except ForgeError:
+        pass  # the list is in the description either way
+
+
 def label_wait(project, f, code):
     """The inbox is one saved search, is:open label:rail:needs-you: label each wait's PR. The engine only ever sets
     and removes this label. It never reads it as a person's word: that is rail:hold."""
     from .forge import ForgeError
 
+    if code == "MERGE_BY_PERSON" or person_next(f):
+        show_read_these(project, f)  # the person is about to read the change
     if f.pr_open and "rail:needs-you" not in f.labels:
         try:
             project.forge.add_labels(f.pr["number"], ["rail:needs-you"])
@@ -1089,7 +1611,8 @@ def commit_work(project, f, run):
     if not changes:
         return True
     product = [c for c in changes if c != ticket_path(t.id)]  # another ticket's file is not this ticket's to change
-    outside = [c for c in product if not match_any(f.ticket.scope, c)]
+    from .triage import IGNORED  # in every ticket's scope: its lines raise a question of their own
+    outside = [c for c in product if not match_any(f.ticket.scope, c) and c != IGNORED]
     if outside:
         run.record("scope", False, f.patch_id, f"outside scope: {', '.join(outside)}",
                    output=f"These changes are outside scope_paths ({', '.join(f.ticket.scope)}):\n" + "\n".join(outside)
@@ -1170,6 +1693,7 @@ def forge_merge(project, f, receipts):
     pr = f.pr
     ticket = Ticket(gitx.read_blobs([f"{f.t.ref}:{ticket_path(f.id)}"], project.root)[f"{f.t.ref}:{ticket_path(f.id)}"])
     subject, body = steps.describe(project, f.t, ticket, f.tier)
+    show_read_these(project, f)
     requested, why = project.forge.merge(pr["number"], pr["head"]["sha"], f"{subject} (#{pr['number']})", body)
     if requested:
         project.cache_write("merge", f.id, f"{pr['head']['sha']} {int(time.time())}")
@@ -1185,7 +1709,7 @@ def forge_merge(project, f, receipts):
     nf = facts[f.id]
     if nf.state != "merge-ready":
         return from_facts(nf, receipts)  # a conflict or a red check: back to implementing
-    return answer(f.id, nf.state, "human", {"kind": "human_wait", "brief": f"GitHub refused the merge of PR #{pr['number']}:"
+    return answer(f.id, nf.state, "person", {"kind": "person_wait", "brief": f"GitHub refused the merge of PR #{pr['number']}:"
                   f" {why}. A person looks, then continues: rail accept {f.id}"}, "MERGE_FAILED", receipts, nf.cwd,
                   tier=nf.tier)
 
@@ -1202,14 +1726,18 @@ def cmd_advance(project, args):
         key = mine[0].id
     nn = project.find(key, tickets).id
     project.busy(nn, wait=True)  # held to the end of the command: no save while it ships and reviews
+    from . import work
+    work.flush(project, nn)  # a worker run's event that a rebase held back
     receipts, first = [], True
     for _ in range(12):
         tickets, facts = load(project)
         f = facts[nn]
         f.explicit = True
         code, owner, _ = first_match(f)
-        if code == "REBASING":
-            return from_facts(f, receipts)  # nothing to ship while the rebase is open: the brief says how to end it
+        if code in ("REBASING", "STOPPED", "DIAGNOSE", "STUCK_CONTRACT", "STUCK_SPLIT"):
+            # Nothing to ship while the rebase is open (the brief says how to end it), while a person's brake is on, or
+            # while a ticket at its retry cap waits for its diagnosis or for what the diagnosis asks of the contract.
+            return from_facts(f, receipts)
         mine = bool(f.worktree) and not f.claimed_elsewhere
         run = steps.Run(project, f.t)
         if f.state == "implementing" and mine and owner == "agent":
@@ -1218,6 +1746,10 @@ def cmd_advance(project, args):
                 tickets, facts = load(project)
                 f = facts[nn]
                 steps.ship(project, f, run)
+        elif code == "TRIAGE" and mine:
+            stage = "triage"
+            from . import triage
+            triage.run(project, f, run)
         elif code == "REVIEW" and mine:
             stage = "review"
             review_stage(project, f, run)
@@ -1229,7 +1761,7 @@ def cmd_advance(project, args):
             receipts += run.steps
             if not merged:
                 if run.failure and run.failure[0] == "merge":
-                    return answer(nn, f.state, "human", {"kind": "human_wait", "brief": run.failure[1]}, "MERGE_FAILED",
+                    return answer(nn, f.state, "person", {"kind": "person_wait", "brief": run.failure[1]}, "MERGE_FAILED",
                                   receipts, f.cwd, tier=f.tier)
                 break
             tickets, facts = load(project)
@@ -1243,8 +1775,15 @@ def cmd_advance(project, args):
             break
         first = False
         # A review run that timed out or gave invalid output: the reviewer's fault, so not counted.
-        no_verdict = bool(run.failure) and run.failure[0] in steps.REVIEW_STEPS and any(
+        no_verdict = bool(run.failure) and run.failure[0] in (*steps.REVIEW_STEPS, "triage") and any(
             e.get("event") == "step" and e.get("counted") is False for e in run.events)
+        if stage == "ship" and run.failure:
+            # The answer below shows the failure's output, and the journal keeps only its detail: the next brief for
+            # the same failure (rail next, rail work) reads the output here.
+            failed = [e for e in run.events if e.get("event") == "step" and e.get("result") == "fail"]
+            project.cache_write("failure", nn, json.dumps({"patch_id": failed[-1].get("patch_id") if failed else None,
+                                                           "signatures": [e.get("signature") for e in failed],
+                                                           "output": run.failure[1]}))
         commit(project, f, run, stage if run.ok else f"{stage} failed")
         receipts += run.steps
         if no_verdict:
@@ -1259,7 +1798,7 @@ def cmd_advance(project, args):
                 if advice:
                     brief += f"\n\n{advice}"
                 code_, owner_, action_ = first_match(nf)
-                if owner_ == "human":
+                if owner_ == "person" or code_ in ("STUCK", "DIAGNOSE"):  # a person's wait, or the cap: rail next
                     return from_facts(nf, receipts)
                 action = worker(nf, {"kind": "agent_task", "brief": brief})
                 # A rebase that stopped on a conflict has its own page; any other failure gets one once it repeats.
@@ -1270,10 +1809,10 @@ def cmd_advance(project, args):
             update_pr(project, nf, receipts)
             result = from_facts(nf, receipts)
             if advice:
-                result["action"]["brief"] += f"\n\n{advice}"
+                end_with(result["reason"]["code"], result["action"], "consult", advice)
             return result
         tickets, facts = load(project)
-        if first_match(facts[nn])[0] not in ("REVIEW",):
+        if first_match(facts[nn])[0] not in ("TRIAGE", "REVIEW"):
             break
     tickets, facts = load(project)
     update_pr(project, facts[nn], receipts)
@@ -1284,12 +1823,13 @@ def cmd_status(project, args):
     project.sync()
     tickets, facts = load(project)
     rows, leftovers = [], []
+    first = first_ids(project, facts)
     for nn, f in facts.items():
         t = f.t
         code, owner, action = first_match(f)
         last = t.events[-1]["at"] if t.events else ""
         note = ""
-        if owner == "human":
+        if owner == "person":
             note = f"waiting: {code.lower().replace('_', ' ')}"
         elif f.held:
             note = f"another session's work, quiet {f.quiet_minutes} min"
@@ -1303,8 +1843,12 @@ def cmd_status(project, args):
             note = action["brief"]
         if f.pr and not note:
             note = f"PR #{f.pr['number']}"
+        marked = nn in first and f.state not in ("merged", "dropped")
+        if marked:
+            note = "; ".join(part for part in ("goes first", note) if part)
         rows.append({"ticket": nn, "title": t.ticket.title if t.ticket else t.label, "state": f.state, "owner": owner,
                      "tier": f.tier, "last_event": age(last), "branch": t.name, "note": note,
+                     **({"first": True} if marked else {}),
                      **({"pr": f.pr["html_url"]} if f.pr else {})})
         if f.state in ("merged", "dropped"):
             if t.worktree:
@@ -1315,7 +1859,8 @@ def cmd_status(project, args):
                 leftovers.append({"kind": "remote branch", "ref": t.remote_branch, "reason": f"ticket {nn} {f.state}"})
     for branch in project.orphans:
         leftovers.append({"kind": "branch", "ref": branch, "reason": "no ticket; left for you"})
-    return answer(code="STATUS", tickets=rows, leftovers=leftovers)
+    return answer(code="STATUS", tickets=rows, leftovers=leftovers,
+                  **({"stops": project.forge.stops()} if project.forge.stops() else {}))
 
 
 def cmd_stats(project, args):
@@ -1333,8 +1878,12 @@ def cmd_context(project, args):
     if key:
         tickets = project.tickets()
         t = project.find(key, tickets)
-        found = areas.context(project, t.ref or project.base_ref, t.ticket.scope if t.ticket else [])
-        return answer(t.id, code="CONTEXT", **found)
+        scope = t.ticket.scope if t.ticket else []
+        found = areas.context(project, t.ref or project.base_ref, scope)
+        # The projects the ticket's scope reaches, each with the commands its ship runs (rail docs languages).
+        mine = [{"name": p["name"], "paths": p["paths"], "uses": p["uses"], "setup": p["setup"], "verify": p["verify"]}
+                for p in steps.in_scope(project, t.ref or project.base_ref, scope)] if scope else []
+        return answer(t.id, code="CONTEXT", history=history.of(project, scope, skip=t.id), projects=mine, **found)
     return answer(code="CONTEXT", **areas.context(project, project.base_ref))
 
 
@@ -1344,28 +1893,99 @@ def cmd_drop(project, args):
     f = facts[project.find(args.ticket or requested(project, args), tickets).id]
     if f.state == "merged":
         raise RailError(f"ticket {f.id} is merged; follow-up work is a new ticket with caused_by", code="MERGED")
-    receipts = []
-    if f.state != "dropped":
-        if f.t.name:
-            ensure_local(project, f.t)
-            project.append_events(f.t, [event(f.id, "dropped", by=args.by, reason=args.reason or "")], "drop")
-        kept = next((e for e in f.t.events if e.get("event") == "requested"), None)
-        project.mark_dropped(f.id, json.dumps(kept, separators=(",", ":")) if kept else "")
+    if args.by == "agent" and f.state != "dropped" and not (args.reason or "").strip():
+        raise RailError(f"say why the ticket ends: rail drop {f.id} --reason \"why\". The reason is kept in the drop's"
+                        " mark, which is all that is left of a dropped ticket once its branch is gone. A person who"
+                        f" drops it needs none: rail drop {f.id} --by person", code="NO_REASON")
+    # The tickets that replace one that was split. Where the split ticket came from an issue, each of them names
+    # that issue from here on, so the issue stays open until the last of them merges (its pull request closes it).
+    external = (f.ticket.get("external_id") or "") if f.ticket else ""
+    external = external if external.startswith("github#") else ""
+    parts = [facts[project.find(key, tickets).id] for key in (args.replaced_by or "").split(",") if key.strip()]
+    for other in parts:
+        if other.id == f.id or other.state == "dropped" or not other.ticket:
+            raise RailError(f"ticket {other.id} can't replace ticket {f.id}: name tickets that are filed and not dropped",
+                            code="BAD_REPLACEMENT")
+        if external and other.ticket.get("external_id") not in ("", None, external):
+            raise RailError(f"ticket {other.id} can't replace ticket {f.id}, which came from issue"
+                            f" #{external.split('#', 1)[1]}: it names {other.ticket.get('external_id')} already",
+                            code="BAD_REPLACEMENT")
+    for other in parts:
+        if external and not other.ticket.get("external_id") and other.t.name and other.state != "merged":
+            ensure_local(project, other.t)
+            ref = f"{other.t.ref}:{ticket_path(other.id)}"
+            text = gitx.read_blobs([ref], project.root)[ref]
+            project.append_events(other.t, [], f"part of the issue of ticket {f.id}",
+                                  files={ticket_path(other.id): with_field(text, "external_id", external)})
+    replaced = [other.id for other in parts]
+    receipts, leftovers = [], []
+    if drop(project, f, args.by, args.reason or "", receipts, replaced_by=replaced):
+        tickets, facts = load(project)
+        leftovers = steps.remove_ticket(project, facts[f.id].t)
+    tickets, facts = load(project)
+    return from_facts(facts[f.id], receipts, leftovers=leftovers)
+
+
+def drop(project, f, by, reason, receipts, **record):
+    """End a ticket without merging it: a `dropped` event in its journal, then the mark on the counter branch, then
+    the pull request closed and the issue released. Removing the worktree and branches is the caller's, and only
+    once this returns True: the mark is the record that outlives the branch, so nothing goes before it is written.
+    `record` (the step and signature the engine stopped at, the tickets that replace a split one) goes into the event
+    and the mark, and so does the answer of the diagnosis the ticket got at its retry cap, when it got one."""
+    from . import triage
+    found = triage.diagnosed(f.diagnosis)
+    if found:
+        record.setdefault("diagnosis", found["answer"])
+    if f.state != "dropped" and f.t.name:
+        ensure_local(project, f.t)
+        project.append_events(f.t, [event(f.id, "dropped", by=by, reason=reason,
+                                          **{k: v for k, v in record.items() if v})], "drop")
+    if f.state != "dropped" or f.drop_pending:
+        return finish_drop(project, f, receipts)
+    close_and_release(project, f, reason, receipts)  # dropped already, such as a pull request closed by hand
+    return True
+
+
+def finish_drop(project, f, receipts, closed=None):
+    """Write the drop's mark; when it is written, close the pull request and release the issue. The mark keeps the
+    ticket's `requested` event, as rail stats reads it, with `dropped`: who dropped it, why, for the engine's drop
+    at the retry cap the step and the failure's signature, and for a PERSON ticket its tier and kinds. `closed`
+    stands for the `dropped` event of a ticket whose pull request a person closed by hand. False when the mark can't
+    be written (offline, or a push refused other than by a race): the ticket then keeps everything and rests as
+    DROP_PENDING."""
+    kept = next((e for e in f.t.events if e.get("event") == "requested"), None)
+    last = f.t.last("dropped") or closed or {}
+    dropped = {k: last[k] for k in ("by", "reason", "step", "signature", "diagnosis", "replaced_by", "at") if last.get(k)}
+    if closed and not dropped.get("at"):
+        dropped["at"] = event(f.id, "dropped")["at"]
+    if not f.auto:
+        dropped.update(tier=f.tier, kinds=f.kinds)
+    cost = round(sum(e.get("cost_usd") or 0 for e in f.t.events if e.get("event") in ("worked", "step")), 4)
+    if cost:
+        dropped["cost_usd"] = cost  # the journal goes with the branch: this is all that is left of what it cost
+    note = dict(kept or {}, dropped=dropped) if kept or dropped else None
+    if not project.mark_dropped(f.id, json.dumps(note, separators=(",", ":")) if note else ""):
+        receipts.append({"step": "drop-mark", "status": "unavailable",
+                         "detail": "the counter branch can't be pushed: the ticket keeps its worktree, branches and"
+                                   " pull request until a later rail next writes the mark"})
+        return False
+    close_and_release(project, f, last.get("reason", ""), receipts, last.get("replaced_by") or ())
+    return True
+
+
+def close_and_release(project, f, reason, receipts, replaced_by=()):
     if f.pr_open:
         project.forge.update_pr(f.pr["number"], state="closed")
         receipts.append({"step": "close-pr", "status": "ran", "result": "pass", "detail": f"closed #{f.pr['number']}"})
     elif project.remote and not (project.forge and project.forge.ok):
         receipts.append({"step": "close-pr", "status": "unavailable", "detail": "the forge can't be reached"})
-    release_issue(project, f, args.reason or "")
-    tickets, facts = load(project)
-    leftovers = steps.remove_ticket(project, facts[f.id].t)
-    tickets, facts = load(project)
-    return from_facts(facts[f.id], receipts, leftovers=leftovers)
+    release_issue(project, f, reason, replaced_by)
 
 
-def release_issue(project, f, reason=""):
+def release_issue(project, f, reason="", replaced_by=()):
     """A dropped ticket from an issue: take the rail label off the issue and say so, so intake doesn't make the
-    ticket again. Labelling the issue again is how to retry."""
+    ticket again. Labelling the issue again is how to retry. A ticket that was split keeps its issue as it is: the
+    tickets that replace it name the issue, and the last of them to merge closes it."""
     from .forge import ForgeError
 
     external = (f.ticket.get("external_id", "") if f.ticket else "") or ""
@@ -1373,6 +1993,11 @@ def release_issue(project, f, reason=""):
         return
     number = external.split("#", 1)[1]
     try:
+        if replaced_by:
+            why = f" Reason: {reason}." if reason else ""
+            project.forge.comment(number, f"Ticket {f.id} was split into ticket {', '.join(replaced_by)}.{why} This issue"
+                                          f" stays open until the last of them merges.\n{ENGINE_MARK}")
+            return
         issue = project.forge.call("GET", f"issues/{number}")
         if "rail" in {l["name"] for l in issue.get("labels", [])}:
             project.forge.remove_label(number, "rail")
@@ -1387,7 +2012,7 @@ def release_issue(project, f, reason=""):
 def cmd_init(args):
     from . import init
 
-    root, receipts = init.init(os.getcwd())
+    root, receipts = init.init(os.getcwd(), args.skills)
     project = Project(root)
     repo = None
     if project.remote:
@@ -1397,11 +2022,11 @@ def cmd_init(args):
             try:
                 created = forge.create_labels(repo)
                 receipts.append({"step": "labels", "status": "ran", "result": "pass",
-                                 "detail": f"created {', '.join(created)}" if created else "all three exist"})
+                                 "detail": f"created {', '.join(created)}" if created else f"all {len(forge.LABELS)} exist"})
             except forge.ForgeError as e:
                 receipts.append({"step": "labels", "status": "unavailable", "detail": str(e)})
     brief = ("Rail is installed. Next: rail next, which returns the init task: the project's commands, ## Areas,"
-             " person_paths and rules. " + ("In this cloud session you set them up and the person confirms by merging one"
+             " [kinds] and rules. " + ("In this cloud session you set them up and the person confirms by merging one"
                                           " pull request." if cloud() else "You propose each and the person confirms."))
     return answer(code="INITIALISED", owner="agent", action={"kind": "script", "brief": brief, "command": "rail next"},
                   steps_=receipts, root=root)
@@ -1411,11 +2036,78 @@ def init_task(project):
     """The first `rail next` returns the init task until the project's config is on the base branch."""
     if gitx.read_blobs([f"{project.base_ref}:.rail/config.toml"], project.root).get(f"{project.base_ref}:.rail/config.toml"):
         return None
-    from .init import INIT_TASK, INIT_TASK_CLOUD
-    brief = (INIT_TASK_CLOUD if cloud() else INIT_TASK).format(base=project.base, depth=project.config["map"]["depth"])
-    action = {"kind": "agent_task", "brief": brief}
+    from .init import found_line
+    found = {"cloud": cloud(), "base": project.base, "depth": project.config["map"]["depth"],
+             "tools": tools.found_line(project.root), "projects": found_line(project.layout().projects)}
+    action = {"kind": "agent_task", "brief": render_brief("INIT_TASK", found), "facts": found}
     named = guide(project, "INIT_TASK", action)  # no ticket, so no event
     return answer(owner="agent", code="INIT_TASK", action=action, cwd=".", **({"guide": named} if named else {}))
+
+
+# --- the worker ------------------------------------------------------------------------------
+
+
+def cmd_work(project, args):
+    """One attempt at a ticket's agent work: [worker] command runs the brief `next` gives for the ticket, and a
+    `worked` event records the run. For any answer that isn't a ticket's agent work it runs nothing and returns the
+    answer. It ships nothing: the runner runs rail advance NN after it."""
+    from . import work
+
+    project.sync()
+    key = requested(project, args)
+    if not key:
+        raise RailError("which ticket? Run rail work NN")
+    nn = project.find(key, project.tickets()).id
+    work.flush(project, nn)
+    rest = day_budget(project, project.tickets())
+    if rest:
+        return rest  # no worker starts while the day's spend is over its cap
+    f, receipts = settle(project, nn, explicit=False)
+    if f is None:
+        return answer(nn, None, "none", {"kind": "rest", "brief": f"Another session claimed ticket {nn} first."},
+                      "CLAIMED_ELSEWHERE", receipts)
+    result = from_facts(f, receipts)
+    code = result["reason"]["code"]
+    if code not in work.CODES or result["owner"] != "agent" or not project.config["worker"]["command"]:
+        return result
+    if code == "TICKET_LINT" and not note_drafting(project, f):
+        tickets, facts = load(project)  # another session noted it first: it writes this contract
+        return from_facts(facts[nn], receipts)
+
+    def save():
+        # The worker runs git in the same worktree at the same time, and a save holds the worktree's index.lock for
+        # its add and commit: a git command of the worker's that started then would fail. So a save waits while the
+        # worker holds the lock, and reads with GIT_OPTIONAL_LOCKS=0, as git status otherwise takes it to refresh.
+        tree = f.t.worktree if f.t.worktree and os.path.isdir(f.t.worktree) else None
+        lock = tree and gitx.git(["rev-parse", "--path-format=absolute", "--git-path", "index.lock"], tree,
+                                 check=False).stdout.strip()
+        if lock and os.path.exists(lock):
+            return
+        before = os.environ.get("GIT_OPTIONAL_LOCKS")
+        os.environ["GIT_OPTIONAL_LOCKS"] = "0"
+        try:
+            project.sync()
+            save_all(project, "work", only=nn)  # the runner's session's saves: a rebase under way is left alone
+        except Exception:
+            pass  # the worker goes on; the next save tries again
+        finally:
+            if before is None:
+                os.environ.pop("GIT_OPTIONAL_LOCKS", None)
+            else:
+                os.environ["GIT_OPTIONAL_LOCKS"] = before
+
+    worked, reply = work.run(project, f, result, save)
+    work.record(project, nn, worked)
+    tickets, facts = load(project)
+    nf = facts[nn]
+    detail = ", ".join(x for x in (worked["end"], f"{worked['turns']} turns" if "turns" in worked else "",
+                                   f"${worked['cost_usd']:.2f}" if "cost_usd" in worked else "",
+                                   f"{worked['minutes']} min") if x)
+    receipts.append({"step": "worker", "status": "ran", "result": "pass" if worked["end"] == "done" else "fail",
+                     "detail": detail})
+    command = f"rail advance {nn}"
+    return answer(nn, nf.state, "agent", {"kind": "script", "brief": command, "command": command}, "WORKED", receipts,
+                  nf.cwd or ".", tier=nf.tier, worked=worked, reply=reply)
 
 
 # --- saving work in flight ---------------------------------------------------------------
@@ -1430,7 +2122,8 @@ def save_work(project, f, via):
     ticket moved a moment ago."""
     t = f.t
     changes = gitx.dirty(t.worktree, exclude=[".rail/journal"])
-    inside = [c for c in changes if c == ticket_path(t.id) or match_any(f.ticket.scope, c)]
+    from .triage import IGNORED
+    inside = [c for c in changes if c in (ticket_path(t.id), IGNORED) or match_any(f.ticket.scope, c)]
     secret = [c for c in inside if guard.holds_secrets(c)]
     inside = [c for c in inside if c not in secret]
     outside = [c for c in changes if c not in inside and c not in secret]
@@ -1510,7 +2203,11 @@ def cmd_save(project, args):
 # --- provisioning: the machine carries the tools --------------------------------------
 
 
-MACHINE_SETUP = "machine-1"  # raise it when what provision writes onto a cloud machine changes
+MACHINE_SETUP = "machine-2"  # raise it when what provision writes onto a cloud machine changes
+# The Bash tool's own default is 2 minutes a call and its ceiling 10: the runner's one Bash call that runs rail work
+# would be cut. The repository's settings set these, and the machine's get the same for a session that doesn't load
+# the repository's.
+BASH_TIMEOUTS = {"BASH_DEFAULT_TIMEOUT_MS": "1800000", "BASH_MAX_TIMEOUT_MS": "7200000"}
 
 
 def bin_dir():
@@ -1564,10 +2261,12 @@ def provisioned(project):
 
 
 def install_machine(project, run):
-    """On a cloud machine: link rail onto PATH, and write Rail's hooks into the machine's own Claude Code settings.
-    Claude Code loads a repository's hooks only in a session that starts with that one repository; the machine's
-    settings load in every session, so the guard and the saves also work above several repositories and in a
-    project's threads. Where the repository's hooks do run, these step aside."""
+    """On a cloud machine: link rail onto PATH, and write Rail's hooks and the Bash tool's two timeouts into the
+    machine's own Claude Code settings. Claude Code loads a repository's settings only in a session that starts
+    with that one repository; the machine's settings load in every session, so the guard and the saves also work
+    above several repositories and in a project's threads, and a Bash call there may run as long as a worker run.
+    Where the repository's hooks do run, these step aside. A timeout the machine's settings already set stays; one
+    they lack takes the value the repository's settings give it, or Rail's own."""
     launcher = os.path.join(project.root, ".rail", "bin", "rail")
     link = os.path.join(bin_dir(), "rail")
     try:
@@ -1602,14 +2301,24 @@ def install_machine(project, run):
             continue
         entries.append({**({"matcher": matcher} if matcher else {}), "hooks": [{"type": "command", "command": hook_command}]})
         added.append(name)
-    if added:
+    try:
+        with open(os.path.join(project.root, ".claude", "settings.json")) as f:
+            theirs = json.load(f).get("env") or {}
+    except (OSError, ValueError, AttributeError):
+        theirs = {}
+    env = settings.get("env") if isinstance(settings.get("env"), dict) else {}
+    timeouts = {name: str(theirs.get(name) or value) for name, value in BASH_TIMEOUTS.items() if name not in env}
+    if timeouts:
+        settings["env"] = {**env, **timeouts}
+    if added or timeouts:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             json.dump(settings, f, indent=2)
             f.write("\n")
     detail = ("rail linked into " + bin_dir() if linked else "rail not linked (no write access to " + bin_dir() + ")")
-    return run.record("machine", True, None, detail + ("; hooks written to ~/.claude/settings.json" if added
-                                                       else "; the machine's hooks are there already"))
+    return run.record("machine", True, None, detail + (
+        "; hooks and the Bash tool's timeouts written to ~/.claude/settings.json" if added or timeouts
+        else "; the machine's hooks and the Bash tool's timeouts are there already"))
 
 
 def run_provision(project, run):
@@ -1643,8 +2352,11 @@ def provision_task(project):
     refused the change to its own settings, and work must not wait for that."""
     if not cloud() or not project.config["commands"]["provision"] or provisioned(project):
         return None
+    from . import docs
+
     brief = ("rail provision\nIt installs what this project's checks need ([commands] provision). If this session"
-             " refuses it, the environment's setup script runs it before a session starts: rail docs cloud")
+             " refuses it, the environment's setup script runs it before a session starts.\n\n"
+             + docs.read_part("cloud.md#Set up, once", docs.DOCS))
     return answer(owner="agent", code="PROVISION", cwd=".",
                   action={"kind": "script", "brief": brief, "command": "rail provision"})
 
@@ -1658,8 +2370,8 @@ def cmd_provision(project, args):
         brief = ("This is your own machine, so Rail installs nothing here." + (
             f" In a cloud session and in CI it runs:\n  {command}\nInstall the same tools your own way."
             if command else " No provision command is set ([commands] provision in .rail/config.toml)."))
-        return answer(owner="human" if command else "none", code="PROVISION_LOCAL",
-                      action={"kind": "human_wait" if command else "rest", "brief": brief})
+        return answer(owner="person" if command else "none", code="PROVISION_LOCAL",
+                      action={"kind": "person_wait" if command else "rest", "brief": brief})
     if _provision_wanted(project) is None:
         other = ("" if not cloud() or _sets_up_machine(project) else
                  " The link and the machine's hooks call the engine in the project's own checkout, and that one isn't"
@@ -1694,10 +2406,28 @@ def cmd_doctor(project, args):
     from . import doctor
 
     found = doctor.checks(project)
-    missing = [f"- {name}: {detail}" for name, passed, detail in found if passed is False]
+    if getattr(args, "product", False):
+        from . import product
+        found += product.try_base(project)
+    missing = [f"- {line[0]}: {line[2]}" for line in found if line[1] is False and doctor.kind_of(line) != "ticket"]
+    # A piece the machine can build is no wait for a person: it is a ticket.
+    buildable = [f"- {line[0]}: {line[2]}" for line in found if doctor.kind_of(line) == "ticket"]
     brief = "Everything Rail needs is in place." if not missing else "Fix these:\n" + "\n".join(missing)
-    return answer(code="DOCTOR", action={"kind": "rest" if not missing else "human_wait", "brief": brief},
-                  owner="none" if not missing else "human", steps_=doctor.as_steps(found))
+    if buildable:
+        brief += "\nThe machine can build these, each as one ticket (rail add):\n" + "\n".join(buildable)
+    return answer(code="DOCTOR", action={"kind": "rest" if not missing else "person_wait", "brief": brief},
+                  owner="none" if not missing else "person", steps_=doctor.as_steps(found))
+
+
+def ci_setup(project, nn, head, changed, run):
+    """On a CI runner: setup for the projects the pull request's diff reaches, then [commands] setup. The set is
+    worked out from the diff against the base, as a ship works it out, so the one check `rail` runs what the ship
+    ran. False when a setup failed."""
+    project.use_trees(head)
+    if not steps.setup_projects(project, nn, project.root, steps.reached(project, head, changed), run):
+        return False
+    command = project.config["commands"]["setup"]
+    return not command or steps.run_command(project, project.root, nn, "setup", command, run)
 
 
 def cmd_ci(project, args):
@@ -1719,14 +2449,11 @@ def cmd_ci(project, args):
     if text is None:
         # A PR with no ticket: the rail init PR, Dependabot, a person's own PR.
         tier, _ = raised_tier(project, changed)
-        verify = project.config["commands"]["verify"]
-        if project.config["commands"]["setup"]:
-            steps.run_command(project, project.root, "", "setup", project.config["commands"]["setup"], run)
-        if run.ok and verify:
-            steps.run_command(project, project.root, "", "verify", verify, run)
-        elif not verify:
-            run.not_run("verify")
+        if ci_setup(project, "", head, changed, run):
+            steps.verify(project, "", head, project.root, changed, run)
         brief = f"No ticket on branch {branch}. Its paths would make it {tier}."
+        if not run.ok:  # the run's log is all a person has of this failure: no ticket's journal records it
+            brief += f"\nFailed at '{run.failure[0]}':\n{run.failure[1]}{tools.ci_note(project)}"
         return answer(code="CI_NO_TICKET", action={"kind": "rest", "brief": brief}, steps_=run.steps, tier=tier)
 
     from .project import parse_events
@@ -1736,8 +2463,7 @@ def cmd_ci(project, args):
     if not run.record("shipped", bool(shipped), patch_id, None if shipped else "not shipped yet",
                       output="The ticket hasn't shipped this patch: run rail advance in its worktree."):
         return answer(nn, code="CI_FAIL", action={"kind": "rest", "brief": "not shipped yet"}, steps_=run.steps)
-    if project.config["commands"]["setup"]:
-        steps.run_command(project, project.root, nn, "setup", project.config["commands"]["setup"], run)
+    ci_setup(project, nn, head, changed, run)
     # A reviewer may have raised the tier after this ship.
     tier = highest(shipped[-1].get("tier", "AUTO"), *[e.get("to") for e in events if e.get("event") == "tier_raised"])
     accepted = [e for e in events if e.get("event") == "accepted"]
@@ -1746,6 +2472,16 @@ def cmd_ci(project, args):
                              accepted=accepted[-1] if accepted else None)
         if needed is not None and rank(needed) > rank(tier):
             run.record("tier", False, patch_id, f"the change needs {needed}, and it shipped as {tier}")
+    if run.ok:
+        # A question the engine raised about this patch: open, or answered with what stops the change.
+        from . import triage
+        waiting = [q["id"] for q in triage.open_questions(events, patch_id)]
+        stops = [q["id"] for q in triage.stopped(events, patch_id)]
+        if waiting or stops:
+            run.record("triage", False, patch_id, f"open: {', '.join(waiting)}" if waiting else f"stopped: {', '.join(stops)}",
+                       output="A question the engine raised about this patch has no answer yet: run rail advance in the"
+                              " ticket's worktree." if waiting else
+                              "A triage answer stopped this patch; the ticket's next brief says what to do.")
     from .review import Ledger, load_doc, needs_review
     if run.ok and needs_review(project, tier, changed):
         from .project import review_path
@@ -1754,7 +2490,7 @@ def cmd_ci(project, args):
         run.record("review", complete, patch_id, None if complete else "no complete review for this patch",
                    output="A review bound to this patch, with every finding answered, is missing.")
     code = "CI_PASS" if run.ok else "CI_FAIL"
-    brief = "Every check passed." if run.ok else f"Failed at '{run.failure[0]}':\n{run.failure[1]}"
+    brief = "Every check passed." if run.ok else f"Failed at '{run.failure[0]}':\n{run.failure[1]}{tools.ci_note(project)}"
     return answer(nn, code=code, action={"kind": "rest", "brief": brief}, steps_=run.steps, tier=tier)
 
 
@@ -1767,7 +2503,9 @@ def render(result):
     if "text" in result:
         return result["text"].rstrip("\n")
     if "tickets" in result:
-        lines = [f"{'TICKET':<7} {'STATE':<13} {'OWNER':<6} {'TIER':<7} {'LAST':<5} NOTE"]
+        lines = [f"STOPPED by issue #{s['number']} ({s['title']})" + (f": {', '.join(s['paths'])}" if s["paths"] else "")
+                 for s in result.get("stops", [])]
+        lines += [f"{'TICKET':<7} {'STATE':<13} {'OWNER':<6} {'TIER':<7} {'LAST':<5} NOTE"]
         for r in result["tickets"]:
             lines.append(f"{r['ticket']:<7} {r['state']:<13} {r['owner']:<6} {r['tier']:<7} {r['last_event']:<5} {r['note']}")
         for i, l in enumerate(result.get("leftovers", [])):
@@ -1793,6 +2531,8 @@ def render(result):
         lines += ["", result["action"]["brief"]]
     for i, l in enumerate(result.get("leftovers") or []):
         lines.append(f"{'' if i else chr(10)}leftover: {l['kind']} {l['ref']} ({l['reason']})")
+    if result.get("note"):
+        lines += ["", result["note"]]
     return "\n".join(lines)
 
 
@@ -1830,6 +2570,8 @@ def parser():
     drop = verb("drop", "end a ticket without merging it")
     drop.add_argument("--reason", default="")
     drop.add_argument("--by", choices=("agent", "person"), default="agent")
+    drop.add_argument("--replaced-by", default="", metavar="NN,NN",
+                      help="the tickets that replace a ticket that was split; its issue stays open until the last merges")
     answer_ = verb("answer", "record how a review finding ended", ticket=False)
     answer_.add_argument("ticket", help="ticket ID")
     answer_.add_argument("finding", help="the finding's id, such as F2")
@@ -1855,14 +2597,21 @@ def parser():
                   ticket=False)
     source.add_argument("name", nargs="?", help="the source, .rail/sources/NAME.md")
     verb("save", "commit and push the work in flight as it is, with no checks")
+    verb("work", "run [worker] command on a ticket's agent task and record the run; it ships nothing: run rail advance"
+                 " NN after it")
     stats_ = verb("stats", "what the merged tickets' journals say: tickets by tier, failed steps, and the reviewer's"
                            " cost and hit rate", ticket=False)
     stats_.add_argument("--since", help="count only tickets merged on or after this date, as YYYY-MM-DD")
     provision = verb("provision", "install what the checks need on this machine (cloud sessions and CI only)",
                      ticket=False)
     provision.add_argument("--force", action="store_true", help="run it again on a machine that has it")
-    verb("init", "set this project up for Rail", ticket=False)
-    verb("doctor", "check the setup and print what's missing", ticket=False)
+    init_ = verb("init", "set this project up for Rail", ticket=False)
+    init_.add_argument("--skills", action="append", metavar="DIR",
+                       help="a folder for the SKILL.md files, from the repository root; repeat it for several. The"
+                            " default is [init] skill_dirs")
+    doctor_ = verb("doctor", "check the setup and print what's missing", ticket=False)
+    doctor_.add_argument("--product", action="store_true",
+                         help="also start the product on the base branch, drive each surface once, and stop it")
     verb("ci", "the rail check: the ship checks again on a pull request's head", ticket=False)
     hook = sub.add_parser("hook")  # internal: Claude Code hooks call it; not a verb
     hook.add_argument("name", choices=sorted(hooks.HOOKS))
@@ -1896,6 +2645,9 @@ def main(argv=None):
             args.ticket = args.ticket_opt
         if args.verb == "hook":
             return hooks.run(args.name, args.machine)
+        if os.environ.get("RAIL_WORKER") and args.verb in ("advance", "next", "work", "save"):
+            from .work import refusal
+            raise RailError(refusal(args.verb), code="WORKER_RUN")
         if args.verb == "init":
             result = cmd_init(args)
         elif args.verb == "docs":
@@ -1910,7 +2662,20 @@ def main(argv=None):
             result = globals()[f"cmd_{args.verb}"](Project(here), args)
         code = 3 if any(s.get("result") == "fail" for s in result.get("steps", [])) else 0
     except RailError as e:
-        result = {"schema_version": 1, "ok": False, "reason": {"code": e.code, "message": str(e)}}
+        result = {"schema_version": 2, "ok": False, "reason": {"code": e.code, "message": str(e)}}
         code = 2
+    except RateLimited as e:
+        result, code = github_limit(e), 0
+    finally:
+        _keep_calls()
     print(json.dumps(result, indent=2) if as_json else render(result))
     return code
+
+
+def _keep_calls():
+    """The GitHub calls this command made after its last event stay in the clone's cache for the next event."""
+    from . import forge
+    try:
+        forge.keep_calls(os.getcwd())
+    except OSError:
+        pass  # the folder is gone, or the cache can't be written: a count is not worth a failed command

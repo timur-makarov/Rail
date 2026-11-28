@@ -5,7 +5,8 @@ Code cloud session, where `gh pr` and `gh issue` (GraphQL) don't work.
 
 ## One-time setup
 
-`rail init` creates the labels `rail`, `rail:go`, `rail:needs-you` and `rail:hold`, and writes `.rail/ruleset.json`.
+`rail init` creates the labels `rail`, `rail:go`, `rail:needs-you`, `rail:hold`, `rail:stop`, `rail:revert`
+and `rail:first`, and writes `.rail/ruleset.json`.
 The rest is yours, in the repository's settings; a cloud session can't change them:
 
 - **Settings > Rules > Rulesets > New ruleset > Import a ruleset:** choose `.rail/ruleset.json`, downloaded
@@ -21,29 +22,89 @@ The rest is yours, in the repository's settings; a cloud session can't change th
 - Turn on Dependabot or Renovate.
 
 `rail doctor` checks the required check, the squash setting, branch deletion and the labels, with a link to
-each page.
+each page. Its `github rate limit` line shows the REST calls the token has left this hour, of its limit, and
+when the limit resets, as GitHub's answer to the doctor's first call says. Every app and token that acts as
+the same person shares one limit. The line is a warning under a tenth of the limit; `rail stats` shows what a
+merged ticket costs in calls.
 
 ## How tickets use pull requests
 
-- A PERSON ticket opens a contract pull request at `add`, titled `NN: [contract] ...`. Approve
+- A PERSON ticket whose kind the project names in `approve_contract` (`rail docs kinds`) opens a contract pull
+  request at `add`, titled `NN: [contract] ...`. Approve
   it with the label `rail:go`, change it by commenting, reject it by closing it. Don't merge it: it holds
   only the contract, and with the ruleset GitHub refuses, because its `rail` check is red. Without the
   ruleset a merge goes through, and Rail takes it as the approval: the work gets a new pull request. Only
   the merge of the ticket's own pull request counts. A ticket file that reaches the base branch any other
   way, such as inside another ticket's merge, approves nothing.
-- An AUTO ticket opens its pull request at claim.
+- Every other ticket, AUTO or PERSON, opens its pull request at claim.
 - No pull request is a draft. The `rail` check stays red with `not shipped yet` until the ticket ships, so
   nothing merges early by mistake.
-- At ship the engine writes the title and description: Why, Look at, Evidence, Risk, and the trailers
+- At ship the engine writes the title and description: Read these (below), Why, Look at, Evidence, Risk, and the trailers
   `Ticket:`, `Tier:` and `Review:` (`reviewer`, `reviewer, security seat`, or `none` when the change needed no
   review). The squash commit carries the same text.
 - A red required check, or a conflict with the base, returns the ticket to the agent. A pull request that is
   behind its base, when the base requires up-to-date branches, is rebased with no agent work.
 - An AUTO ticket merges through the async merge endpoint once the required checks are green. A person
-  merges a PERSON ticket by pressing the button.
+  merges a PERSON ticket by pressing the button, and that is the one act it takes. A person who closes the pull
+  request instead drops the ticket; the drop's mark says a person did it, and for a PERSON ticket its kinds, which
+  `rail stats` counts (`rail docs stats`).
+- A ticket from an issue closes it when it merges (`Closes #N` in its pull request). While another open ticket
+  names the same issue, as the parts of a ticket that was split do, it says `Part of #N` instead, and the last
+  of them to merge closes the issue (`rail docs retries`).
 
 ## Testing every merge on the latest base
 
 Turn on "Require branches to be up to date before merging": the engine rebases a shipped pull request that
 falls behind, and CI runs again. A merge queue is for organisations with many merges a day; a project that
 turns one on adds the `merge_group` trigger to `.github/workflows/rail.yml` and tests it.
+
+## Many pull requests, and GitHub's limits
+
+- The engine reads the 100 newest pull requests once per command. A ticket whose pull request is older than
+  those is asked for by its branch, one call for each such ticket, and only when the ticket should have one:
+  it is claimed, or it is a PERSON ticket with a contract a person approves.
+- Issues labelled `rail` are read to the last page, so intake misses none.
+- When GitHub refuses a call because a rate limit is used up (a `403` or `429` with `retry-after`, or with
+  nothing left until `x-ratelimit-reset`), the command stops there and answers `GITHUB_LIMIT`. Under five
+  minutes the answer is the script `sleep N; rail next`; a longer wait is a `rest` that names the time to come
+  back. Nothing is counted as an attempt, and what the command had already done stays done: the next
+  `rail next` goes on from the journal. A ship whose pull request could not be written has its title and
+  description written by the next `rail next`.
+- Two writes to GitHub in one command are at least one second apart, as GitHub's guide to its REST API asks.
+
+## Read these
+
+A pull request's description opens with `## Read these`: the lines of the change that need a person's eye, and
+why. The engine builds the list from facts. It stands before `## Look at`, which the worker wrote: an author
+frames a change as its author sees it, and this list has no author.
+
+| An item is | Its lines | Named as |
+|---|---|---|
+| What the reviewer found that a revert doesn't undo | Where the reviewer saw it | the reviewer |
+| A changed file on the paths of a kind (`[kinds]`, `person_paths`, `migration_paths`) | The lines the change adds there | the tier |
+| A PERSON ticket whose `person_reason` names no changed path | The ticket | the tier |
+| An advisory finding the author declined, or a blocking finding the refuter dismissed | The finding's place | the review |
+| A Done Contract amended after the ticket was accepted, which no person approved: any amend, but that of a ticket whose kind `approve_contract` names | The ticket, with the amend's reason | an amend |
+| An added `SHORTCUT(NN)`, `SENSOR(NN)`, `TODO(NN)` or `FIXME(NN)` | Its line | a marker |
+| An added line that matches a flag rule (`rail docs rules`) | Its line | a flag rule |
+| A changed manifest, lockfile or `.gitattributes` | The file | the change |
+
+The section ends with a count of the rest: "12 other changed lines: checked by verify, 2 checks and the
+reviewer." With no item it says "Nothing needs a person's eye." It is rebuilt whenever the description is: at
+ship, and after the review.
+
+- **Each item is also a comment on its line.** When a PERSON ticket reaches its person's merge, and when an AUTO
+  ticket is about to merge, the engine posts one review that comments on each item's first line, where that
+  line is one the change adds. Each comment carries the engine's mark, so it is posted once per patch and is
+  never read as a person's word.
+- **A person's answer on a line is heard.** A comment a person leaves on a line of the diff reaches the agent
+  as the person's note, like a comment on the conversation, with the same filter: only someone who can push
+  to the repository speaks for it.
+- **After the fact.** An AUTO ticket merges with nobody reading it, and Rail asks nobody to: its change can be
+  undone. The list stays in the pull request's description and in the squash commit's message, so a person who
+  chooses to look, or an agent that gathers such lists for them, finds it there. What you find wrong, take out
+  with `rail:revert`, or file a ticket for.
+- **Generated files fold.** `rail init` writes each `[size] exclude` glob into `.gitattributes` as
+  `linguist-generated`, which GitHub folds in a diff. Lockfiles stay in sight. A ticket that changes
+  `.gitattributes` is on its own list, because marking a file generated hides it from the diff and from the
+  size count.

@@ -1,0 +1,33 @@
+# The Go profile. The engine reads it each time it derives the projects of a tree: a folder that tracks a manifest
+# below is a project, with these commands, rules and paths (rail docs languages). Nothing of it is written into a
+# project's files.
+
+workspace = "go.work"                                      # its `use` lines name the modules
+manifests = ["go.mod"]                                     # file names, matched in any folder
+domains = ["proxy.golang.org", "sum.golang.org"]           # the module proxy and the checksum database
+generated = ["**/*.pb.go"]                                 # protobuf and gRPC output, left out of the size count
+migration_paths = []
+tests = ["**/*_test.go", "**/testdata/**"]
+
+# A project's commands: `setup`, and the parts of `verify`, run in the project's folder. Each part names the tool
+# it needs on the machine; `audit` runs only on a change that touches go.sum. -race needs cgo and a C compiler.
+# A module of a go.work is a project of its own with these same commands. A [[projects]] entry of the config
+# puts the repository's own commands in their place (rail docs languages).
+[[managers]]
+name = "go"
+lockfile = "go.sum"
+setup = "go mod download"
+verify = [
+  { part = "format", tool = "gofmt", run = 'test -z "$(gofmt -l .)"' },
+  { part = "lint", tool = "go", run = "go vet ./..." },
+  { part = "lint", tool = "golangci-lint", run = "golangci-lint run" },
+  { part = "tests", tool = "go", run = "go test -race ./..." },
+  { part = "audit", tool = "govulncheck", run = "govulncheck ./..." },
+]
+
+[[rules]]
+id = "no-new-go-suppressions"
+files = "**/*.go"
+forbid = ["//nolint", "t.Skip("]
+fix = "Fix the cause instead of silencing the check."
+why = "the Go profile: a linter silenced, or a test skipped"

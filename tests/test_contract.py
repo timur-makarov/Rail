@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import CONFIG, RAIL, RailTest, check_shape, ticket  # noqa: E402
+from railtest import APPROVE, CONFIG, RAIL, RailTest, check_shape, ticket  # noqa: E402
 
 GRILLED = """
 ## Grilling
@@ -200,12 +200,12 @@ class Amend(RailTest):
         merged = p.rail("amend", "1", "--file", p.path(".rail", "tickets", "1.md"), expect=2)
         self.assertEqual(merged["reason"]["message"], "ticket 1 is merged; follow-up work is a new ticket with caused_by")
         p.add(ticket(title="Other", scope=("api/**",)))
-        p.rail("drop", "2")
+        p.rail("drop", "2", "--reason", "not needed")
         dropped = p.rail("amend", "2", "--file", p.path(".rail", "tickets", "1.md"), expect=2)
         self.assertEqual(dropped["reason"]["message"], "ticket 2 is dropped; follow-up work is a new ticket with caused_by")
 
     def test_a_ticket_with_no_worktree_here_is_amended_with_a_file(self):
-        p = self.fixture()
+        p = self.fixture(config=APPROVE + CONFIG)
         p.add(ticket(tier="PERSON"))
         refused = p.rail("amend", "1", expect=2)
         self.assertEqual(refused["reason"]["message"], "edit the ticket in its worktree, or pass the new ticket with --file")
@@ -220,17 +220,19 @@ class Amend(RailTest):
         p, path = self.claimed()
         p.write(".rail/tickets/1.md", read(path).replace('["src/**"]', '["src/**", ".github/workflows/**"]'),
                 base=p.worktree("1"))
-        amended = p.rail("amend", "1")
+        amended = p.rail("amend", "1", "the config moved")
         self.assertEqual((amended["tier"], amended["state"], amended["owner"]), ("PERSON", "implementing", "agent"))
         record = [e for e in events(p) if e["event"] == "amended"][-1]
         self.assertEqual((record["changed"], record["added_paths"], record["needs_approval"]),
-                         (["scope"], [".github/workflows/**"], False))
-        self.assertEqual((events(p)[-1]["event"], events(p)[-1]["tier"]), ("accepted", "PERSON"))
+                         (["scope", "tier"], [".github/workflows/**"], False))
+        self.assertEqual((events(p)[-1]["event"], events(p)[-1]["tier"], events(p)[-1]["kinds"]),
+                         ("accepted", "PERSON", ["runs-with-secrets"]))
         self.assertIn('tier = "PERSON"', read(path))
+        self.assertIn('person_reason = "runs-with-secrets: .github/workflows/rail.yml"', read(path))
         self.assertIn('tier = "PERSON"', p.git("show", "1-fix-add:.rail/tickets/1.md"))
 
     def test_an_amend_keeps_its_reason_and_shows_it_to_the_person_who_approves(self):
-        p = self.fixture()
+        p = self.fixture(config=APPROVE + CONFIG)
         p.add(ticket(tier="PERSON"))
         p.rail("accept", "1")
         p.rail("next")
@@ -256,9 +258,9 @@ class Drop(RailTest):
         self.assertEqual((dropped["state"], dropped["leftovers"][0]["kind"]), ("dropped", "worktree"))
         last = events(p)[-1]
         self.assertEqual((last["event"], last["by"], last["reason"]), ("dropped", "person", "superseded by ticket 2"))
-        p.rail("drop", "2")
+        p.rail("drop", "2", "--reason", "not needed")
         last = events(p, "2-add-a-status-code", "2")[-1]
-        self.assertEqual((last["event"], last["by"], last["reason"]), ("dropped", "agent", ""))
+        self.assertEqual((last["event"], last["by"], last["reason"]), ("dropped", "agent", "not needed"))
 
     def test_a_merged_ticket_cannot_be_dropped(self):
         p = self.fixture()
@@ -300,7 +302,7 @@ class ReviewOutput(RailTest):
                 failed = p.rail("advance", "1", expect=3)
                 details = [s["detail"] for s in failed["steps"] if s["step"] == "review"]
                 self.assertEqual((failed["state"], failed["owner"], failed["reason"]["code"], details),
-                                 ("reviewing", "human", "STUCK_REVIEW", [f"invalid output: {reason}"] * 2))
+                                 ("reviewing", "person", "STUCK_REVIEW", [f"invalid output: {reason}"] * 2))
                 p.rail("accept", "1")
         self.assertNotIn("1-review.json", p.git("ls-tree", "-r", "--name-only", "1-fix-add", ".rail/journal"))  # no run kept
 
@@ -312,3 +314,46 @@ class ReviewOutput(RailTest):
         self.assertEqual(shipped["state"], "merge-ready")
         doc = json.loads(p.git("show", "1-fix-add:.rail/journal/1-review.json"))
         self.assertEqual(doc["runs"][-1]["summary"], "Clean.")
+
+
+class Reasons(RailTest):
+    """Every decision of an agent carries its reason; a person's act needs none."""
+
+    def test_an_agent_cannot_amend_an_accepted_contract_or_drop_a_ticket_without_a_reason(self):
+        p = self.fixture()
+        p.add(ticket())
+        p.rail("next")
+        path = os.path.join(p.worktree("1"), ".rail", "tickets", "1.md")
+        with open(path) as f:
+            text = f.read()
+        p.write(".rail/tickets/1.md", text.replace("== 5", "== 5 and calc.add(1, 1) == 2"), base=p.worktree("1"))
+        refused = p.rail("amend", "1", expect=2)
+        self.assertEqual(refused["reason"]["code"], "NO_REASON")
+        self.assertIn('rail amend 1 "why"', refused["reason"]["message"])
+        self.assertFalse([e for e in events(p) if e["event"] == "amended"])
+        p.rail("amend", "1", "the check missed a case")
+        self.assertEqual([e["reason"] for e in events(p) if e["event"] == "amended"], ["the check missed a case"])
+
+        refused = p.rail("drop", "1", expect=2)
+        self.assertEqual(refused["reason"]["code"], "NO_REASON")
+        self.assertIn('rail drop 1 --reason "why"', refused["reason"]["message"])
+        self.assertEqual(p.rail("status")["tickets"][0]["state"], "implementing")
+        self.assertEqual(p.rail("drop", "1", "--by", "person")["state"], "dropped")  # a person's word is its own reason
+
+    def test_writing_a_contract_nobody_accepted_yet_needs_no_reason(self):
+        p = self.fixture(config=APPROVE + CONFIG)
+        p.add(ticket(tier="PERSON"))
+        path = p.path(".rail", "tickets", "1.md")
+        changed = os.path.join(self.tmp, "1.md")
+        with open(changed, "w") as f:
+            f.write(ticket(tier="PERSON", check="test -f src/calc.py && grep -q 'a + b' src/calc.py", front=('id = "1"',)))
+        self.assertEqual(p.rail("amend", "1", "--file", changed)["reason"]["code"], "APPROVE_CONTRACT")
+
+    def test_a_decided_row_with_nothing_after_it_fails_lint(self):
+        p = self.fixture()
+        refused = p.add(ticket(body="\n## Assumptions\n- VERIFIED: decided, not checked:\n"), expect=None)
+        text = json.dumps(refused)
+        self.assertIn("a 'VERIFIED: decided, not checked:' row needs", text)
+        ok = p.add(ticket(body="\n## Assumptions\n- VERIFIED: decided, not checked: ints only, as ## Why says; a float"
+                               " caller would get a wrong sum.\n"))
+        self.assertTrue(ok)

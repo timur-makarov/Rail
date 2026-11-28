@@ -1,0 +1,2638 @@
+{
+  "title": "answer/v1",
+  "description": "What a rail verb answers with --json. `answer` is the shape every answer has. `codes` names every reason.code of an answer that worked: who may own it, the kinds of action it may carry, and the keys of action.facts when it has facts. `error` is the answer of a command that was refused. A brief is written from the facts alone, so a host can read a fact where it would have parsed a sentence. The parts under answer, facts and $defs are JSON Schema.",
+  "answer": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "schema_version",
+      "ok",
+      "ticket",
+      "state",
+      "owner",
+      "cwd",
+      "action",
+      "reason",
+      "steps"
+    ],
+    "properties": {
+      "schema_version": {
+        "const": 2
+      },
+      "ok": {
+        "const": true
+      },
+      "ticket": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "state": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "new",
+              "accepted",
+              "implementing",
+              "reviewing",
+              "in-ci",
+              "merge-ready",
+              "merged",
+              "dropped"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "owner": {
+        "type": "string",
+        "enum": [
+          "agent",
+          "person",
+          "none"
+        ],
+        "description": "Who acts next."
+      },
+      "cwd": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "action": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "brief"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "script",
+              "agent_task",
+              "person_wait",
+              "rest"
+            ],
+            "description": "script: run `command`. agent_task: an agent does the brief. person_wait: a person acts. rest: nothing to do."
+          },
+          "brief": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string",
+            "description": "On an agent_task for a ticket: the model the tier's ladder names."
+          },
+          "effort": {
+            "type": "string"
+          },
+          "facts": {
+            "type": "object",
+            "description": "The values the brief is made of; `codes` says which keys a code has."
+          }
+        }
+      },
+      "reason": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "steps": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "step",
+            "status"
+          ],
+          "properties": {
+            "step": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "ran",
+                "could_not_run",
+                "not_run",
+                "unavailable"
+              ]
+            },
+            "result": {
+              "type": "string",
+              "enum": [
+                "pass",
+                "fail"
+              ]
+            }
+          }
+        }
+      },
+      "tier": {
+        "type": "string"
+      },
+      "guide": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "situation": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "description": "The [guides] page whose text ends the brief."
+      },
+      "leftovers": {
+        "type": "array",
+        "items": {}
+      },
+      "waits": {
+        "type": "array",
+        "items": {}
+      },
+      "held": {
+        "type": "array",
+        "items": {}
+      },
+      "branch": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "note": {
+        "type": "string"
+      },
+      "adopted": {
+        "type": "string"
+      },
+      "checks": {
+        "type": "array",
+        "items": {}
+      },
+      "draft": {
+        "type": "string"
+      },
+      "files": {},
+      "head": {
+        "type": "string"
+      },
+      "size": {},
+      "advice": {},
+      "merge_commit": {
+        "type": "string"
+      },
+      "wait_secs": {
+        "type": "integer"
+      },
+      "spent_usd": {
+        "type": "number"
+      },
+      "root": {
+        "type": "string"
+      },
+      "created": {},
+      "skipped": {},
+      "architecture": {},
+      "areas": {},
+      "projects": {},
+      "digest": {},
+      "history": {},
+      "text": {
+        "type": "string"
+      },
+      "topic": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "stats": {
+        "type": "object"
+      },
+      "tickets": {
+        "type": "array",
+        "items": {}
+      },
+      "stops": {
+        "type": "array",
+        "items": {}
+      },
+      "sources": {
+        "type": "array",
+        "items": {}
+      },
+      "source": {
+        "type": "string"
+      },
+      "room": {},
+      "worked": {
+        "type": "object"
+      },
+      "reply": {
+        "type": "string"
+      },
+      "unreviewed": {
+        "type": "integer"
+      },
+      "merged": {
+        "type": "integer"
+      }
+    }
+  },
+  "error": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "schema_version",
+      "ok",
+      "reason"
+    ],
+    "properties": {
+      "schema_version": {
+        "const": 2
+      },
+      "ok": {
+        "const": false
+      },
+      "reason": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "BAD_REPLACEMENT",
+              "BAD_SOURCE",
+              "CONSULT_LIMIT",
+              "GIT",
+              "MERGED",
+              "NOTHING_TO_ACCEPT",
+              "NOTHING_TO_AMEND",
+              "NOT_ADOPTABLE",
+              "NOT_A_PROJECT",
+              "NO_BRANCH",
+              "NO_COMMITS",
+              "NO_FINDING",
+              "NO_FOLDER",
+              "NO_PACK",
+              "NO_REASON",
+              "NO_SOURCE",
+              "NO_TICKET",
+              "NO_TOPIC",
+              "REBASING",
+              "SOURCE_DUPLICATE",
+              "SOURCE_FULL",
+              "TICKET_LINT",
+              "UNAVAILABLE",
+              "UNCOMMITTED",
+              "USAGE",
+              "WORKER_RUN"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "shared_facts": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ticket": {
+        "type": "string"
+      },
+      "title": {
+        "type": "string"
+      },
+      "branch": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The ticket's branch."
+      },
+      "ticket_file": {
+        "type": "string",
+        "description": "The ticket's file, from the root of its branch."
+      }
+    },
+    "description": "On every answer with facts that is about one ticket."
+  },
+  "added_facts": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "adopted": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "branch",
+          "head"
+        ],
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "head": {
+            "type": "string"
+          }
+        },
+        "description": "From rail adopt: the branch whose work the ticket holds and that branch's head. The brief opens with it."
+      },
+      "guide": {
+        "type": "string",
+        "description": "The text of the [guides] page for the brief's situation. The brief ends with it."
+      },
+      "consult": {
+        "type": "string",
+        "description": "What consult advised in this same command. The brief ends with it, after the guide."
+      }
+    },
+    "description": "What is put around a brief, on any answer with facts."
+  },
+  "codes": {
+    "ACCEPT_AUTO": {
+      "says": "A ticket that passes lint, of a kind approve_contract does not name: next accepts it.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "ADOPT": {
+      "says": "rail adopt read a branch and hands over a ticket draft.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ]
+    },
+    "ADOPTED": {
+      "says": "rail adopt filed the ticket.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "ADOPT_CHECKS": {
+      "says": "rail adopt: the draft's checks do not show the work.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ]
+    },
+    "ADOPT_SETUP_FAILED": {
+      "says": "rail adopt: setup failed, and nothing was created.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ]
+    },
+    "AFTER_DROPPED": {
+      "says": "A ticket this one comes after was dropped: an agent decides whether it still stands.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tier",
+          "after_dropped"
+        ],
+        "properties": {
+          "tier": {
+            "type": "string"
+          },
+          "after_dropped": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "ANSWER_FINDINGS": {
+      "says": "The review left blocking findings open.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "findings"
+        ],
+        "properties": {
+          "findings": {
+            "$ref": "#/$defs/findings"
+          },
+          "person_note": {
+            "$ref": "#/$defs/person_note"
+          }
+        }
+      }
+    },
+    "APPROVE_AMEND": {
+      "says": "The contract changed after acceptance in a way a person approves.",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pr",
+          "wait"
+        ],
+        "properties": {
+          "amend_reason": {
+            "type": "string"
+          },
+          "pr": {
+            "$ref": "#/$defs/pr"
+          },
+          "wait": {
+            "$ref": "#/$defs/wait"
+          }
+        }
+      }
+    },
+    "APPROVE_CONTRACT": {
+      "says": "The contract of a PERSON ticket whose kind approve_contract names waits for a person's approval.",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tier",
+          "pr",
+          "wait"
+        ],
+        "properties": {
+          "tier": {
+            "type": "string"
+          },
+          "pr": {
+            "$ref": "#/$defs/pr"
+          },
+          "wait": {
+            "$ref": "#/$defs/wait"
+          }
+        }
+      }
+    },
+    "ASK_COVERAGE": {
+      "says": "A ticket the engine filed to ask about the folders inside no project: its ship asks.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "BUDGET": {
+      "says": "The ticket's runs reported more than [worker] ticket_usd since a person last acted.",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "spent",
+          "limit",
+          "spent_by",
+          "wait"
+        ],
+        "properties": {
+          "spent": {
+            "type": "number"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "spent_by": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Dollars by what ran: each worker model, each review step."
+          },
+          "wait": {
+            "$ref": "#/$defs/wait"
+          }
+        }
+      }
+    },
+    "BUDGET_DAY": {
+      "says": "The runs of the last 24 hours reported more than [worker] daily_usd.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "CI_FAIL": {
+      "says": "rail ci: a check failed.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "CI_NO_TICKET": {
+      "says": "rail ci on a pull request with no ticket.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "CI_PASS": {
+      "says": "rail ci: every check passed.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "CI_WAIT": {
+      "says": "The ticket shipped and CI runs. As a script, a command that waits for the run.",
+      "owners": [
+        "none",
+        "agent"
+      ],
+      "kinds": [
+        "rest",
+        "script"
+      ]
+    },
+    "CLAIM": {
+      "says": "An accepted ticket: next claims it.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "CLAIMED_ELSEWHERE": {
+      "says": "Another session's work in flight.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "CONFLICT": {
+      "says": "The pull request conflicts with the base branch.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cwd",
+          "pr",
+          "conflicted"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "pr": {
+            "$ref": "#/$defs/pr"
+          },
+          "conflicted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The files a merge of the base would conflict in, as far as git can say."
+          }
+        }
+      }
+    },
+    "CONSULT": {
+      "says": "A step failed the same way [retry] budget times: next asks consult.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "CONTEXT": {
+      "says": "rail context.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "CONTRACT_ELSEWHERE": {
+      "says": "Another session is writing this ticket's contract.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "CONTRACT_MERGED": {
+      "says": "A person merged the contract's pull request: next takes it as the approval.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "DIAGNOSE": {
+      "says": "A ticket at its retry budget or cap that has had no diagnosis: next starts the one run that says why it is stuck, before it is dropped or waits.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "DOCS": {
+      "says": "rail docs.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "DOCTOR": {
+      "says": "rail doctor: a rest when everything is in place, else what a person fixes.",
+      "owners": [
+        "none",
+        "person"
+      ],
+      "kinds": [
+        "rest",
+        "person_wait"
+      ]
+    },
+    "DROPPED": {
+      "says": "The ticket was dropped.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "DROP_PENDING": {
+      "says": "The ticket is dropped and its mark is not written yet.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "FORGE_UNAVAILABLE": {
+      "says": "The ticket shipped and GitHub can't be reached.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "GITHUB_LIMIT": {
+      "says": "GitHub's rate limit is used up: a wait the script sleeps through, or a rest until it lifts.",
+      "owners": [
+        "agent",
+        "none"
+      ],
+      "kinds": [
+        "script",
+        "rest"
+      ]
+    },
+    "GO": {
+      "says": "A person's rail:go is on the ticket: next reads it.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "HOLD": {
+      "says": "A person holds the ticket with the label rail:hold.",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pr",
+          "wait"
+        ],
+        "properties": {
+          "pr": {
+            "$ref": "#/$defs/pr"
+          },
+          "wait": {
+            "$ref": "#/$defs/wait"
+          }
+        }
+      }
+    },
+    "IMPLEMENT": {
+      "says": "The ticket's work.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cwd",
+          "why",
+          "decided",
+          "done_contract",
+          "base_green",
+          "scope_paths",
+          "out_of_scope",
+          "size",
+          "migration",
+          "tools",
+          "tried",
+          "history",
+          "save_note",
+          "findings"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "why": {
+            "type": "string",
+            "description": "The ticket's ## Why."
+          },
+          "decided": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The rows decided when the ticket was written, and not checked."
+          },
+          "done_contract": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "text",
+              "checks"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The Done Contract section as written, and the command of each Check: line."
+          },
+          "base_green": {
+            "type": "boolean",
+            "description": "Every check of the contract already passed on the base before any work."
+          },
+          "scope_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "out_of_scope": {
+            "type": "string",
+            "description": "The ticket's ## Out of scope, or an empty string."
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "count",
+                  "cap"
+                ],
+                "properties": {
+                  "count": {
+                    "type": "integer"
+                  },
+                  "cap": {
+                    "type": "integer"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The change's size against [size] cap, on an AUTO ticket."
+          },
+          "migration": {
+            "type": "boolean",
+            "description": "The scope reaches migration_paths."
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "use",
+                "env"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "use": {
+                  "type": "string"
+                },
+                "env": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "description": "The declared tools."
+          },
+          "tried": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The ticket's ## Tried lines."
+          },
+          "history": {
+            "$ref": "#/$defs/history"
+          },
+          "save_note": {
+            "type": "boolean",
+            "description": "No hook saves for this session, so the brief tells the agent to run rail save."
+          },
+          "findings": {
+            "$ref": "#/$defs/findings"
+          },
+          "person_note": {
+            "$ref": "#/$defs/person_note"
+          },
+          "restarted": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "branch": {
+                    "type": "string"
+                  },
+                  "rule": {
+                    "type": "string"
+                  },
+                  "file": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Until the next ship: the branch the engine replaced with this one, started again from the base; the type of the question that led to it; the scan's rule and file of the secret its commits held, or what the diagnosis of a stuck ticket said its attempts shared."
+          }
+        }
+      }
+    },
+    "INITIALISED": {
+      "says": "rail init installed Rail.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "INIT_TASK": {
+      "says": "The project's config is not on the base branch yet: the init task.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cloud",
+          "base",
+          "depth",
+          "tools",
+          "projects"
+        ],
+        "properties": {
+          "cloud": {
+            "type": "boolean",
+            "description": "A cloud session, where the agent sets up and a person confirms by merging one pull request."
+          },
+          "base": {
+            "type": "string"
+          },
+          "depth": {
+            "type": "integer"
+          },
+          "tools": {
+            "type": "string",
+            "description": "What looks like a tool, as one line."
+          },
+          "projects": {
+            "type": "string",
+            "description": "The projects found from the tracked manifests, as one line."
+          }
+        }
+      }
+    },
+    "INTAKE": {
+      "says": "rail intake took issues in.",
+      "owners": [
+        "agent",
+        "none"
+      ],
+      "kinds": [
+        "script",
+        "rest"
+      ]
+    },
+    "MERGE": {
+      "says": "A shipped ticket the engine merges: rail advance does it.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "MERGED": {
+      "says": "The ticket is merged.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "MERGE_BY_PERSON": {
+      "says": "A PERSON ticket is ready: a person reviews and merges it.",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tier",
+          "pr",
+          "remote",
+          "asked",
+          "wait"
+        ],
+        "properties": {
+          "tier": {
+            "type": "string"
+          },
+          "pr": {
+            "$ref": "#/$defs/pr"
+          },
+          "remote": {
+            "type": "boolean",
+            "description": "The project has a remote, so the merge is a pull request's."
+          },
+          "asked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the reviewer found that a revert doesn't undo, each as kind: file:line: why."
+          },
+          "wait": {
+            "$ref": "#/$defs/wait"
+          }
+        }
+      }
+    },
+    "MERGE_FAILED": {
+      "says": "A requested merge has not landed, or GitHub or git refused it (then from rail advance, with no facts).",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pr",
+          "wait"
+        ],
+        "properties": {
+          "pr": {
+            "$ref": "#/$defs/pr"
+          },
+          "wait": {
+            "$ref": "#/$defs/wait"
+          }
+        }
+      }
+    },
+    "MERGE_REQUESTED": {
+      "says": "The merge is requested and GitHub has not landed it yet.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "NO_WORK": {
+      "says": "Nothing to do now.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "PROVISION": {
+      "says": "In a cloud session the project's provision command has not run on this machine.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "PROVISIONED": {
+      "says": "rail provision ran, or had run already.",
+      "owners": [
+        "agent",
+        "none"
+      ],
+      "kinds": [
+        "script",
+        "rest"
+      ]
+    },
+    "PROVISION_FAILED": {
+      "says": "rail provision failed.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ]
+    },
+    "PROVISION_LOCAL": {
+      "says": "rail provision on a person's own machine installs nothing.",
+      "owners": [
+        "person",
+        "none"
+      ],
+      "kinds": [
+        "person_wait",
+        "rest"
+      ]
+    },
+    "REBASE_BEHIND": {
+      "says": "A shipped pull request is behind its base: next rebases it.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "REBASING": {
+      "says": "A rebase is stopped in the ticket's worktree.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cwd",
+          "conflicted"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "conflicted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The files the rebase stopped on."
+          }
+        }
+      }
+    },
+    "RED_BASE": {
+      "says": "verify fails on the base branch too: the ticket waits for the base's fix.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "RED_CHECK": {
+      "says": "A required check failed on the pull request.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cwd",
+          "pr",
+          "checks",
+          "findings"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "pr": {
+            "$ref": "#/$defs/pr"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "summary"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Each failed check and what it printed."
+          },
+          "findings": {
+            "$ref": "#/$defs/findings"
+          },
+          "person_note": {
+            "$ref": "#/$defs/person_note"
+          }
+        }
+      }
+    },
+    "RESTART": {
+      "says": "A person has rotated the secret, or the diagnosis of a stuck ticket judged that its attempts share a mistake: next starts the ticket's branch again from the base, under a new name.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "RESUME": {
+      "says": "Work an ended session left: next resumes it here.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "RETRY_CAP": {
+      "says": "A PERSON ticket is at the retry budget or cap, and its diagnosis names nothing to do.",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stuck",
+          "could_not_run",
+          "pr",
+          "wait"
+        ],
+        "properties": {
+          "stuck": {
+            "$ref": "#/$defs/stuck"
+          },
+          "diagnosis": {
+            "$ref": "#/$defs/diagnosis"
+          },
+          "could_not_run": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "step"
+              ],
+              "properties": {
+                "step": {
+                  "type": "string"
+                },
+                "detail": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "The capped steps whose last attempt could not run."
+          },
+          "pr": {
+            "$ref": "#/$defs/pr"
+          },
+          "wait": {
+            "$ref": "#/$defs/wait"
+          }
+        }
+      }
+    },
+    "REVERT": {
+      "says": "A revert ticket an agent undoes by hand.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cwd",
+          "revert",
+          "scope_paths",
+          "save_note",
+          "findings"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "revert": {
+            "$ref": "#/$defs/revert"
+          },
+          "scope_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "save_note": {
+            "type": "boolean"
+          },
+          "findings": {
+            "$ref": "#/$defs/findings"
+          },
+          "person_note": {
+            "$ref": "#/$defs/person_note"
+          }
+        }
+      }
+    },
+    "REVERT_SHIP": {
+      "says": "A revert ticket whose worktree holds the exact reverse: the ship is all that is left.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revert"
+        ],
+        "properties": {
+          "revert": {
+            "$ref": "#/$defs/revert"
+          }
+        }
+      }
+    },
+    "REVIEW": {
+      "says": "A shipped patch that needs a review run: rail advance starts it.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "SAVED": {
+      "says": "rail save.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "SCOPE_OVERLAP": {
+      "says": "Another ticket in flight changes the same paths.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "SECRET_FOUND": {
+      "says": "A triage run judged that a line the change adds to .gitleaksignore covers a real secret: a person rotates it, and the engine then starts the ticket's branch again from the base.",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "question",
+          "reason",
+          "finding",
+          "pr",
+          "wait"
+        ],
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "The question's id in the journal."
+          },
+          "reason": {
+            "type": "string",
+            "description": "The triage run's reason."
+          },
+          "finding": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "rule": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer"
+              },
+              "commit": {
+                "type": "string"
+              }
+            },
+            "description": "What the line's fingerprint names: the scan's rule, the file and line, the commit. Empty for a line in another form."
+          },
+          "pr": {
+            "$ref": "#/$defs/pr"
+          },
+          "wait": {
+            "$ref": "#/$defs/wait"
+          }
+        }
+      }
+    },
+    "SETUP_FAILED": {
+      "says": "A setup command failed in the ticket's worktree.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cwd",
+          "failed"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "failed": {
+            "$ref": "#/$defs/failed"
+          }
+        }
+      }
+    },
+    "SOURCE": {
+      "says": "rail source ran a source's fetch: an agent files tickets from what it found.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ]
+    },
+    "SOURCES": {
+      "says": "rail source with no name lists the sources.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "SOURCE_EMPTY": {
+      "says": "The source's fetch found nothing.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "SOURCE_FETCH_FAILED": {
+      "says": "The source's fetch command failed.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "SOURCE_FULL": {
+      "says": "The source has as many open tickets as it may.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "SPLIT": {
+      "says": "An AUTO change over [size] cap is offered a split, once.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cwd",
+          "size",
+          "cap",
+          "rest_branch"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "cap": {
+            "type": "integer"
+          },
+          "rest_branch": {
+            "type": "string",
+            "description": "The branch the brief asks the rest to be moved to."
+          },
+          "remote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The remote to push that branch to, when the project has one."
+          },
+          "person_note": {
+            "$ref": "#/$defs/person_note"
+          }
+        }
+      }
+    },
+    "STATS": {
+      "says": "rail stats.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "STATUS": {
+      "says": "rail status.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "STEP_FAILED": {
+      "says": "The last ship failed at a step and nothing has changed since. From rail advance, the answer shows the failure's output as it happened and has no facts.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cwd",
+          "failed",
+          "output",
+          "findings"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "failed": {
+            "$ref": "#/$defs/failed"
+          },
+          "output": {
+            "type": "string",
+            "description": "What the failed step printed, when this clone kept it."
+          },
+          "tried": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The ticket's ## Tried lines. For a failure of the work itself."
+          },
+          "advice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Consult's latest advice, while the attempt it was given for is still to come."
+          },
+          "triage": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "question",
+                  "type",
+                  "answer"
+                ],
+                "properties": {
+                  "question": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "ask": {
+                    "type": "string"
+                  },
+                  "fact": {
+                    "type": "string"
+                  },
+                  "answer": {
+                    "type": "string"
+                  },
+                  "means": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "evidence": {
+                    "type": "string"
+                  },
+                  "told": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the step is triage: the question, the fact that raised it, the answer that stopped the change with what it means, the run's reason, and what the worker is told to do."
+          },
+          "findings": {
+            "$ref": "#/$defs/findings"
+          },
+          "person_note": {
+            "$ref": "#/$defs/person_note"
+          }
+        }
+      }
+    },
+    "STOPPED": {
+      "says": "A person's brake is on: an open issue labelled rail:stop, for this ticket or, with no ticket, for the repository.",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stop",
+          "wait"
+        ],
+        "properties": {
+          "stop": {
+            "$ref": "#/$defs/stop"
+          },
+          "wait": {
+            "$ref": "#/$defs/wait"
+          }
+        }
+      }
+    },
+    "STUCK": {
+      "says": "An AUTO ticket at the retry budget or cap, whose diagnosis names nothing to do: next drops it with a record.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stuck"
+        ],
+        "properties": {
+          "stuck": {
+            "$ref": "#/$defs/stuck"
+          },
+          "diagnosis": {
+            "$ref": "#/$defs/diagnosis"
+          }
+        }
+      }
+    },
+    "STUCK_CONTRACT": {
+      "says": "The diagnosis of a stuck ticket judged that its contract is at fault: the contract writer amends it.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stuck",
+          "diagnosis"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "stuck": {
+            "$ref": "#/$defs/stuck"
+          },
+          "diagnosis": {
+            "$ref": "#/$defs/diagnosis"
+          }
+        }
+      }
+    },
+    "STUCK_REVIEW": {
+      "says": "A review run, or a triage run, failed twice in a row with no verdict.",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "run",
+          "pr",
+          "wait"
+        ],
+        "properties": {
+          "run": {
+            "type": "string",
+            "enum": [
+              "review",
+              "security",
+              "refuter",
+              "triage"
+            ],
+            "description": "The step of the run that last failed."
+          },
+          "pr": {
+            "$ref": "#/$defs/pr"
+          },
+          "wait": {
+            "$ref": "#/$defs/wait"
+          }
+        }
+      }
+    },
+    "STUCK_SPLIT": {
+      "says": "The diagnosis of a stuck ticket judged that the work is more than one ticket: the contract writer files the parts and drops this one.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stuck",
+          "diagnosis"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "stuck": {
+            "$ref": "#/$defs/stuck"
+          },
+          "diagnosis": {
+            "$ref": "#/$defs/diagnosis"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The issue the ticket came from, which the engine writes into each ticket that replaces it."
+          }
+        }
+      }
+    },
+    "SWEEP": {
+      "says": "Enough merged since the last sweep: rail sweep.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "SWEEP_EMPTY": {
+      "says": "A sweep that found nothing: it ships and merges.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "SWEEP_RUN": {
+      "says": "A sweep ticket whose review run is still to come.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "SWEEP_TICKETS": {
+      "says": "The sweep ran: an agent files its findings as tickets.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cwd",
+          "summary_file"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "summary_file": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "TICKET_LINT": {
+      "says": "The ticket is not complete: an agent writes its contract. From rail add and rail amend, the file given did not pass lint, and the answer has no facts.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "lint_errors"
+        ],
+        "properties": {
+          "lint_errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "not_taken": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why an issue that held a whole ticket was taken as a request only."
+          }
+        }
+      }
+    },
+    "TOOL_DOWN": {
+      "says": "A step failed for the machine's own reason twice in a row: a tool out of reach, or a command that could not run. Or the diagnosis of a stuck ticket judged that the machine is at fault.",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "failed",
+          "times",
+          "pr",
+          "wait"
+        ],
+        "properties": {
+          "failed": {
+            "$ref": "#/$defs/failed"
+          },
+          "times": {
+            "type": "integer"
+          },
+          "pr": {
+            "$ref": "#/$defs/pr"
+          },
+          "wait": {
+            "$ref": "#/$defs/wait"
+          },
+          "diagnosis": {
+            "$ref": "#/$defs/diagnosis"
+          }
+        }
+      }
+    },
+    "TOOL_MISSING": {
+      "says": "A declared tool has no credential on this machine. One ticket's wait, or with `tickets` the one wait of several.",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tools_missing",
+          "machine",
+          "wait"
+        ],
+        "properties": {
+          "tools_missing": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Each tool and the names it lacks."
+          },
+          "machine": {
+            "type": "string",
+            "enum": [
+              "cloud",
+              "ci",
+              "own"
+            ],
+            "description": "The kind of machine, which says where a name is set."
+          },
+          "tickets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The tickets the wait holds, when the answer is about several."
+          },
+          "resting": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What else rests, one line a ticket, when the answer is about several."
+          },
+          "wait": {
+            "$ref": "#/$defs/wait"
+          }
+        }
+      }
+    },
+    "TRIAGE": {
+      "says": "A question the engine raised about the shipped patch has no answer: rail advance starts the triage run, before any review.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    },
+    "VERIFY_ASSUMPTIONS": {
+      "says": "The ticket has open ASSUMED rows to verify before the work.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "agent_task"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cwd",
+          "open_assumptions"
+        ],
+        "properties": {
+          "cwd": {
+            "$ref": "#/$defs/cwd"
+          },
+          "open_assumptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "WAITING_AFTER": {
+      "says": "The ticket waits for a ticket in `after` to merge.",
+      "owners": [
+        "none"
+      ],
+      "kinds": [
+        "rest"
+      ]
+    },
+    "WAITING_PERSON": {
+      "says": "No agent has work, and tickets wait for a person.",
+      "owners": [
+        "person"
+      ],
+      "kinds": [
+        "person_wait"
+      ],
+      "facts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "waits",
+          "resting"
+        ],
+        "properties": {
+          "waits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "ticket",
+                "needs",
+                "kind",
+                "brief",
+                "wait"
+              ],
+              "properties": {
+                "ticket": {
+                  "type": "string"
+                },
+                "needs": {
+                  "type": "string",
+                  "description": "The wait's code."
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "brief": {
+                  "type": "string"
+                },
+                "pr": {
+                  "type": "string"
+                },
+                "wait": {
+                  "$ref": "#/$defs/wait"
+                }
+              }
+            },
+            "description": "Each wait, with its own brief."
+          },
+          "resting": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What else rests, one line a ticket."
+          }
+        }
+      }
+    },
+    "WORKED": {
+      "says": "rail work ran the worker once: rail advance is next.",
+      "owners": [
+        "agent"
+      ],
+      "kinds": [
+        "script"
+      ]
+    }
+  },
+  "$defs": {
+    "pr": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "number",
+            "url",
+            "open"
+          ],
+          "properties": {
+            "number": {
+              "type": "integer"
+            },
+            "url": {
+              "type": "string"
+            },
+            "open": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The ticket's pull request, or null when it has none."
+    },
+    "wait": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "approval",
+            "grant",
+            "hold"
+          ],
+          "description": "approval: of something a revert doesn't undo, money included. grant: the machine lacks something a person gives once, or something outside the repository is a person's to do. hold: the person's own brake."
+        },
+        "accept": {
+          "type": "string",
+          "description": "The command that approves or continues: rail accept NN. A note may follow it in quotes."
+        },
+        "label": {
+          "type": "string",
+          "description": "The label that does the same on the ticket's open pull request: rail:go."
+        },
+        "drop": {
+          "type": "string",
+          "description": "The command that ends the ticket instead."
+        },
+        "answer": {
+          "type": "string",
+          "description": "The command with which the person decides a finding; F1 stands for the finding's id."
+        },
+        "amend": {
+          "type": "string",
+          "description": "The command that changes the ticket instead."
+        },
+        "merge": {
+          "type": "string",
+          "description": "The pull request a person reviews and merges."
+        },
+        "issue": {
+          "type": "string",
+          "description": "The rail:stop issue: closing it, or taking the label off, ends the wait."
+        },
+        "set": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The names of the environment variables to set on the machine; then rail next."
+        }
+      },
+      "description": "What a person's wait asks, and each way to answer it that works here."
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "severity",
+        "claim"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "blocking",
+            "advisory",
+            "parked"
+          ]
+        },
+        "role": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer"
+        },
+        "claim": {
+          "type": "string"
+        },
+        "check": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "output": {
+              "type": "string"
+            }
+          }
+        },
+        "answer": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "outcome": {
+              "type": "string"
+            },
+            "by": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "A review finding as the journal holds it, and its last answer once it has one."
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      },
+      "description": "The blocking findings still to answer, then the open advisory ones. Empty while no blocking finding is open."
+    },
+    "failed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step"
+      ],
+      "properties": {
+        "step": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "signature": {
+          "type": "string"
+        },
+        "counted": {
+          "type": "boolean"
+        },
+        "tools_down": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "The failed step's event: its name, how it ended, and the signature of its output."
+    },
+    "stuck": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "step",
+          "why",
+          "attempts",
+          "budget"
+        ],
+        "properties": {
+          "step": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string",
+            "enum": [
+              "cap",
+              "consulted",
+              "same"
+            ]
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "budget": {
+            "type": "integer"
+          }
+        }
+      },
+      "description": "Each step at its limit: cap ([retry] cap failures of any kind), same (the same failure [retry] budget times in a row), consulted (once more after consult advised)."
+    },
+    "diagnosis": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "answer",
+            "means"
+          ],
+          "properties": {
+            "answer": {
+              "type": "string",
+              "enum": [
+                "contract",
+                "too-large",
+                "approach",
+                "machine",
+                "cannot-tell"
+              ]
+            },
+            "means": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The one diagnosis the ticket got at its retry cap, from a run that did not write the change: its answer, what the answer means, the run's reason and what it names. Null while it has no answer."
+    },
+    "revert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ticket",
+        "sha",
+        "exact",
+        "applies",
+        "failed"
+      ],
+      "properties": {
+        "ticket": {
+          "type": "string"
+        },
+        "sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exact": {
+          "type": "boolean"
+        },
+        "applies": {
+          "type": "boolean"
+        },
+        "failed": {
+          "type": "boolean"
+        },
+        "base": {
+          "type": "string"
+        }
+      },
+      "description": "A revert ticket: the ticket it reverts and that ticket's squash commit, whether the worktree holds the exact reverse, whether the reverse still applies to the base, and whether verify failed on it."
+    },
+    "history": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tickets",
+        "markers",
+        "more_markers"
+      ],
+      "properties": {
+        "tickets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "ticket": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              },
+              "decided": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "not_tested": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "noticed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "markers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "more_markers": {
+          "type": "integer"
+        }
+      },
+      "description": "What earlier work on the same paths left: the last merged tickets and the markers standing there."
+    },
+    "stop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number",
+        "title",
+        "url",
+        "paths"
+      ],
+      "properties": {
+        "number": {
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "smoke": {
+          "type": "integer"
+        }
+      },
+      "description": "The open issue labelled rail:stop, and the paths it names when it stops only those."
+    },
+    "person_note": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What a person said with their last approval or continue, until the next ship."
+    },
+    "cwd": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The ticket's worktree, from the project's root."
+    }
+  }
+}

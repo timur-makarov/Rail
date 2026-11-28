@@ -13,7 +13,8 @@ from .util import RailError
 
 DIR = os.path.join(".rail", "sources")
 NAME = re.compile(r"^[a-z0-9-]+$")
-RESERVED = ("sweep", "red-base", "github")  # external_id prefixes the engine writes itself
+# external_id prefixes the engine writes itself, and the two it asks the sweep's tickets to carry
+RESERVED = ("sweep", "red-base", "github", "coverage", "todo", "bar")
 KEYS = {"fetch": str, "max_open": int}
 SIGNAL_LIMIT = 20000  # characters of the fetch's output in a brief: the tail, where a log's news usually is
 ENDED = ("merged", "dropped")
@@ -115,7 +116,7 @@ def check_add(project, facts, external_id):
                         f" max_open: no more until one merges or is dropped", code="SOURCE_FULL")
 
 
-def brief(source, output, room, mine):
+def brief(source, output, room, mine, template=""):
     cut = len(output) > SIGNAL_LIMIT
     signal = output[-SIGNAL_LIMIT:] if cut else output
     existing = [f"  - {key} (ticket {nn}, {state})" for key, nn, state in mine]
@@ -132,7 +133,7 @@ def brief(source, output, room, mine):
         f"- You may file at most {room} tickets now: max_open is {source.max_open}, and"
         f" {source.max_open - room} of this source's tickets are open.",
         "- Write each ticket to a file outside the repository, such as a temporary file, in the format of"
-        " .rail/tickets/TEMPLATE.md (rail docs tickets), and file it with: rail add FILE",
+        " .rail/tickets/TEMPLATE.md, and file it with: rail add FILE",
         f"- Set each ticket's external_id to \"{source.name}#KEY\". KEY names the underlying problem, not this run,"
         " so the same problem found on a later run gets the same key. rail add refuses a key whose ticket is"
         " still open.",
@@ -141,4 +142,6 @@ def brief(source, output, room, mine):
         *(existing or ["  (none)"]),
         "- When nothing is worth a ticket, file none and say so.",
     ]
+    if template:  # the format the brief names, in front of the agent rather than a path to open
+        parts += ["", "## .rail/tickets/TEMPLATE.md", "```markdown", template.rstrip("\n"), "```"]
     return "\n".join(parts) + "\n"

@@ -129,12 +129,25 @@ class Validation(RailTest):
             '[[rules]]\nid = "x"\nforbids = ["# noqa"]\n': "config: unknown key 'rules[0].forbids' (did you mean 'forbid'?)",
             '[[rules]]\nid = "x"\nforbid = "# noqa"\n': "config: rules[0].forbid must be list",
             '[[rules]]\nforbid = ["# noqa"]\n': "config: rules[0] needs an id",
+            '[[projects]]\nname = "api"\npath = ["api/**"]\n': "config: unknown key 'projects[0].path' (did you mean 'paths'?)",
+            '[[projects]]\npaths = ["api/**"]\n': "config: projects[0] needs a name",
+            '[[projects]]\nname = "api"\npaths = "api/**"\n': "config: projects[0].paths must be list",
+            '[[projects]]\nname = "api"\npaths = ["api/**"]\n\n[[projects]]\nname = "api"\npaths = ["web/**"]\n':
+                "config: projects[1] needs a name no other entry has; got 'api'",
+            'projects = "api"\n': "config: projects must be an array of tables ([[projects]])",
+            '[[profiles]]\nname = "go"\n': "config: unknown key 'profiles'",
+            '[tests]\npaths = "tests/**"\n': "config: tests.paths must be list",
             "[commands]\nverify = make test\n": "config: .rail/config.toml is not valid TOML",
         }
         for text, message in cases.items():
             with self.subTest(message):
                 p.write(".rail/config.toml", text)
                 self.assertIn(message, p.rail("status", expect=2)["reason"]["message"])
+
+    def test_a_config_with_a_project_and_test_paths_loads(self):
+        p = self.fixture(config=CONFIG + '\n[tests]\npaths = ["**/*_test.go"]\n\n[[projects]]\nname = "api"\n'
+                                         'paths = ["api/**"]\nverify = "true"\nuses = ["calc"]\n')
+        self.assertEqual(p.rail("status")["reason"]["code"], "STATUS")
 
     def test_a_packs_own_section_is_taken_only_when_the_pack_is_there(self):
         p = self.fixture(config=CONFIG + '\n[hello]\ngreeting = "hi"\n')

@@ -1,0 +1,25 @@
+# The bench's own settings (bench/common.py reads them). BENCH_CONFIG names another file.
+
+store = ""             # sealed copies, runs and results; empty: $BENCH_STORE, else ~/.rail-bench
+oracle_runs = 10       # admission: the hidden tests pass this many times in a row with the fix
+grade_rounds = 3       # a change is right only when every round passes: hidden tests and touched packages
+command_minutes = 30   # one setup or test command, wall clock, when the project names no timeout
+run_minutes = 120      # one run, wall clock: the driver ends it, whatever the arm's own limits
+worker_minutes = 60    # one worker run: Rail's [worker] timeout_minutes, and a plain arm's one run
+budget_usd = 10        # the budget flag of one worker run, {budget} in an arm's command, the same for every arm
+tools = "Bash,Read,Edit,Write,Glob,Grep,Skill"   # the fixed tool list, {tools} in an arm's command: no web tools
+piece_mb = 90          # a saved stage is packed in pieces under this, so a git push takes each one
+# The variables a child gets from the bench's environment; everything else is scrubbed (GH_TOKEN, cloud tokens, the
+# session's messaging socket). Which ones a child needs to sign in on a cloud machine is not known yet: the pilot finds it.
+pass_env = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "USER", "LOGNAME", "SHELL",
+            "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_SESSION_INGRESS_TOKEN_FILE", "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"]
+proxy = true           # a cost proxy per role (worker, contract, review, consult): it logs path, status and tokens
+upstream = ""          # where the proxies send requests; empty: $BENCH_UPSTREAM, else $ANTHROPIC_BASE_URL, else the API
+# Lock each child's network to the proxies (Linux as root: unshare -n). auto: lock where the machine can, else run
+# unlocked and mark the results so; required: refuse to run unlocked; off: never lock.
+network_lock = "auto"
+
+# The training cutoff of each model, for the report: a situation closed before the cutoff of an arm's newest model is
+# left out for that arm. Fill in from the models' published cutoffs.
+[cutoffs]

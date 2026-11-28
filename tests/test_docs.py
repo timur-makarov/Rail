@@ -1,16 +1,18 @@
 """rail docs: the framework's docs, read from the engine."""
 
+import ast
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import RailTest
+from railtest import RailTest, engine
 
 
 class Reference(RailTest):
     def test_the_config_reference_names_every_field_and_its_reader(self):
         p = self.fixture()
-        sys.path.insert(0, p.path(".rail", "engine"))
+        engine()
         from rail import config, docs
         names = [name for name, _ in docs._fields(config.DEFAULTS)]
         self.assertEqual(sorted(set(names) - set(docs.READERS)), [])
@@ -35,7 +37,7 @@ class Reference(RailTest):
         p = self.fixture()
         page = p.rail("docs", "cli")["text"]
         for verb in ("init", "add", "accept", "amend", "answer", "next", "advance", "status", "context", "drop",
-                     "doctor", "ci", "consult", "docs", "stats", "sweep", "source", "adopt"):
+                     "doctor", "ci", "consult", "docs", "stats", "sweep", "source", "adopt", "work"):
             self.assertIn(f"## rail {verb}", page)
         self.assertNotIn("## rail hook", page)
 
@@ -53,7 +55,7 @@ class Loop(RailTest):
     def test_the_loop_ticket_and_state_pages_cover_what_an_agent_needs(self):
         p = self.fixture()
         loop = p.rail("docs", "loop")["text"]
-        for text in ("rail next --json", "rail advance --json", "owner", "human_wait", "Exit codes"):
+        for text in ("rail next --json", "rail advance --json", "owner", "person_wait", "Exit codes"):
             self.assertIn(text, loop)
         tickets = p.rail("docs", "tickets")["text"]
         for text in ("rail add", "Check:", "ASSUMED", "rail amend", "rail/ids"):
@@ -84,9 +86,10 @@ class Operations(RailTest):
         self.assertIn(".rail/packs/NAME/", packs)
         self.assertIn("never changes ticket state", packs)
         self.assertIn("## Decision", p.rail("docs", "adr")["text"])
-        self.assertIn("People keep four acts", p.rail("docs", "environments")["text"])
+        self.assertIn("A person is asked only about what a revert doesn't undo", p.rail("docs", "environments")["text"])
         journal = p.rail("docs", "journal")["text"]
-        for name in ("requested", "accepted", "amended", "claimed", "saved", "step", "shipped", "tier_raised", "finding",
+        for name in ("requested", "accepted", "amended", "claimed", "saved", "worked", "step", "shipped", "tier_raised",
+                     "finding", "question", "answered", "restarted",
                      "consulted", "continued", "dropped"):
             self.assertIn(f"| `{name}` |", journal)  # every event the engine writes has its row
         for text in ("NN-review.json", "review/v1", "A review is complete for a patch", "rail/ids"):
@@ -114,3 +117,107 @@ class Operations(RailTest):
         stats = p.rail("docs", "stats")["text"]
         for text in ("rail stats --since", "Hit rate", "merged with no review", "BY MODEL"):
             self.assertIn(text, stats)
+
+
+def prose(text):
+    """A markdown text's lines with what stands in a code span or a fenced block blanked out."""
+    out, fenced = [], False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            out.append("")
+        else:
+            out.append("" if fenced else re.sub(r"`[^`]*`", " ", line))
+    return out
+
+
+def misused(terms, text):
+    """[(line number, word, term)] for each word a term's `not` lists that stands in the text's prose."""
+    found = []
+    for n, line in enumerate(prose(text), 1):
+        for t in terms:
+            for word in t["not"]:
+                if re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", line, re.I):
+                    found.append((n, word, t["term"]))
+    return found
+
+
+class Terms(RailTest):
+    """One word for one thing: Rail's own text keeps to engine/terms.toml."""
+
+    def texts(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        paths = [os.path.join("engine", "reviewer.md"), os.path.join("seed", "AGENTS.md"),
+                 os.path.join("seed", "tickets", "TEMPLATE.md")]
+        for folder in (os.path.join("engine", "docs"), os.path.join("engine", "guides")):
+            paths += [os.path.join(folder, name) for name in sorted(os.listdir(os.path.join(root, folder)))
+                      if name.endswith(".md")]
+        skills = os.path.join("seed", "skills")
+        paths += [os.path.join(skills, name, "SKILL.md") for name in sorted(os.listdir(os.path.join(root, skills)))]
+        for path in paths:
+            with open(os.path.join(root, path)) as f:
+                yield path, f.read()
+        # What the table writes into briefs: its string literals, each as one line of prose.
+        with open(os.path.join(root, "engine", "rail", "table.py")) as f:
+            tree = ast.parse(f.read())
+        yield "engine/rail/table.py", "\n".join(
+            node.value.replace("\n", " ") for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str))
+
+    def test_every_wait_for_a_person_says_what_it_asks(self):
+        engine()
+        from rail import table
+        codes = {row[0] for row in table.ROWS if row[1] == "person"}
+        self.assertEqual(codes, set(table.WAIT_KINDS))
+        self.assertEqual(set(table.WAIT_KINDS.values()), {"approval", "grant", "hold"})
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "engine", "docs", "retries.md")) as f:
+            page = f.read()
+        self.assertEqual([code for code in sorted(codes) if f"`{code}`" not in page], [])
+
+    def test_rails_own_text_uses_no_word_the_terms_rule_out(self):
+        engine()
+        from rail import docs
+        terms = docs.terms()
+        bad = [f"{path}:{n}: '{word}', where Rail says '{term}'"
+               for path, text in self.texts() for n, word, term in misused(terms, text)]
+        self.assertEqual(bad, [])
+
+    def test_no_file_init_copies_holds_an_example_a_secret_scan_fails(self):
+        # rail init commits engine/ and seed/ into the project, and the profiles' verify ends with a secret scan over
+        # the branch's commits. gitleaks' curl-auth-user rule fails `curl -u "$KEY:"`, variable or not, so such an
+        # example made every project's setup pull request fail its own check.
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        bad = []
+        for top in ("engine", "seed"):
+            for folder, _, names in os.walk(os.path.join(root, top)):
+                for name in names:
+                    path = os.path.join(folder, name)
+                    try:
+                        with open(path) as f:
+                            lines = f.read().splitlines()
+                    except UnicodeDecodeError:
+                        continue
+                    bad += [f"{os.path.relpath(path, root)}:{n}" for n, line in enumerate(lines, 1)
+                            if re.search(r"curl\b[^|;&]*\s(-u|--user)\s", line)]
+        self.assertEqual(bad, [])
+
+    def test_the_check_finds_a_planted_word_and_leaves_a_code_span_alone(self):
+        engine()
+        from rail import docs
+        terms = docs.terms()
+        text = "A ticket waits.\nThen a human approves it.\nThe value `human` is gone.\n```\nhuman\n```\nNon-humans too.\n"
+        self.assertEqual(misused(terms, text), [(2, "human", "person")])
+        self.assertEqual(misused(terms, "Its acceptance criteria are the Definition of Done."),
+                         [(1, "acceptance criteria", "Done Contract"), (1, "definition of done", "Done Contract")])
+
+    def test_every_term_names_a_page_that_exists_and_rail_docs_prints_the_list(self):
+        p = self.fixture()
+        engine()
+        from rail import docs
+        terms = docs.terms()
+        self.assertEqual([t["term"] for t in terms if t["page"] not in docs.topics()], [])
+        self.assertEqual(len({t["term"] for t in terms}), len(terms))
+        page = p.rail("docs", "terms")["text"]
+        self.assertIn("| person | Whoever answers for the repository", page)
+        self.assertIn("| `rail docs kinds` | human, humans, operator, maintainer |", page)
+        self.assertIn("- terms: Terms", p.rail("docs", raw=True).stdout)

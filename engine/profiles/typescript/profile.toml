@@ -1,0 +1,74 @@
+# The TypeScript profile, which JavaScript gets too. The engine reads it each time it derives the projects of a tree: a
+# folder that tracks a manifest below is a project, with these commands, rules and paths (rail docs languages).
+# Nothing of it is written into a project's files.
+
+workspace = "pnpm-workspace.yaml"                          # its `packages` list names the members
+manifests = ["package.json"]                               # file names, matched in any folder
+type_check_file = "tsconfig.json"                          # type checking is on only where one is tracked
+domains = ["registry.npmjs.org", "registry.yarnpkg.com"]   # npm's registry (npm, pnpm, Bun) and Yarn's default
+generated = []
+migration_paths = ["**/drizzle/**"]                        # Drizzle Kit's migrations
+tests = ["**/*.test.*", "**/*.spec.*", "**/__tests__/**", "**/e2e/**", "**/vitest.config.*",
+         "**/playwright.config.*"]
+
+# A project's commands: `setup`, and the parts of `verify`, run in the project's folder. The manager is the first
+# whose lockfile is tracked beside the manifest, or at the workspace's root; with none, the first one. Each
+# part names the tool it needs on the machine. `types` runs only where a tsconfig.json is tracked; `audit` only on
+# a change that touches the lockfile. Installs run no dependency's lifecycle scripts. oxlint reports its default
+# rules as warnings and exits 0 on them, so the lint part runs it with --deny-warnings. `member_setup` and a
+# part's `member` are what a member of a pnpm workspace runs, where {name} is the member's package name; not
+# checked on a machine with pnpm. The package at a workspace's root, where it is a project, runs the lines with
+# no filter in the root (`root_plain`): a filter that names it matches nothing, and pnpm then exits 0. A
+# [[projects]] entry of the config puts the repository's own formatter check and scripts in their place (rail
+# docs languages).
+[[managers]]
+name = "pnpm"
+lockfile = "pnpm-lock.yaml"
+setup = "pnpm install --frozen-lockfile --ignore-scripts"
+member_setup = "pnpm install --frozen-lockfile --ignore-scripts --filter {name}..."
+root_plain = true                                          # --filter matches no package at a workspace's root and exits 0
+verify = [
+  { part = "lint", tool = "oxlint", run = "pnpm exec oxlint --deny-warnings", member = "pnpm --filter {name} exec oxlint --deny-warnings" },
+  { part = "types", tool = "tsc", run = "pnpm exec tsc --noEmit", member = "pnpm --filter {name} exec tsc --noEmit" },
+  { part = "tests", tool = "pnpm", run = "pnpm test", member = "pnpm --filter {name} test" },
+  { part = "audit", tool = "pnpm", run = "pnpm audit" },
+]
+
+[[managers]]
+name = "npm"
+lockfile = "package-lock.json"
+setup = "npm ci --ignore-scripts"
+verify = [
+  { part = "lint", tool = "oxlint", run = "npx --no-install oxlint --deny-warnings" },
+  { part = "types", tool = "tsc", run = "npx --no-install tsc --noEmit" },
+  { part = "tests", tool = "npm", run = "npm test" },
+  { part = "audit", tool = "npm", run = "npm audit" },
+]
+
+[[managers]]
+name = "yarn"
+lockfile = "yarn.lock"
+setup = "yarn install --immutable"
+verify = [
+  { part = "lint", tool = "oxlint", run = "yarn oxlint --deny-warnings" },
+  { part = "types", tool = "tsc", run = "yarn tsc --noEmit" },
+  { part = "tests", tool = "yarn", run = "yarn test" },
+  { part = "audit", tool = "yarn", run = "yarn npm audit" },
+]
+
+[[managers]]
+name = "bun"
+lockfile = "bun.lock"
+setup = "bun install --frozen-lockfile --ignore-scripts"
+verify = [
+  { part = "lint", tool = "oxlint", run = "bunx oxlint --deny-warnings" },
+  { part = "types", tool = "tsc", run = "bunx tsc --noEmit" },
+  { part = "tests", tool = "bun", run = "bun run test" },
+]
+
+[[rules]]
+id = "no-new-typescript-suppressions"
+files = "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"
+forbid = ["@ts-expect-error", "@ts-nocheck", "oxlint-disable", "biome-ignore", ".only("]
+fix = "Fix the cause instead of silencing the check."
+why = "the TypeScript profile: a type error or lint silenced, or a focused test (.only) that skips the rest"

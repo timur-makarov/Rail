@@ -38,6 +38,21 @@ def event(ticket_id, name, **fields):
     return record
 
 
+AGAIN = re.compile(r"--(\d+)$")   # a ticket branch started again from the base: NN-title--2, then --3
+
+
+def times_started(name):
+    """1 for a ticket's first branch, 2 for the branch that replaced it, and so on."""
+    m = AGAIN.search(name)
+    return int(m.group(1)) if m else 1
+
+
+def started_again(name):
+    """The name of the branch that replaces `name`. A title never gives two hyphens in a row, so the ending is the
+    engine's alone."""
+    return f"{AGAIN.sub('', name)}--{times_started(name) + 1}"
+
+
 def parse_events(text):
     events = []
     for line in (text or "").splitlines():
@@ -69,6 +84,7 @@ class TicketInfo:
         self.on_base = False       # the ticket file is on the base branch
         self.dropped_mark = False  # the counter branch says the ticket was dropped: it outlives the ticket's branch
         self.dropped_request = None  # the `requested` event the drop mark keeps, so stats still sees where it came from
+        self.dropped_record = None   # who dropped it and why, and the step the engine stopped at, from the drop mark
         self.remote_events = []    # the remote branch's journal, when it differs from the local branch's
 
     @property
@@ -95,6 +111,16 @@ class Project:
         self.session = os.environ.get("CLAUDE_CODE_SESSION_ID") or None
         self.ids_dir = os.path.join(common, "rail", "ids")
         self.orphans = []
+        self._tools_missing = None
+        self.cwd = cwd
+        self._layouts = {}
+        # What the config itself holds, before the profiles of the projects add to it (use_trees).
+        self._own = {"rules": list(self.config["rules"]), "tests": list(self.config["tests"]["paths"]),
+                     "migration_paths": list(self.config["migration_paths"]),
+                     "generated": list(self.config["size"]["exclude"])}
+        from . import layout
+        layout.check(self.layout())
+        self.use_trees()
 
     # --- refs ---------------------------------------------------------------
 
@@ -118,6 +144,38 @@ class Project:
     def rel(self, path):
         return os.path.relpath(path, self.root) if path else None
 
+    # --- the projects inside the repository ---------------------------------------
+
+    def layout(self, ref=None):
+        """The projects of a commit's tree, derived now (rail docs languages); with no ref, of the files the root
+        checkout tracks, which is the tree the config was read from."""
+        from . import layout
+        key = gitx.rev(ref, self.root) if ref else None
+        if key not in self._layouts:
+            tree = layout.at(self.root, key) if key else layout.checkout(self.root)
+            self._layouts[key] = layout.Layout(tree, self.config)
+        return self._layouts[key]
+
+    def use_trees(self, *refs):
+        """What a language profile brings besides its commands (rules, test paths, migration paths, generated files)
+        applies to the paths of each project of that profile, and nothing of it is written into the config: it is
+        added here to the lists the config holds. The projects are those of the base branch, of the checkout the
+        command runs in, and of these refs: a ship names its branch, so a manifest the change adds counts in its
+        own ship."""
+        from . import layout
+        here = gitx.rev("HEAD", self.cwd) if self.cwd else None
+        layouts = [self.layout(ref) for ref in dict.fromkeys([self.base_ref, here, *refs]) if ref and gitx.rev(ref, self.root)]
+        found = layout.extras([*layouts, self.layout()])
+
+        def joined(own, more):
+            return own + [item for item in more if item not in own]
+        self.config["rules"] = self._own["rules"] + found["rules"]
+        self.config["tests"]["paths"] = joined(self._own["tests"], found["tests"])
+        self.config["migration_paths"] = joined(self._own["migration_paths"], found["migration_paths"])
+        self.config["size"]["exclude"] = joined(self._own["generated"], found["generated"])
+        self.origins = {glob: origin for glob, origin in found["origins"].items()
+                        if glob not in self._own["migration_paths"]}
+
     # --- discovery -------------------------------------------------------------
 
     def tickets(self):
@@ -130,11 +188,18 @@ class Project:
         prefixes = ["refs/heads"] + ([f"refs/remotes/{self.remote}"] if self.remote else [])
         heads = gitx.out(["for-each-ref", "--format=%(objectname) %(refname)", *prefixes], self.root).splitlines()
         tips = {ref: sha for sha, ref in (line.split(" ", 1) for line in heads)}
+        names = {}
         for ref in sorted(tips):
             if m := re.match(r"refs/heads/((\d+)-.+)$", ref):
-                info(m.group(2)).branch = info(m.group(2)).branch or m.group(1)
+                names.setdefault(m.group(2), ([], []))[0].append(m.group(1))
             elif self.remote and (m := re.match(rf"refs/remotes/{self.remote}/((\d+)-.+)$", ref)):
-                info(m.group(2)).remote_branch = info(m.group(2)).remote_branch or m.group(1)
+                names.setdefault(m.group(2), ([], []))[1].append(m.group(1))
+        for nn, (local, remote) in names.items():
+            # A branch the engine started again from the base replaces the one before it, which may still be on the
+            # remote where this machine could not delete it.
+            last = max(times_started(name) for name in local + remote)
+            info(nn).branch = next((name for name in local if times_started(name) == last), None)
+            info(nn).remote_branch = next((name for name in remote if times_started(name) == last), None)
         for nn, label in self.counter()[2].items():
             info(nn).id_taken = True
             info(nn).label = label
@@ -150,6 +215,8 @@ class Project:
                 except ValueError:
                     kept = None
                 found[nn].dropped_request = kept if isinstance(kept, dict) and kept.get("event") == "requested" else None
+                record = kept.get("dropped") if isinstance(kept, dict) else None
+                found[nn].dropped_record = record if isinstance(record, dict) else None
 
         base = self.base_ref
         if gitx.rev(base, self.root):
@@ -227,6 +294,13 @@ class Project:
             return ""
         result = gitx.git(["patch-id", "--stable"], self.root, input=diff).stdout.split()
         return result[0] if result else ""
+
+    def tools_missing(self):
+        """{tool: [names]} for the declared tools whose names are not set on this machine; read once per command."""
+        if self._tools_missing is None:
+            from . import tools
+            self._tools_missing = tools.missing(self)
+        return self._tools_missing
 
     # --- writing ---------------------------------------------------------------
 
@@ -324,6 +398,11 @@ class Project:
         path = events_path(t.id)
         ref = f"refs/heads/{t.branch}"
         old = gitx.rev(ref, self.root)
+        if events and self.remote:
+            from . import forge
+            calls = forge.take_calls(self.common)
+            if calls:
+                events[-1]["gh_calls"] = calls + events[-1].get("gh_calls", 0)
         existing = gitx.read_blobs([f"{old}:{path}"], self.root)[f"{old}:{path}"] or ""
         text = existing + "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events)
         writes = {path: text, **(files or {})}

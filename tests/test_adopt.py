@@ -187,15 +187,15 @@ class Adopted(RailTest):
         self.assertIn("204", p.git("show", "main:api/handlers.py"))
 
     def test_a_person_adoption_waits_for_the_contract_approval_with_the_work_attached(self):
-        p = self.fixture(config='person_paths = ["api/**"]\n' + CONFIG)
+        p = self.fixture(config='approve_contract = ["controls"]\nperson_paths = ["api/**"]\n' + CONFIG)
         prototype(p, {"src/calc.py": FIXED, "api/handlers.py": "def handle():\n    return 201\n"})
         draft = fill(p.rail("adopt", "proto")["draft"], checks=(CHECK_ADD, "grep -q 201 api/handlers.py"))
         adopted = p.rail("adopt", "proto", draft)
         self.assertEqual((adopted["state"], adopted["owner"], adopted["reason"]["code"], adopted["tier"]),
-                         ("new", "human", "APPROVE_CONTRACT", "PERSON"))
+                         ("new", "person", "APPROVE_CONTRACT", "PERSON"))
         self.assertTrue(adopted["action"]["brief"].startswith("Ticket 1 holds the work of branch proto"))
         self.assertIn("rail accept 1", adopted["action"]["brief"])
-        self.assertEqual(p.rail("next")["reason"]["code"], "WAITING_HUMAN")
+        self.assertEqual(p.rail("next")["reason"]["code"], "WAITING_PERSON")
         self.assertEqual(p.rail("accept", "1")["reason"]["code"], "IMPLEMENT")
         shipped = p.rail("advance", "1")
         self.assertEqual((shipped["state"], shipped["reason"]["code"]), ("merge-ready", "MERGE_BY_PERSON"))

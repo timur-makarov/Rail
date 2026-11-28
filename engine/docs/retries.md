@@ -10,12 +10,85 @@ the same failure look new.
 
 `[retry] budget` (2 by default) counts the failures in a row at one step with the same signature. When a
 step fails the same way twice, the consult pack advises once, and you get one more attempt. If that fails
-too, whatever its output, the ticket waits for a person. When there is no pack, it waits for a person at the budget. A failure whose signature differs from the last failure at that step is progress: the count of
+too, whatever its output, the ticket is stuck. When there is no pack, it is stuck at the budget. A failure whose signature differs from the last failure at that step is progress: the count of
 same failures starts again at 1.
 
 `[retry] cap` (5 by default) bounds the rest: after that many failed attempts at one step, whatever their
-signatures, the ticket waits for a person. This is what stops an agent that keeps producing new errors.
+signatures, the ticket is stuck. This is what stops an agent that keeps producing new errors.
 An agent could also make a failure look new by changing the text it prints; the cap bounds that too.
+
+**A stuck ticket gets one diagnosis.** Before anything else happens to it, a run that did not write the change
+says why the attempts fail: a stuck ticket more often has a wrong or too large contract than a worker that
+needs a hint. `rail next` answers `DIAGNOSE` for the ticket, on either tier, and `rail next --ticket NN` starts
+the run. It is a question of the triage step (`rail docs triage`), type `stuck`, on the contract writer's
+model (`[worker] contract`), with `[triage] command`. The brief shows the ticket, each failed attempt in the
+journal with its step, signature and detail, the last attempt's output where this machine still has it, the
+reviewer's findings, consult's advice, and the change. Consult advises the worker about the code, before the
+cap; the diagnosis asks whether the contract is at fault. `rail advance` ships nothing until it is made.
+
+| Answer | Its evidence, and the engine's check | What happens then |
+|---|---|---|
+| `contract`: a `Check:` line or a Done Contract item is wrong, or two contradict each other | The line or lines, word for word: each is in the Done Contract | `STUCK_CONTRACT`, a task for the contract writer: amend the contract (`rail amend NN "why"`). The amend gives a fresh budget and cap |
+| `too-large`: the work is more than one ticket | The parts, one on each line: at least two | `STUCK_SPLIT`, a task for the contract writer: file a ticket for each part with `rail add`, then drop this one with `rail drop NN --reason "why" --replaced-by A,B` |
+| `approach`: the contract is right, and the attempts share a mistake | What they share, and what to do instead | The engine starts the ticket's branch again from the base branch under a new name (`RESTART`, as after a rotated secret: `rail docs triage`), the worker's next brief has what the run named, and the budget and cap start again |
+| `machine`: the failures are the machine's or a tool's | The failure that shows it | The ticket waits for a person (`TOOL_DOWN`, below) |
+| `cannot-tell` | None | As without a diagnosis (below) |
+
+- **Once.** A ticket gets one diagnosis. At the cap again after it, the ticket is dropped or waits as below,
+  and the record and the wait's brief have the diagnosis.
+- **No answer.** A run that timed out, gave invalid output or named evidence that fails the check is started
+  once more. After two such runs the ticket is handled as if the answer were `cannot-tell`, and so it is when
+  neither `[triage] command` nor `[review] command` is set.
+- **The tier stays.** No answer changes it: a PERSON ticket whose contract the diagnosis amended still stops at
+  the person's merge.
+- **A split ticket's issue stays open.** The drop's record names the tickets that replace it. When the ticket
+  came from a GitHub issue, the engine writes that issue into each of them (`external_id`), the issue keeps
+  its `rail` label and gets a comment, and each part's pull request says `Part of #N` while another part is
+  open. The last part's says `Closes #N`.
+
+The wording of the diagnosis and of the two tasks has not been tested with a model run. Assumed, not
+verified: that a fresh run can tell a wrong contract from a wrong approach from the journal and the change.
+
+**With no diagnosis to act on,** an AUTO ticket that is stuck is dropped by the engine with a record
+(`STUCK`): nothing
+merged, so nothing needs undoing, and a wait would only spend a person's attention on doubt. `rail next` writes a
+`dropped` event with `by: "engine"`, the step, its last failure's signature and the diagnosis's answer; writes
+the drop's mark on the
+counter branch; closes the pull request; takes the `rail` label off the issue with a comment that says what was
+tried, why it stopped and what the diagnosis said; and removes the worktree and branches. The closed pull
+request keeps the commits on
+GitHub. To try again, label the issue `rail` again. A PERSON ticket that is stuck waits for a person
+(`RETRY_CAP`): a person is there anyway.
+
+**A flaky check.** A flake is a `verify` or `Check:` command that both failed and passed on the same code (the
+same `patch_id`). When one of them fails at ship, the engine runs that one command once more, at once. When the
+second run passes, the step still fails and counts like any failure: a race the change brought in looks exactly
+like an old flake, so a pass on the second try proves nothing about the change. The engine writes a `flake`
+event, and the failure's brief says to find why the command is not deterministic and to add no retry, sleep or
+skip. A command that fails on a patch where another ship passed it, or the other way round, is a flake too.
+A command the shell couldn't start is not run again, and `rail ci` runs nothing twice. The reviewer's brief
+names each flake on the patch it reviews; the sweep opens a ticket for a command that was flaky in two or more
+merged tickets (`rail docs sweep`); `rail stats` has a FLAKES table.
+
+**Spending has two caps of its own.** They are sums of what the runs reported (`cost_usd` on the `worked`
+events of `rail work` and on the review, security, refuter and sweep steps): the CLI's own estimate, not the
+bill. Consult records no cost, and neither does a session a person drives.
+
+- `[worker] ticket_usd` (40 by default; 0 switches it off) bounds one ticket. When its runs since a person
+  last acted cost more, the ticket waits for a person (`BUDGET`) in whatever state it is, a ticket with no
+  contract yet included, and the brief gives the sum by what ran. This holds on AUTO too: money spent is not
+  undone by a revert. `rail accept NN` or `rail:go` lets it go on and starts the count again, as either gives
+  a fresh retry cap; that answer approves nothing else, so a contract or a merge that waits still waits.
+  `rail drop NN --by person` ends it. A rebase that is open in the worktree is finished first.
+- `[worker] daily_usd` (0 by default: off) bounds every ticket together. While the runs of the last 24 hours
+  cost more, `rail next` rests (`BUDGET_DAY`) and `rail work` starts no worker. No ticket changes state, and
+  the rest lifts by itself as the runs get older: the answer's `wait_secs` and its brief say when. A dropped
+  ticket's journal goes with its branch, so its drop mark keeps its cost, and the day's sum counts all of it
+  when the drop was in the last 24 hours.
+
+**The mark comes first.** When the counter branch can't be pushed (offline, or a push refused other than by
+another clone's push), nothing is removed or closed: the ticket rests as `DROP_PENDING` until a later
+`rail next` writes the mark and finishes the drop. `rail drop` works the same way.
 
 Both count since the step last passed or since a person last continued the ticket. A review run counts when
 it leaves a blocking finding open, and all such runs at a review step count as the same failure, so the
@@ -26,10 +99,50 @@ two such runs in a row wait for a person. A command that
 times out at ship, such as `verify` or a check, counts like any other failure. A failed step event with no
 `signature`, written by an older engine, counts as the same failure as its neighbour.
 
-A command the shell couldn't start (exit 127: not found; 126: found but not executable) is recorded as
-`could_not_run`, not as a failure of the change: nothing was checked. It still counts as an attempt, so a
-missing tool can't loop for ever, and a verify that couldn't run is never taken for a red base. Install the
-tool to go on, and open a ticket so that `[commands] provision` (or `setup`) installs it on every machine.
+## One line of work per ticket
+
+A ticket has one line of work at a time: one worker carries it from its claim to its merge, on one branch. The
+engine starts no second line of work on the same ticket beside the first, and it does not build a ticket several
+times over to keep the best result.
+
+This is not the "attempt" of the retry budget. An attempt is one ship that counts toward `[retry] budget` and
+`cap` (above, and `rail docs journal`, "The retry budget"): the same line of work, tried again after a failed
+step. Every attempt of a ticket belongs to its one line of work.
+
+Why only one. Several lines of work with the best one kept pay only where something can rank them. For most web,
+API and command-line work every line of work that passes the checks looks the same to those checks. What differs
+is design and how well the code reads, which only a reviewer judges, at the price of a review for each line of
+work and with a reviewer's own false alarms.
+
+Three cases where several lines of work might pay, named so that they are recognised. None is built:
+
+- a bug that lines of work fail on in different ways;
+- performance work with a benchmark that ranks the results;
+- a rewrite with a check of the old code against the new that ranks them.
+
+## The machine's failures
+
+Some failures are the machine's and not the change's, and more attempts would not mend them. They spend no
+attempt, the worker ladder doesn't move, and consult is not asked:
+
+- **A command the shell couldn't start** (exit 127: not found; 126: found but not executable) is recorded as
+  `could_not_run`: nothing was checked. A verify that couldn't run is never taken for a red base. The brief
+  says to put the program back if the change removed it, or to install it and open a ticket so that
+  `[commands] provision` (or `setup`) installs it on every machine.
+  A sensor that ends with an exit code it doesn't declare is `could_not_run` too, with a brief of its own: the
+  tool crashed or is set up wrongly, and nothing needs installing (`rail docs sensors`).
+- **A declared tool out of reach.** After a failed `verify`, `Check:` line or sensor, the engine runs the
+  probe of each declared tool whose names are set (`rail docs tools`). When one fails, the step's failure may
+  be the tool's alone: the event keeps `tools_down`, and the brief says to run the ship once more. The
+  base branch is not tried either, since it would fail the same way. A probe runs only then, so a tool that
+  is up costs nothing.
+
+The same such failure at one step twice in a row waits for a person (`TOOL_DOWN`), on an AUTO ticket too: the
+brief names the program or the tool, and `rail accept NN` or `rail:go` continues the ticket and starts the
+count again. "The same" is the same output for a command that couldn't start and the same tools for a probe;
+`[retry] cap` such failures in a row at one step wait too, whatever they were. A failure that counts, or a
+pass of the step, ends the row. The reviewer's command that can't start is the reviewer's fault and follows
+the review rules above.
 
 ## Consult
 
@@ -42,8 +155,14 @@ it. The advice given at the budget is in the answer of
 
 ## Waits
 
-A ticket waits for a person (`owner: human`) for an approval, a person's merge, the retry budget or cap, a finding
-the refuter upheld, a review that timed out or gave invalid output twice in a row, or an amended Done Contract. The brief says what is
+A ticket waits for a person (`owner: person`) for an approval, a person's merge, a review that timed out or gave
+invalid output twice in a row, or a failure of the machine's twice in a row; a ticket whose kind the project
+names in `approve_contract` also for its contract and for an amended Done Contract (`rail docs kinds`); and a
+PERSON ticket also for the retry budget or cap. On an AUTO ticket the cap is no wait: the ticket is dropped
+(above). Two more are no wait on either tier: a finding the refuter upheld stands, and disputing it again comes
+back as a failed review that counts toward the cap; and when a ticket it comes after was dropped, the agent
+decides, with the contract writer's model (`[worker] contract`), whether to remove that ticket from `after`
+(`rail amend NN "why" --file FILE`) or to drop this one (`rail drop NN --reason "why"`). Both are recorded. The brief says what is
 needed. One act continues any wait:
 
 ```text
@@ -52,3 +171,14 @@ rail accept NN "what to do differently"
 
 The note goes into your next brief, with a fresh retry budget and a fresh cap. If it holds beyond this ticket, open a
 ticket that writes it into the project's part of `AGENTS.md`, or into a rule.
+
+Each entry of `rail next`'s `waits` list has `kind`, what the wait asks of the person:
+
+- `approval`: something a revert doesn't undo, money included (`APPROVE_CONTRACT`, `APPROVE_AMEND`,
+  `MERGE_BY_PERSON`, `BUDGET`, and on a PERSON ticket `RETRY_CAP`).
+- `grant`: the machine lacks something a person gives once, a setting needs repair, or something outside the
+  repository is a person's to do (`TOOL_MISSING`, `TOOL_DOWN`, `STUCK_REVIEW`, `MERGE_FAILED`, `SECRET_FOUND`).
+  `STUCK_REVIEW` is also the wait of a triage run that gave no answer twice in a row, and `SECRET_FOUND` is
+  the wait of a triage answer: a real secret is in the branch's commits, and a person rotates it (`rail docs
+  triage`).
+- `hold`: the person's own brake (`HOLD`, `STOPPED`).

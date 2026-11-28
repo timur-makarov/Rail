@@ -12,8 +12,9 @@ You only ask. You don't change code, and you don't start the work.
 Clone the repository, or use the checkout you are in. Read:
 
 - `AGENTS.md`, and `ARCHITECTURE.md` with its `## Areas` table;
-- `.rail/tickets/TEMPLATE.md`, the shape of a ticket (`rail docs tickets` explains each part);
-- `.rail/config.toml`: `person_paths`, `migration_paths` and `[size] cap`, which decide the tier;
+- `.rail/tickets/TEMPLATE.md`, the shape of a ticket;
+- `.rail/config.toml`: `[kinds]`, `person_paths` and `migration_paths`, which decide the tier, and `[size] cap`,
+  over which the first ship offers a split;
 - the code the request touches, and its tests.
 
 Never ask what the code answers: where a thing lives, what it does today, which test covers it.
@@ -28,6 +29,11 @@ Read the request's small words before you draft. "Just", "only" and "quick" set 
 "Still" and "again" mean an earlier fix did not hold, so the check must name the cause and not only the
 symptom. When the request names a mechanism ("add a retry"), work out the problem it is meant to solve and
 write the check for that problem; if the mechanism does not fit it, say so in your first question.
+
+<!-- Not tested with a model run: the paragraph below. -->
+When the project has a surface of kind `agent` (a `[[surfaces]]` entry in `.rail/config.toml`: what the
+product has that is built for agents) and the request adds behaviour users get, the draft says whether that
+behaviour is exposed there. If it is, a `Check:` line drives it there.
 
 ## 3. Ask only what changes the contract
 
@@ -102,4 +108,4 @@ person has confirmed the draft.
 - A ticket with no questions keeps the lines and an empty table: you read the code and asked nothing.
 
 Ticket lint checks the section. Rail copies it into the ticket's journal as the `requested` event, and
-`rail stats` counts it (`rail docs stats`).
+`rail stats` counts it.

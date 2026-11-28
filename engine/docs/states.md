@@ -8,19 +8,19 @@ new -> accepted -> implementing -> reviewing -> in-ci -> merge-ready -> merged
 
 | State | Means |
 |---|---|
-| `new` | The ticket has no `accepted` event. The engine accepts an AUTO ticket once its lint passes; a person approves a PERSON ticket: `rail accept NN` |
+| `new` | The ticket has no `accepted` event. The engine accepts a ticket once its lint passes; a person approves the contract of a PERSON ticket whose kind `approve_contract` names: `rail accept NN` (`rail docs kinds`) |
 | `accepted` | Accepted, not claimed yet |
 | `implementing` | Claimed, and the current patch hasn't passed the ship steps, or the worktree has uncommitted changes |
-| `reviewing` | Shipped, the change needs a review, and no complete review is bound to this patch |
+| `reviewing` | Shipped, and a question the triage step raised about this patch has no answer (`rail docs triage`), or the change needs a review and no complete review is bound to this patch |
 | `in-ci` | Shipped and reviewed, with a remote: waiting for the required checks on the pull request |
-| `merge-ready` | Ready to merge. An AUTO ticket merges with `rail advance NN`; a PERSON ticket waits for a person |
+| `merge-ready` | Ready to merge. An AUTO ticket merges with `rail advance NN`; a PERSON ticket waits for a person's merge, the one act it takes |
 | `merged` | A squash commit with `Ticket: NN` is on the base branch |
-| `dropped` | `rail drop NN` ended it, or its pull request was closed without a merge |
+| `dropped` | `rail drop NN` ended it, the engine dropped an AUTO ticket at the retry cap after its diagnosis (`STUCK`), or its pull request was closed without a merge. Until the drop's mark is on the counter branch, the ticket keeps its worktree, branches and pull request (`DROP_PENDING`) |
 
 With a pull request, a conflict with the base or a red required check returns a shipped ticket to
 `implementing`, with the check's output in the brief.
 
-Any state can wait for a person: `owner` is `human`, and the brief says what is needed. The engine labels
+Any state can wait for a person: `owner` is `person`, and the brief says what is needed. The engine labels
 the ticket's pull request `rail:needs-you`. One act continues any wait: the label `rail:go` on the pull
 request, or `rail accept NN "note"`. The note, and any comments the person wrote on the pull request during
 the wait, go into the agent's next brief. A person can hold any ticket by adding the label `rail:hold`. The engine never

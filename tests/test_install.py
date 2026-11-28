@@ -2,6 +2,7 @@
 
 import json
 import os
+import tomllib
 import subprocess
 import sys
 
@@ -104,10 +105,58 @@ class Init(RailTest):
         self.assertIn('base_branch = "main"', read(p.path(".rail/config.toml")))
 
 
+class Skills(RailTest):
+    SKILLS = ["rail-blast-radius", "rail-debug", "rail-grill", "rail-slice", "rail-tool", "rail-verify"]
+
+    def folder(self, p, *parts):
+        return sorted(os.listdir(p.path(*parts))) if os.path.isdir(p.path(*parts)) else None
+
+    def test_by_default_the_skills_go_to_claudes_folder_only(self):
+        p = self.fixture()
+        self.assertEqual(self.folder(p, ".claude", "skills"), self.SKILLS)
+        self.assertIsNone(self.folder(p, ".agents"))
+
+    def test_init_writes_each_skill_to_every_folder_named_and_the_guides_read_the_first(self):
+        p = self.fixture(init=False)
+        p.git("add", "-A")
+        p.git("commit", "--quiet", "-m", "first")
+        p.rail("init", "--skills", ".agents/skills/", "--skills", ".claude/skills")
+        for parts in ((".agents", "skills"), (".claude", "skills")):
+            self.assertEqual(self.folder(p, *parts), self.SKILLS)
+        with open(p.path(".rail", "config.toml"), "rb") as f:
+            config = tomllib.load(f)
+        self.assertEqual(config["init"]["skill_dirs"], [".agents/skills", ".claude/skills"])
+        self.assertEqual(config["guides"]["stuck"], ".agents/skills/rail-debug/SKILL.md")
+        self.assertEqual(config["guides"]["start"], ".rail/engine/guides/build.md")  # no skill: it stays
+        # The init task's guide is a skill: its text comes from the first folder.
+        task = p.rail("next")
+        self.assertEqual(task["guide"]["path"], ".agents/skills/rail-verify/SKILL.md")
+        self.assertEqual([s["step"] for s in p.rail("doctor", expect=None)["steps"] if s["step"].startswith("guide")
+                          and s.get("result") == "fail"], [])
+
+    def test_a_folder_added_to_the_config_is_filled_by_the_next_init(self):
+        p = self.fixture()
+        with open(p.path(".rail", "config.toml")) as f:
+            text = f.read()
+        p.write(".rail/config.toml", text + '\n[init]\nskill_dirs = [".claude/skills", ".codex/skills"]\n')
+        again = p.rail("init")
+        self.assertEqual(self.folder(p, ".codex", "skills"), self.SKILLS)
+        added = [s["step"] for s in again["steps"] if s["status"] == "ran"]
+        self.assertEqual([s for s in added if "skills" in s],
+                         [f".codex/skills/{name}/SKILL.md" for name in self.SKILLS])
+
+    def test_a_folder_outside_the_repository_is_refused(self):
+        p = self.fixture(init=False)
+        p.git("add", "-A")
+        p.git("commit", "--quiet", "-m", "first")
+        refused = p.rail("init", "--skills", "../elsewhere", expect=None)
+        self.assertIn("a skill folder is a path inside the repository", refused["reason"]["message"])
+
+
 class Launcher(RailTest):
     def test_inside_a_project_rail_runs_the_projects_own_engine(self):
         p = self.fixture()
-        p.write(".rail/bin/rail", "#!/usr/bin/env python3\nprint('{\"schema_version\": 1, \"ok\": true, \"marker\": \"project\"}')\n")
+        p.write(".rail/bin/rail", "#!/usr/bin/env python3\nprint('{\"schema_version\": 2, \"ok\": true, \"marker\": \"project\"}')\n")
         self.assertEqual(json.loads(p.rail("next", raw=True).stdout)["marker"], "project")
 
     def test_outside_a_project_only_init_is_offered(self):
@@ -180,7 +229,7 @@ class Doctor(RailTest):
         p.write("CLAUDE.local.md", "local notes\n")
         failed = p.rail("doctor", expect=3)
         self.assertEqual({s["step"]: s.get("result") for s in failed["steps"]}["CLAUDE.local.md"], "fail")
-        self.assertEqual(failed["owner"], "human")
+        self.assertEqual(failed["owner"], "person")
 
 
 class CI(RailTest):

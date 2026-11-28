@@ -8,10 +8,11 @@ import json
 import os
 import re
 import shlex
+import tempfile
 
-from . import areas, gitx
+from . import areas, flakes, gitx
 from .project import event, review_path, ticket_path
-from .ticket import Ticket
+from .ticket import KINDS, Ticket
 from .util import could_not_run, match_any, now_iso, run_shell, tail
 
 SECURITY = """Security. This list is a checklist, not a ceiling. Report only what someone could exploit in this application:
@@ -55,6 +56,11 @@ BASE_GREEN = ("Every check in the Done Contract already passed on the base branc
               " alone do not show the work was done. Look at whether the change is tested.")
 
 
+def kind_line(k):
+    where = f"{k.get('file')}:{k['line']}" if k.get("line") else k.get("file")
+    return f"{k.get('kind')}: {where}: {k.get('why')}"
+
+
 def load_doc(text, nn):
     try:
         doc = json.loads(text) if text else None
@@ -88,10 +94,14 @@ class Ledger:
         return self.last(fid).get("outcome")
 
     def unanswered(self):
-        """Open findings the author must answer: fix and mark fixed, decline, or park."""
+        """Open blocking findings the author must answer: fix and mark fixed, decline, or park. An advisory finding
+        holds nothing: it stays open until answered, and the sweep gathers it once the ticket merged."""
         waiting = set(self.disputed())
         return [fid for fid in self.findings if self.outcome(fid) == "open" and not self.last(fid).get("disputed")
-                and fid not in waiting]
+                and fid not in waiting and self.findings[fid].get("severity") == "blocking"]
+
+    def open_advisory(self):
+        return [fid for fid, f in self.findings.items() if self.outcome(fid) == "open" and f.get("severity") == "advisory"]
 
     def upheld_before(self, fid):
         return any(e.get("by") == "refuter" and e.get("outcome") == "open" for _, e in self.findings[fid]["history"])
@@ -113,11 +123,6 @@ class Ledger:
                   and not self.refuted(fid)):
                 found.append(fid)
         return found
-
-    def disputed_again(self):
-        """Disputed after a refuter upheld them: the agent can't fix them, so a person decides."""
-        return [fid for fid in self.findings if self.outcome(fid) == "open" and self.last(fid).get("disputed")
-                and self.upheld_before(fid)]
 
     def next_id(self):
         numbers = [int(fid[1:]) for fid in self.findings if fid[1:].isdigit()]
@@ -146,26 +151,43 @@ class Ledger:
         return None
 
     def complete(self, patch_id, tier):
-        return not self.unanswered() and not self.disputed() and not self.disputed_again() \
-            and self.needed_run(patch_id, tier) is None
+        return not self.unanswered() and not self.disputed() and self.needed_run(patch_id, tier) is None
 
     def asked_for_person(self):
-        """What review and security runs said a person should see before the merge, each sentence once."""
-        return list(dict.fromkeys(r["needs_person"] for r in self.doc["runs"] if r.get("needs_person")))
+        """What review and security runs found that a revert doesn't undo, each item once, as "kind: file:line: why"."""
+        found = []
+        for r in self.doc["runs"]:
+            found += [kind_line(k) for k in r.get("kinds") or [] if isinstance(k, dict)]
+        return list(dict.fromkeys(found))
+
+    def fact(self, fid):
+        """One finding as plain values: what the reviewer wrote (id, severity, file, line, claim, check, evidence),
+        the role that reported it, and its last answer once it has one."""
+        f = self.findings[fid]
+        found = {key: f[key] for key in ("id", "severity", "role", "file", "line", "claim", "check", "evidence")
+                 if f.get(key) is not None}
+        if f["history"]:
+            last = self.last(fid)
+            found["answer"] = {key: last[key] for key in ("outcome", "by", "reason") if last.get(key)}
+        return found
 
     def describe(self, fid, with_answer=True, scripts=False):
-        f = self.findings[fid]
-        where = f"{f.get('file')}:{f['line']}" if f.get("line") else f.get("file")
-        text = f"{fid} ({f.get('severity')}, {f.get('role')}) {where}: {f.get('claim')}"
-        if f.get("evidence"):
-            text += f"\n    evidence: $ {f['evidence'].get('command')}\n    {tail(f['evidence'].get('output', ''), 8, 600)}"
-            for path, script in (f["evidence"].get("scripts") or {}).items() if scripts else ():
-                text += f"\n    {path}, the reviewer's scratch file (gone from the worktree):\n" + \
-                        "\n".join("      " + line for line in script.splitlines())
-        if with_answer and f["history"]:
-            last = self.last(fid)
-            text += f"\n    now {last.get('outcome')} (by {last.get('by')})" + (f": {last.get('reason')}" if last.get("reason") else "")
-        return text
+        return describe_finding(dict(self.fact(fid), id=fid), with_answer, scripts)
+
+
+def describe_finding(f, with_answer=True, scripts=False):
+    """A finding's lines in a brief, from its plain values (Ledger.fact)."""
+    where = f"{f.get('file')}:{f['line']}" if f.get("line") else f.get("file")
+    text = f"{f.get('id')} ({f.get('severity')}, {f.get('role')}) {where}: {f.get('claim')}"
+    if f.get("evidence"):
+        text += f"\n    evidence: $ {f['evidence'].get('command')}\n    {tail(f['evidence'].get('output', ''), 8, 600)}"
+        for path, script in (f["evidence"].get("scripts") or {}).items() if scripts else ():
+            text += f"\n    {path}, the reviewer's scratch file (gone from the worktree):\n" + \
+                    "\n".join("      " + line for line in script.splitlines())
+    if with_answer and f.get("answer"):
+        last = f["answer"]
+        text += f"\n    now {last.get('outcome')} (by {last.get('by')})" + (f": {last.get('reason')}" if last.get("reason") else "")
+    return text
 
 
 # --- the brief -----------------------------------------------------------------------------
@@ -184,17 +206,20 @@ def project_conventions(project, ref):
 
 
 def review_guidance(project, ref):
-    """The project's REVIEW.md files at the ticket's ref: the root one, then one in each directory above a changed
-    file, shallowest first. Empty when there is none. Cut at GUIDANCE_LIMIT characters, saying which files were."""
+    """The project's REVIEW.md files: the root one, then one in each directory above a file the ticket changed,
+    shallowest first. They are read from the base branch, not from the ticket's: the change under review doesn't
+    write what its own review is told, and a REVIEW.md it adds or edits counts from the next ticket on. Empty when
+    there is none. Cut at GUIDANCE_LIMIT characters, saying which files were."""
     dirs = {""}
     for path in project.changed_files(ref):
         parts = path.split("/")[:-1]
         dirs.update("/".join(parts[:n]) for n in range(1, len(parts) + 1))
     paths = [f"{d}/REVIEW.md" if d else "REVIEW.md" for d in sorted(dirs, key=lambda d: (d.count("/") + bool(d), d))]
-    blobs = gitx.read_blobs([f"{ref}:{p}" for p in paths], project.root)
+    base = project.base_ref
+    blobs = gitx.read_blobs([f"{base}:{p}" for p in paths], project.root)
     parts, cut, room = [], [], GUIDANCE_LIMIT
     for path in paths:
-        text = (blobs.get(f"{ref}:{path}") or "").strip()
+        text = (blobs.get(f"{base}:{path}") or "").strip()
         if not text:
             continue
         if len(text) > room:
@@ -235,6 +260,42 @@ def first_contract(project, t):
             f"scope_paths: {', '.join(accepted.get('scope_paths') or [])}.", ""]
 
 
+STATUS_SAID = {"M": "edited", "A": "new in this change", "D": "deleted"}
+
+
+def checks_changed(project, t, ref, patch_id):
+    """The lines of the brief's section on what the change does to the things that check it: each changed file
+    under [tests] paths, with whether the base had it; each changed REVIEW.md; what the checks did with the base's
+    version of the tests (the base_tests event); and each answer the triage step got about them. [] when there is
+    nothing of the kind."""
+    from . import triage
+    from .steps import test_changes
+    lines = []
+    for kind, old, new in test_changes(project, ref):
+        what = "review guidance" if os.path.basename(new or old) == "REVIEW.md" else "a test file"
+        lines.append(f"- {new or old}: {what}, " + (f"renamed from {old}, which the base had" if kind == "R" else
+                                                    STATUS_SAID[kind] + (", and the base had it" if kind == "M" else "")))
+    ran = triage.base_tests_of(t.events, patch_id)
+    if ran:
+        results = ", ".join(f"`{c['command']}` {c['result']}" for c in ran.get("commands") or [])
+        lines.append(f"- With the base branch's version of {', '.join(ran.get('files') or [])} in place: {results}.")
+    for q in triage.asked(t.events):
+        if q.get("patch_id") == patch_id and q.get("type") == "old-test" and q["answer"]:
+            a = q["answer"]
+            lines.append(f"- A triage run was asked about that ({q['id']}) and answered `{a.get('answer')}`: {a.get('reason')}"
+                         + (f" It named: {a['evidence']}" if a.get("evidence") else ""))
+    return lines
+
+
+def unchecked(project, ref):
+    """The files of the change that are inside no project, in a folder the engine asks about (rail docs languages):
+    no check read them."""
+    here = project.layout(ref)
+    folders = here.uncovered()
+    return [path for path in project.changed_files(ref) if path in here.tree.names and not here.owners(path)
+            and any(path.startswith(folder + "/") for folder in folders)]
+
+
 def brief(project, f, role, ledger, disputed=None):
     t, ref = f.t, f.t.ref
     ticket_text = gitx.read_blobs([f"{ref}:{ticket_path(t.id)}"], project.root)[f"{ref}:{ticket_path(t.id)}"] or ""
@@ -255,12 +316,47 @@ def brief(project, f, role, ledger, disputed=None):
                     "doesn't hold, return an empty list. `summary` says why. When it has evidence, run the command again.")
         job = f"Decide whether finding {disputed} holds. You are the refuter."
     guidance = review_guidance(project, ref)
+    patch = project.patch_id(ref)
+    flaky = list(dict.fromkeys(flakes.name(x) for x in flakes.of(t.events) if x["patch_id"] == patch))
+    from . import sensors
+    marked = sensors.markers(project, ref)
+    from . import tools
+    reviewer_tools = tools.lines(tools.declared(project, review=True), review=True)
+    checked = checks_changed(project, t, ref, patch)
+    loose = unchecked(project, ref)
+    from . import product
+    driven = product.brief_lines(product.evidence_of(project, ref, t.id, patch))
     parts = [
         f"# Review brief: ticket {t.id}, {f.tier}", "", f"This run's job: {job}", "",
         "## The ticket", ticket_text.strip(), "",
         f"Risk: tier {f.tier}. scope_paths: {', '.join(f.ticket.scope)}.", "",
         *((first_contract(project, t) or []) if role == "review" else []),
         *([BASE_GREEN, ""] if role == "review" and checks_green_on_base(t) else []),
+        *(["## Flaky checks on this change",
+           "Each of these both failed and passed on this same code. It may be an old flake, or a race this change"
+           " brought in:", *[f"- `{name}`" for name in flaky], ""] if flaky and role != "refuter" else []),
+        *(["## Sensor markers this change adds",
+           "Each line below tells a sensor that its violation there is wrong or accepted. Judge the reason: a marker"
+           " with no reason that holds is a finding.", *[f"- {line}" for line in marked], ""]
+          if marked and role in ("review", "security") else []),
+        # Not tested with a model run: the wording of this section.
+        *(["## Changes to what checks this change",
+           "The change edits these itself. A test that was weakened until it passed, or guidance that was loosened, is"
+           " a finding unless the contract asks for the new behaviour.", *checked, ""]
+          if checked and role in ("review", "security") else []),
+        # Not tested with a model run: the wording of this section.
+        *(["## Files of this change that no check read",
+           "These files are inside no project of the repository, so no command checked them at ship. What they do is"
+           " yours to read. When a file is of a kind a revert does not undo, such as infrastructure code or a schema,"
+           " list it in `kinds`.", *[f"- {path}" for path in loose], ""]
+          if loose and role in ("review", "security") else []),
+        # Not tested with a model run: the wording of this section.
+        *(["## What the product did",
+           "The product was started with this change in it, and the driving check of each surface the change reaches"
+           " ran against it and passed. Below is what each check wrote down. Hold what the change says it does against"
+           " it: a behaviour the ticket asks for that no line below shows was not driven.", *driven, ""]
+          if driven and role in ("review", "security") else []),
+        *(["## Tools", *reviewer_tools, ""] if reviewer_tools else []),
         "## The diff", "```diff", diff, "```", "",
         "## Areas this change touches", "| Area | Paths | Holds |", "|---|---|---|", rows, "",
         "Directories:", found["digest"], "",
@@ -280,6 +376,28 @@ def brief(project, f, role, ledger, disputed=None):
 
 
 # --- running and reading a review -------------------------------------------------------------
+
+REVIEWER_FILES = {"RAIL_REVIEW_PROMPT": "reviewer.md", "RAIL_REVIEW_SCHEMA": "review-v1.json"}
+
+
+def reviewer_files(project, folder):
+    """{RAIL_REVIEW_PROMPT, RAIL_REVIEW_SCHEMA}: paths of the reviewer's system prompt and of the schema its answer
+    must match, as the base branch has them, written into `folder` for one run. The review command runs in the
+    ticket's worktree, where both files are the ticket's own copies: read from there, a change could rewrite the
+    prompt of its own review. A base branch without them (a project that keeps no engine there) gets the running
+    engine's."""
+    held = gitx.read_blobs([f"{project.base_ref}:.rail/engine/{name}" for name in REVIEWER_FILES.values()], project.root)
+    env = {}
+    for var, name in REVIEWER_FILES.items():
+        text = held.get(f"{project.base_ref}:.rail/engine/{name}")
+        if text is None:
+            with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), name)) as f:
+                text = f.read()
+        env[var] = os.path.join(folder, name)
+        with open(env[var], "w") as f:
+            f.write(text)
+    return env
+
 
 
 def _structured(stdout):
@@ -303,7 +421,19 @@ def validate(project, head, nn, data, ledger, role, disputed):
     inside it, and `repeats` names an earlier finding of this ticket. Returns a list of errors."""
     if not isinstance(data, dict) or not isinstance(data.get("summary"), str) or not isinstance(data.get("findings"), list):
         return ["the output is not a review/v1 object with summary and findings"]
-    errors = [] if isinstance(data.get("needs_person", ""), str) else ["needs_person is not a string"]
+    errors = []
+    kinds = data.get("kinds", [])
+    if not isinstance(kinds, list):
+        errors.append("kinds is not a list")
+        kinds = []
+    for n, k in enumerate(kinds):
+        where = f"kinds[{n}]"
+        if not isinstance(k, dict) or set(k) - {"kind", "file", "line", "why"} or not {"kind", "file", "why"} <= set(k):
+            errors.append(f"{where} doesn't match the schema")
+        elif k["kind"] not in KINDS:
+            errors.append(f"{where}: '{k['kind']}' is not a kind's id ({', '.join(KINDS)})")
+        elif "line" in k and not isinstance(k["line"], int):
+            errors.append(f"{where}: line is not a number")
     allowed = {"severity", "file", "line", "claim", "check", "evidence", "repeats"}
     for n, f in enumerate(data["findings"]):
         where = f"finding {n + 1}"
@@ -341,8 +471,10 @@ def run(project, f, role, receipt, disputed=None, prompt=None):
     ledger = Ledger(t.events, doc)
     prompt = prompt or brief(project, f, role, ledger, disputed)
     timeout = project.config["commands"]["timeout_secs"]
-    code, output, ms = run_shell(project.config["review"]["command"], wt,
-                                 {"RAIL_TICKET": t.id, **model_env(project.config["review"]["model"])}, timeout, stdin=prompt)
+    with tempfile.TemporaryDirectory(prefix="rail-review-") as held:
+        code, output, ms = run_shell(project.config["review"]["command"], wt,
+                                     {"RAIL_TICKET": t.id, **model_env(project.config["review"]["model"]),
+                                      **reviewer_files(project, held)}, timeout, stdin=prompt)
     # Tracked files back as they were; the reviewer's untracked scratch files stay for the evidence re-runs.
     gitx.git(["reset", "--quiet", "--hard", head], wt)
     try:
@@ -447,13 +579,15 @@ def _read(project, f, role, receipt, disputed, head, doc, ledger, code, output, 
         entry["findings"].append(finding)
     if role == "sweep":
         events = []  # the sweep's findings become tickets, not ledger entries
-    asked = data.get("needs_person", "").strip() if role in ("review", "security") else ""
-    if asked:
-        # A change a person should see although nothing blocks it: an AUTO ticket becomes PERSON, never back.
-        entry["needs_person"] = asked
+    found = (data.get("kinds") or []) if role in ("review", "security") else []
+    if found:
+        # Something a revert doesn't undo: recorded on every ticket, and an AUTO ticket becomes PERSON, never back.
+        entry["kinds"] = found
         if f.tier == "AUTO":
             events.append(event(t.id, "tier_raised", **{"from": "AUTO", "to": "PERSON", "reason": "reviewer",
-                                                         "detail": asked}))
+                                                         "kind": found[0]["kind"],
+                                                         "kinds": list(dict.fromkeys(k["kind"] for k in found)),
+                                                         "detail": kind_line(found[0])}))
     if role == "refuter" and not data["findings"]:
         events.append(event(t.id, "finding", id=disputed, outcome="declined", by="refuter", reason=data["summary"]))
     parked_by_refuter = [x["repeats"] for x in entry["findings"]

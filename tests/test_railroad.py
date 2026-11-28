@@ -8,7 +8,7 @@ import threading
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import ARCHITECTURE, CHECK_ADD, CONFIG, FAKE, RailTest, ticket
+from railtest import APPROVE, ARCHITECTURE, CHECK_ADD, CONFIG, FAKE, RailTest, ticket
 
 CHECK_ADD_PIPED = CHECK_ADD + " 2>&1 | tail -5"
 
@@ -208,8 +208,7 @@ class Ship(RailTest):
         p = self.fixture(files={"db/migrations/001.sql": "create table t (id int);\n",
                                 "ARCHITECTURE.md": ARCHITECTURE + "| db | db/** | schema and migrations |\n"})
         added = p.add(ticket(title="Add a column", scope=("db/**", "src/**")))
-        self.assertEqual((added["tier"], added["state"], added["owner"]), ("PERSON", "new", "human"))
-        p.rail("accept", "1")
+        self.assertEqual((added["tier"], added["state"], added["owner"]), ("PERSON", "new", "agent"))
         p.rail("next")
         p.fix_calc("1")
         p.write("db/migrations/002.sql", "alter table t add column c int;\n", base=p.worktree("1"))
@@ -219,7 +218,7 @@ class Ship(RailTest):
         text = read(path).replace('tier = "PERSON"', 'tier = "PERSON"\nreversibility = "expand-contract"\nrollback = "drop column c"')
         p.write(".rail/tickets/1.md", text, base=p.worktree("1"))
         ready = p.rail("advance", "1")
-        self.assertEqual((ready["state"], ready["owner"], ready["reason"]["code"]), ("merge-ready", "human", "MERGE_BY_PERSON"))
+        self.assertEqual((ready["state"], ready["owner"], ready["reason"]["code"]), ("merge-ready", "person", "MERGE_BY_PERSON"))
         self.assertEqual([s["step"] for s in ready["steps"]][-2:], ["review", "security"])
 
     def test_base_moved_rebases_and_ships_again_before_merge(self):
@@ -297,19 +296,34 @@ class Commands(RailTest):
         self.assertIn("Ship of ticket 1 could not run 'verify'.", first["action"]["brief"])
         self.assertIn("no-such-test-runner: command not found", first["action"]["brief"])  # the shell's own line
         self.assertIn("Nothing was checked", first["action"]["brief"])
-        self.assertIn("could not run 'verify': could not run (exit 127: command not found). Nothing was checked",
-                      p.rail("next", "--ticket", "1")["action"]["brief"])
+        again = p.rail("next", "--ticket", "1")["action"]["brief"]  # with the output the advance answer showed
+        self.assertIn("could not run 'verify': could not run (exit 127: command not found).\n$ no-such-test-runner", again)
+        self.assertIn("no-such-test-runner: command not found\n\nNothing was checked", again)
         recorded = [e for e in journal(p) if e["event"] == "step" and e["step"] == "verify"][-1]
         self.assertEqual((recorded["status"], recorded["result"]), ("could_not_run", "fail"))
-        self.assertNotIn("counted", recorded)  # an attempt like any other: the budget bounds it
+        self.assertIs(recorded["counted"], False)  # the machine's lack is no attempt at the work
+        self.assertIn("Nothing was checked, so no attempt was counted. The same thing a second time in a row waits for"
+                      " a person.", first["action"]["brief"])
+        self.assertIn("no attempt was counted", again)
         self.assertEqual(p.rail("next", "--ticket", "1")["reason"]["code"], "STEP_FAILED")  # not RED_BASE
         self.assertEqual(len(p.rail("status")["tickets"]), 1)  # and no fix ticket for the base
-        second = p.rail("advance", "1", expect=3)  # the budget: consult advises, one more attempt
-        self.assertIn("consult says", second["action"]["brief"])
-        capped = p.rail("advance", "1", expect=3)
-        self.assertEqual((capped["owner"], capped["reason"]["code"]), ("human", "RETRY_CAP"))
-        self.assertIn("Its last attempt at 'verify' (could not run (exit 127: command not found)) could not run",
-                      capped["action"]["brief"])
+        # A second time in a row: more attempts would not mend the machine, so a person is asked, on AUTO too. The
+        # ticket is not dropped as stuck, and consult is not asked about a program that isn't there.
+        second = p.rail("advance", "1", expect=3)
+        self.assertEqual((second["owner"], second["reason"]["code"]), ("person", "TOOL_DOWN"))
+        self.assertEqual(second["action"]["brief"],
+                         "Ticket 1 can't get past 'verify' on this machine: its command could not run 2 times in a row"
+                         " (could not run (exit 127: command not found)), so nothing was checked and no attempt was"
+                         " counted. A person installs what it needs on this machine, and adds it to [commands] provision"
+                         " so that every cloud machine and CI runner gets it, then continues the ticket: rail accept 1.")
+        waits = p.rail("next")["waits"]
+        self.assertEqual([(w["ticket"], w["needs"], w["kind"]) for w in waits], [("1", "TOOL_DOWN", "grant")])
+        self.assertEqual([e["event"] for e in journal(p) if e["event"] in ("consulted", "dropped")], [])
+        # The person's answer starts the count again: one more could-not-run is the first in a row.
+        p.rail("accept", "1")
+        self.assertEqual(p.rail("next", "--ticket", "1")["reason"]["code"], "STEP_FAILED")
+        self.assertEqual(p.rail("advance", "1", expect=3)["reason"]["code"], "STEP_FAILED")
+        self.assertEqual(p.rail("advance", "1", expect=3)["reason"]["code"], "TOOL_DOWN")
 
     def test_a_check_that_cannot_start_says_so_and_a_failing_one_does_not(self):
         p = self.fixture()
@@ -349,7 +363,7 @@ class Claim(RailTest):
         p.write(".env", "TOKEN=local\n", base=p.worktree("1"))
         rerun = p.rail("next", "--ticket", "1")
         self.assertEqual((rerun["reason"]["code"], rerun["steps"][0]["result"]), ("IMPLEMENT", "pass"))
-        p.rail("drop", "1")
+        p.rail("drop", "1", "--reason", "not needed")
         p.add(ticket(title="Fix add again"))
         self.assertEqual(p.rail("next", expect=3)["reason"]["code"], "SETUP_FAILED")  # ticket 2: RAIL_TICKET is 2
         self.assertEqual(read(os.path.join(p.worktree("2"), ".env")), "TOKEN=local\n")
@@ -383,13 +397,13 @@ class TicketLint(RailTest):
 
 
 class Approval(RailTest):
-    def test_a_person_tickets_contract_waits_for_a_person_then_runs(self):
-        p = self.fixture()
+    def test_where_the_project_asks_a_person_tickets_contract_waits_for_a_person_then_runs(self):
+        p = self.fixture(config=APPROVE + CONFIG)
         added = p.add(ticket(tier="PERSON"))
-        self.assertEqual((added["state"], added["owner"], added["action"]["kind"]), ("new", "human", "human_wait"))
+        self.assertEqual((added["state"], added["owner"], added["action"]["kind"]), ("new", "person", "person_wait"))
         self.assertIn("rail accept 1", added["action"]["brief"])
         waiting = p.rail("next")
-        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("human", "WAITING_HUMAN"))
+        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("person", "WAITING_PERSON"))
         self.assertEqual(waiting["waits"][0]["ticket"], "1")
         self.assertEqual(p.rail("advance", "1")["reason"]["code"], "APPROVE_CONTRACT")
         accepted = p.rail("accept", "1", "keep the API stable")
@@ -402,7 +416,7 @@ class Approval(RailTest):
     def test_a_scope_that_reaches_a_person_path_makes_the_ticket_person_at_add(self):
         p = self.fixture()
         added = p.add(ticket(scope=(".github/workflows/**",)))
-        self.assertEqual((added["tier"], added["state"], added["reason"]["code"]), ("PERSON", "new", "APPROVE_CONTRACT"))
+        self.assertEqual((added["tier"], added["state"], added["reason"]["code"]), ("PERSON", "new", "ACCEPT_AUTO"))
         self.assertIn('tier = "PERSON"', p.git("show", "1-fix-add:.rail/tickets/1.md"))  # the ticket says so
 
 
@@ -432,13 +446,14 @@ class Parallel(RailTest):
         self.assertIn("201", read(os.path.join(p.worktree("2"), "api", "handlers.py")))
         self.assertEqual(p.git("merge-base", "--is-ancestor", "main", "2-fix-add"), "")
 
-    def test_a_dropped_dependency_waits_for_a_person(self):
+    def test_a_dropped_dependency_is_the_agents_to_decide_on_a_person_ticket_too(self):
         p = self.fixture()
         p.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
-        p.add(ticket(front=('after = ["1"]',)))
-        p.rail("drop", "1")
-        waiting = p.rail("next")
-        self.assertEqual((waiting["owner"], waiting["waits"][0]["needs"]), ("human", "AFTER_DROPPED"))
+        p.add(ticket(tier="PERSON", front=('after = ["1"]',)))
+        p.rail("drop", "1", "--reason", "not needed")
+        decide = p.rail("next")  # no person is asked, on either tier (test_stuck.py has the AUTO case)
+        self.assertEqual((decide["ticket"], decide["owner"], decide["reason"]["code"]), ("2", "agent", "AFTER_DROPPED"))
+        self.assertNotIn("wait", decide["action"]["facts"])
 
     def test_overlapping_scope_is_not_claimed_and_claims_belong_to_sessions(self):
         p = self.fixture()
@@ -558,7 +573,7 @@ class Drop(RailTest):
         self.assertEqual(p.git("branch", "--list", "1-*"), "")
         self.assertEqual(p.add(ticket(title="Fix add again"))["ticket"], "2")
         self.assertEqual([r["state"] for r in p.rail("status")["tickets"]], ["dropped", "accepted"])
-        self.assertEqual(p.rail("drop", "1")["state"], "dropped")
+        self.assertEqual(p.rail("drop", "1", "--reason", "not needed")["state"], "dropped")
 
 
 class Reading(RailTest):
@@ -567,7 +582,7 @@ class Reading(RailTest):
         p.add(ticket())
         p.rail("next")
         p.fix_calc("1")
-        dropped = p.rail("drop", "1")
+        dropped = p.rail("drop", "1", "--reason", "not needed")
         self.assertEqual(dropped["leftovers"][0]["kind"], "worktree")
         self.assertTrue(os.path.exists(p.worktree("1")))
         self.assertEqual(p.rail("next")["leftovers"][0]["ref"], ".claude/worktrees/1")

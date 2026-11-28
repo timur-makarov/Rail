@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import CONFIG, Fixture, RailTest, ticket
+from railtest import APPROVE, CONFIG, Fixture, RailTest, ticket
 
 
 def read(path):
@@ -101,9 +101,10 @@ class Intake(RailTest):
         github.update(lambda s: s["issues"].append({"number": 30, "title": "Smoke check failed on dev",
                                                     "body": f"Commit: {sha}\n\nGET /health returned 500.",
                                                     "labels": ["rail"], "state": "open"}))
-        nn = a.rail("intake", "github")["created"][0]
+        revert, nn = a.rail("intake", "github")["created"]  # the revert goes first (test_revert), then the fix
         text = a.git("show", f"{nn}-github-30-smoke-check-failed-on-dev:.rail/tickets/{nn}.md")
         self.assertIn('caused_by = "1"', text)
+        self.assertIn(f'after = ["{revert}"]', text)
 
     def test_any_tracker_comes_in_with_an_external_id(self):
         p = self.fixture()
@@ -140,7 +141,7 @@ class RedBase(RailTest):
 
 class Notify(RailTest):
     def test_each_new_wait_is_announced_once(self):
-        p = self.fixture()
+        p = self.fixture(config=APPROVE + CONFIG)
         p.add(ticket(tier="PERSON"))
 
         def hook(term_program):
@@ -246,8 +247,9 @@ class Sweep(RailTest):
         self.assertIn("| review | not needed: no product file changed |", body)
         self.assertEqual(p.rail("next")["reason"]["code"], "NO_WORK")
 
-    def test_merged_tickets_make_a_sweep_due_and_it_gathers_parked_findings_with_no_model_run(self):
-        # Every ticket is reviewed, as with the default config: only [sweep] every makes a sweep due.
+    def test_merged_tickets_make_a_sweep_due_and_its_pass_reads_the_areas_they_changed(self):
+        # Every ticket is reviewed, as with the default config: only [sweep] every makes a sweep due. Each review saw
+        # one change, so the sweep's pass reads the areas the tickets changed, as they are now.
         p = self.fixture(config=CONFIG + "\n[sweep]\nevery = 2\n")
         p.add(ticket())
         p.rail("next")
@@ -255,7 +257,8 @@ class Sweep(RailTest):
         parked = {"severity": "parked", "file": "src/calc.py", "claim": "calc has no subtract, and callers negate add."}
         checked = {"severity": "advisory", "file": "src/calc.py", "claim": "add has no test.",
                    "check": "a test per public function"}
-        p.queue_reviews({"summary": "Read it.", "findings": [parked, checked]})
+        left = {"severity": "advisory", "file": "api/handlers.py", "claim": "handle has no docstring."}
+        p.queue_reviews({"summary": "Read it.", "findings": [parked, checked]}, {"summary": "Read it.", "findings": [left]})
         p.rail("advance", "1")
         p.rail("answer", "1", "F2", "fixed", "Added a test.")
         self.assertEqual(p.rail("advance", "1")["state"], "merged")
@@ -263,24 +266,94 @@ class Sweep(RailTest):
         p.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
         p.rail("next")
         p.write("api/handlers.py", "def handle():\n    return 201\n", base=p.worktree("2"))
-        p.rail("advance", "2")
+        self.assertEqual(p.rail("advance", "2")["state"], "merge-ready")  # an open advisory finding holds nothing
         self.assertEqual(p.rail("advance", "2")["state"], "merged")
 
         offer = p.rail("next")
         self.assertEqual((offer["reason"]["code"], offer["unreviewed"], offer["merged"]), ("SWEEP", 0, 2))
+        twice = {"severity": "advisory", "file": "api/handlers.py", "claim": "handle adds by hand what calc.add does."}
+        p.queue_reviews({"summary": "Read both areas.", "findings": [twice]})
         swept = p.rail("sweep")
         self.assertEqual((swept["ticket"], swept["reason"]["code"]), ("3", "SWEEP_TICKETS"))
-        self.assertEqual(len(p.briefs()), 2)  # the two tickets' reviews: nothing merged unreviewed, so no sweep run
-        self.assertIn("harvest", [s["step"] for s in swept["steps"]])
+        self.assertEqual(len(p.briefs()), 3)  # the two tickets' reviews, and the sweep's pass
+        self.assertNotIn("harvest", [s["step"] for s in swept["steps"]])
+        brief = p.briefs()[-1]["brief"]
+        self.assertIn("This run's job: sweep the areas below, which the tickets merged since the last sweep changed.", brief)
+        self.assertIn("## Areas the merged tickets changed\nTickets merged since the last sweep: 1, 2.", brief)
+        self.assertIn("| calc | src/** | the calculator | 1 |\n| api | api/** | public HTTP handlers | 2 |", brief)
+        self.assertIn("Read the code of those areas as it is now, in this directory. Look for:\n- duplication across"
+                      " tickets;", brief)
+        self.assertNotIn("## The changes", brief)  # nothing merged without a review, so the brief holds no diff
+        self.assertNotIn("return 201", brief)
         summary = read(os.path.join(p.worktree("3"), ".rail", "journal", "3-summary.md"))
         self.assertIn("2 tickets merged; 0 commits merged without a review", summary)
-        self.assertIn("no review run", summary)
+        self.assertIn("## Review\nRead: calc (tickets 1); api (tickets 2).\nRead both areas.\n", summary)
+        self.assertIn("- F1 (advisory) api/handlers.py: handle adds by hand what calc.add does.", summary)
         self.assertIn("ticket 1 F1: calc has no subtract, and callers negate add.", summary)
+        self.assertIn("ticket 2 F1 (advisory, left open): handle has no docstring.", summary)
         self.assertIn("- a test per public function (1/F2)", summary)
         self.assertEqual(p.rail("advance", "3")["state"], "merge-ready")
         self.assertEqual(p.rail("advance", "3")["state"], "merged")
         self.assertIn("Sweep: since", p.git("log", "-1", "--format=%b", "main"))
         self.assertEqual(p.rail("next")["reason"]["code"], "NO_WORK")
+
+    def test_a_sweep_names_a_file_a_reviewer_named_a_kind_on_that_no_kind_path_matches(self):
+        p = self.fixture(config=CONFIG + "\n[sweep]\nevery = 1\n")
+        p.add(ticket())
+        p.rail("next")
+        p.fix_calc("1")
+        shape = {"kind": "data-shape", "file": "src/calc.py", "line": 2, "why": "It changes what add returns to callers."}
+        clean = {"summary": "Read it.", "findings": []}
+        p.queue_reviews(clean | {"kinds": [shape]}, clean, clean)
+        self.assertEqual(p.rail("advance", "1")["reason"]["code"], "MERGE_BY_PERSON")
+        p.rail("accept", "1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
+        swept = p.rail("sweep")
+        self.assertEqual(swept["reason"]["code"], "SWEEP_TICKETS")  # something to file, so the agent gets the task
+        summary = read(os.path.join(p.worktree("2"), ".rail", "journal", "2-summary.md"))
+        self.assertIn("## Kind paths reviewers found\n- `data-shape`: a reviewer named this kind on `src/calc.py` (ticket 1),"
+                      " and no path of that kind in `.rail/config.toml` matches the file", summary)
+
+        # With the path under its kind, the next sweep has nothing to say about it.
+        q = self.fixture("listed", config=CONFIG + '\n[sweep]\nevery = 1\n\n[kinds]\ndata-shape = ["src/**"]\n')
+        q.add(ticket(tier="PERSON"))
+        q.rail("next")
+        q.fix_calc("1")
+        q.queue_reviews(clean | {"kinds": [shape]}, clean, clean)
+        q.rail("advance", "1")
+        q.rail("accept", "1")
+        self.assertEqual(q.rail("advance", "1")["state"], "merged")
+        self.assertEqual(q.rail("sweep")["reason"]["code"], "SWEEP_EMPTY")
+
+    def test_a_sweep_before_every_tickets_merged_reads_no_area(self):
+        # A person runs it by hand after one reviewed ticket: [sweep] every (20) is far off, so no pass reads the
+        # areas, and what the ticket left behind is still gathered.
+        p = self.fixture()
+        p.add(ticket())
+        p.rail("next")
+        p.fix_calc("1")
+        parked = {"severity": "parked", "file": "src/calc.py", "claim": "calc has no subtract, and callers negate add."}
+        p.queue_reviews({"summary": "Read it.", "findings": [parked]})
+        p.rail("advance", "1")
+        self.assertEqual(p.rail("advance", "1")["state"], "merged")
+        swept = p.rail("sweep")
+        self.assertEqual(swept["reason"]["code"], "SWEEP_TICKETS")
+        self.assertEqual(len(p.briefs()), 1)  # the ticket's own review
+        self.assertEqual(swept["steps"][-1]["detail"],
+                         "no review run: 1 parked findings, 0 proposed checks, 0 patterns in the worker runs, 0 flaky checks")
+        summary = read(os.path.join(p.worktree("2"), ".rail", "journal", "2-summary.md"))
+        self.assertIn("## Review\n(no review run: nothing merged without a review, and the areas the merged tickets"
+                      " changed are read once [sweep] every tickets merged)", summary)
+
+        # With nothing left behind either, there is no task.
+        q = self.fixture("quiet")
+        q.add(ticket())
+        q.rail("next")
+        q.fix_calc("1")
+        q.rail("advance", "1")
+        q.rail("advance", "1")
+        self.assertEqual(q.rail("sweep")["reason"]["code"], "SWEEP_EMPTY")
+        self.assertEqual(len(q.briefs()), 1)
 
     def test_a_sweep_that_finds_nothing_merges_with_no_task(self):
         p = self.fixture(config=CONFIG + "\n[sweep]\nevery = 1\n")
@@ -293,7 +366,8 @@ class Sweep(RailTest):
         self.assertEqual(p.rail("next")["reason"]["code"], "SWEEP")
         swept = p.rail("sweep")
         self.assertEqual((swept["reason"]["code"], swept["action"]["command"]), ("SWEEP_EMPTY", "rail advance 2"))
-        self.assertEqual(len(p.briefs()), 1)
+        self.assertEqual(len(p.briefs()), 2)  # the pass read the area ticket 1 changed and found nothing
+        self.assertEqual([(s["step"], s.get("detail")) for s in swept["steps"]][-1], ("harvest", "nothing to file"))
         p.rail("advance", "2")
         self.assertEqual(p.rail("advance", "2")["state"], "merged")
         self.assertEqual(p.rail("next")["reason"]["code"], "NO_WORK")

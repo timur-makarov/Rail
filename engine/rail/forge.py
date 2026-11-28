@@ -4,8 +4,11 @@
 """
 
 import json
+import os
 import re
 import subprocess
+import time
+import uuid
 
 from . import gitx, util
 
@@ -14,7 +17,15 @@ LABELS = {
     "rail:go": ("1d76db", "Rail: a person approves or continues this ticket"),
     "rail:needs-you": ("d93f0b", "Rail: this ticket waits for a person"),  # the engine sets it and never reads it
     "rail:hold": ("b60205", "Rail: a person stopped this ticket; rail:go continues it"),  # only a person sets it
+    # only a person sets it, on an issue: the brake for the whole repository, or for the paths its body names
+    "rail:stop": ("b60205", "Rail: while an issue with this label is open, Rail does nothing here"),
+    # only a person sets it, on a merged pull request; the engine removes it once the revert ticket is filed
+    "rail:revert": ("b60205", "Rail: on a merged pull request, files a ticket that reverts it"),
+    # only a person sets it, on a ticket's pull request or on the issue the ticket came from
+    "rail:first": ("fbca04", "Rail: rail next takes this ticket before the others"),
 }
+
+STOP_PATHS = re.compile(r"(?im)^[ \t]*paths:[ \t]*(\S.*)$")
 
 # Whose comments speak for the repository: those of people who can push to it. GitHub gives every comment an
 # author_association; a stranger's is NONE, CONTRIBUTOR or FIRST_TIME_CONTRIBUTOR, and so is most bots'.
@@ -42,6 +53,16 @@ class ForgeError(Exception):
         self.status = status
 
 
+class RateLimited(Exception):
+    """GitHub refused a call because a rate limit is used up. `wait` is the seconds until it lifts. Not a
+    ForgeError: nothing that treats GitHub as out of reach may catch it, since the command would go on and make
+    more calls. It ends the command, and the answer says when to come back."""
+
+    def __init__(self, wait, message):
+        super().__init__(message)
+        self.wait = wait
+
+
 def github_repo(project):
     """'owner/name' from the origin remote's URL, or None when it isn't on GitHub."""
     url = gitx.git(["config", "--get", f"remote.{project.remote}.url"], project.root, check=False).stdout.strip()
@@ -49,35 +70,141 @@ def github_repo(project):
     return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
-def api(method, path, body=None):
-    """One REST call. Returns the decoded JSON, or None for an empty body. Raises ForgeError.
+# Every REST call is counted: the next event the command writes carries the calls made since its last one, as
+# `gh_calls` (rail docs journal). Calls made after a command's last event, or by a command that writes none, are
+# kept in the clone's local cache, one file per command, and go onto the next event any command there writes. So
+# the sum over the journals is every call the engine made, and rail stats divides it by the merged tickets.
+_calls = 0
 
-    Lists are read one page of 100, which is enough for labels, check runs and a ticket's comments.
-    """
+
+def _count():
+    global _calls
+    _calls += 1
+
+
+def _kept(common):
+    return os.path.join(common, "rail", "cache", "gh_calls")
+
+
+def take_calls(common):
+    """The calls no event carries yet: this command's since its last event, and those other commands left in the
+    cache. A file is renamed before it is read, so two commands at once never count the same one."""
+    global _calls
+    found, _calls = _calls, 0
+    folder = _kept(common)
+    try:
+        names = [name for name in os.listdir(folder) if not name.endswith(".taken")]
+    except OSError:
+        return found
+    for name in names:
+        taken = os.path.join(folder, f"{name}.{os.getpid()}.taken")
+        try:
+            os.rename(os.path.join(folder, name), taken)
+            with open(taken) as f:
+                found += int(f.read().strip() or 0)
+            os.remove(taken)
+        except (OSError, ValueError):
+            pass  # another command took it first
+    return found
+
+
+def keep_calls(cwd):
+    """At a command's end: leave the calls no event carried in the clone's cache. Outside a repository they are
+    dropped, as there is no journal for them to reach."""
+    global _calls
+    if not _calls:
+        return
+    common = gitx.git(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd, check=False).stdout.strip()
+    if common:
+        os.makedirs(_kept(common), exist_ok=True)
+        with open(os.path.join(_kept(common), uuid.uuid4().hex), "w") as f:
+            f.write(str(_calls))
+    _calls = 0
+
+
+PAGE = 100          # the most GitHub gives in one page of a list
+MAX_PAGES = 20      # of one list: a list longer than this is read no further
+WRITE_GAP = 1.0     # seconds between two writes, as GitHub's guide to its REST API asks
+_last_write = None
+
+
+def _limit_wait(status, headers, message):
+    """Seconds to wait when this refusal is a rate limit, else None. GitHub answers 403 or 429 with `retry-after`, or
+    with `x-ratelimit-remaining: 0` and the time the limit resets; with neither, its docs say to wait a minute."""
+    if status not in (403, 429):
+        return None
+    after, reset = headers.get("retry-after", ""), headers.get("x-ratelimit-reset", "")
+    used_up = headers.get("x-ratelimit-remaining") == "0"
+    if not (after.isdigit() or used_up or "rate limit" in message.lower()):
+        return None
+    if after.isdigit():
+        return max(1, int(after))
+    if used_up and reset.isdigit():
+        return max(1, int(reset) - int(time.time()))
+    return 60
+
+
+def call(method, path, body=None):
+    """One REST call. Returns (the decoded JSON or None for an empty body, the response's headers by lower-case
+    name). Raises ForgeError, or RateLimited when a rate limit refused it."""
+    global _last_write
     args = ["gh", "api", "--method", method, path, "-H", "Accept: application/vnd.github+json", "--include"]
     if body is not None:
         args += ["--input", "-"]
+    if method != "GET" and _last_write is not None:
+        time.sleep(max(0.0, WRITE_GAP - (time.monotonic() - _last_write)))
+    _count()
     try:
         result = subprocess.run(args, input=json.dumps(body) if body is not None else None,
                                 capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise ForgeError(None, f"gh api {path}: {e}")
+    finally:
+        if method != "GET":
+            _last_write = time.monotonic()
     head, _, payload = result.stdout.partition("\r\n\r\n") if "\r\n\r\n" in result.stdout else result.stdout.partition("\n\n")
     m = re.match(r"HTTP/[\d.]+ (\d+)", head)
     status = int(m.group(1)) if m else None
+    headers = {name.strip().lower(): value.strip() for name, _, value in
+               (line.partition(":") for line in head.splitlines()[1:]) if value}
     if result.returncode != 0 or (status and status >= 400):
         message = payload.strip() or result.stderr.strip()
         try:
             message = json.loads(payload).get("message", message)
-        except ValueError:
+        except (ValueError, AttributeError):
             pass
+        wait = _limit_wait(status, headers, message)
+        if wait is not None:
+            raise RateLimited(wait, f"gh api {method} {path}: {status} {message}".strip())
         raise ForgeError(status, f"gh api {method} {path}: {status or ''} {message}".strip())
     payload = payload.strip()
-    return json.loads(payload) if payload else None
+    return (json.loads(payload) if payload else None), headers
+
+
+def api(method, path, body=None):
+    """One REST call. Returns the decoded JSON, or None for an empty body. Raises ForgeError or RateLimited.
+
+    A list read this way is one page of 100, which is enough for labels, check runs and a ticket's comments.
+    """
+    return call(method, path, body)[0]
+
+
+def pages(path):
+    """A whole list: every page, following the `Link` header's rel="next"."""
+    found = []
+    for _ in range(MAX_PAGES):
+        rows, headers = call("GET", path)
+        found += rows or []
+        m = re.search(r'<([^>]+)>;\s*rel="next"', headers.get("link", ""))
+        if not m:
+            break
+        path = m.group(1)
+    return found
 
 
 def raw(path):
     """A REST call whose answer isn't JSON, such as a job's log. Returns the text, or None."""
+    _count()
     try:
         result = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired):
@@ -94,14 +221,35 @@ def log_tail(log, lines=60):
     return "\n".join([row for row in rows[start:end + 1] if row.strip()][-lines:])
 
 
+RATE_LOW = 0.1  # of the hour's limit: under it the doctor's line is a warning
+
+
+def rate_line(headers, now=None):
+    """rail doctor's line on the token's primary rate limit, from the headers of a call GitHub just answered: the
+    calls left this hour of the limit, and when it resets. Nothing when GitHub sent no such header (GitHub Enterprise
+    Server with rate limits off). Every app and token acting as the same person shares one limit."""
+    left, limit, reset = (headers.get(f"x-ratelimit-{name}", "") for name in ("remaining", "limit", "reset"))
+    if not left.isdigit():
+        return []
+    detail = f"{int(left)}" + (f" of {int(limit)}" if limit.isdigit() else "") + " REST calls left this hour"
+    if reset.isdigit():
+        detail += f", reset in {max(0, int(reset) - int(now if now is not None else time.time())) // 60} min"
+    low = limit.isdigit() and int(left) < RATE_LOW * int(limit)
+    if low:
+        detail += (". Everything that acts as this person on GitHub shares the limit: rail stats shows the calls for"
+                   " each merged ticket")
+    return [("github rate limit", None if low else True, detail)]
+
+
 def doctor_checks(project, repo):
     """[(name, passed or None, detail)] for the GitHub side of the setup."""
     found = []
     try:
-        info = api("GET", f"repos/{repo}")
+        info, headers = call("GET", f"repos/{repo}")
     except ForgeError as e:
         return [("gh", False, f"gh can't read {repo}: {e}. Log in with gh auth login")]
     found.append(("gh", True, f"gh reads {repo}"))
+    found += rate_line(headers)
     base = project.base
     contexts, plan_limit, ruleset_squash = set(), False, False
     try:
@@ -149,13 +297,13 @@ def doctor_checks(project, repo):
         found.append(("labels", False, str(e)))
         return found
     missing = [name for name in LABELS if name not in names]
-    found.append(("labels", not missing, "rail, rail:go, rail:needs-you and rail:hold exist" if not missing
+    found.append(("labels", not missing, f"all {len(LABELS)} labels exist" if not missing
                   else f"missing labels: {', '.join(missing)}; rail init creates them"))
     return found
 
 
 def create_labels(repo):
-    """Create the three labels that are missing. Returns the names created."""
+    """Create the labels that are missing. Returns the names created."""
     names = {label["name"] for label in api("GET", f"repos/{repo}/labels?per_page=100") or []}
     created = []
     for name, (color, description) in LABELS.items():
@@ -178,9 +326,13 @@ class Forge:
         self.ok = bool(self.repo) and project.online
         self.epoch = _epoch
         self._pulls = None
+        self._more = False   # the list of pull requests filled its page: older ones exist that it doesn't hold
+        self._by_branch = {}
         self._full = {}
         self._checks = {}
         self._required = earlier._required if earlier else None  # the base branch's rules don't change mid-command
+        self._stops = earlier._stops if earlier else None        # a person's brake is read once per command
+        self._firsts = earlier._firsts if earlier else None      # and so are the issues a person marked to go first
 
     @property
     def stale(self):
@@ -193,31 +345,48 @@ class Forge:
 
     # --- pull requests ----------------------------------------------------------
 
+    def _own(self, pr):
+        """Not from a fork: anyone can name a branch there like a ticket's. Such a pull request is not the ticket's,
+        and what is written on it is not the owner's word."""
+        head = pr["head"]
+        return "repo" not in head or ((head["repo"] or {}).get("full_name") or "").lower() == self.repo.lower()
+
     def pulls(self):
-        """{head branch: the newest PR from it}."""
+        """{head branch: the newest PR from it}, from the 100 newest pull requests."""
         if self._pulls is None:
             self._pulls = {}
             try:
-                for pr in self.call("GET", "pulls?state=all&per_page=100&sort=created&direction=desc") or []:
-                    head = pr["head"]
-                    if "repo" in head and ((head["repo"] or {}).get("full_name") or "").lower() != self.repo.lower():
-                        # From a fork: anyone can name a branch there like a ticket's. Its pull request is not
-                        # the ticket's, and what is written on it is not the owner's word.
-                        continue
-                    self._pulls.setdefault(head["ref"], pr)
+                found = self.call("GET", f"pulls?state=all&per_page={PAGE}&sort=created&direction=desc") or []
+                self._more = len(found) >= PAGE
+                for pr in found:
+                    if self._own(pr):
+                        self._pulls.setdefault(pr["head"]["ref"], pr)
             except ForgeError:
                 self.ok = False
         return self._pulls
 
-    def pr(self, branch):
-        """The newest pull request from a branch, as the list gives it: labels, head, title, merged_at."""
+    def pr(self, branch, expected=True):
+        """The newest pull request from a branch, as the list gives it: labels, head, title, merged_at. One that is
+        older than the 100 newest is asked for by its branch, when the caller expects the branch to have one."""
         if not self.ok or not branch:
             return None
-        return self.pulls().get(branch)
+        found = self.pulls().get(branch)
+        if found is None and self._more and expected and self.ok:
+            if branch not in self._by_branch:
+                owner = self.repo.split("/")[0]
+                try:
+                    rows = self.call("GET", f"pulls?state=all&per_page={PAGE}&sort=created&direction=desc"
+                                            f"&head={owner}:{branch}") or []
+                except ForgeError:
+                    rows = []
+                self._by_branch[branch] = next((pr for pr in rows if self._own(pr) and pr["head"]["ref"] == branch), None)
+            found = self._by_branch[branch]
+        return found
 
     def merged_from(self, nn):
         """The newest merged pull request from one of ticket NN's branches (NN-...), or None. A ticket whose branch
-        is gone shows by it that its own pull request was merged."""
+        is gone shows by it that its own pull request was merged. Only the 100 newest pull requests are searched:
+        the branch's name went with the branch, so there is nothing to ask GitHub for."""
         if not self.ok:
             return None
         return next((pr for ref, pr in self.pulls().items() if ref.startswith(f"{nn}-") and pr.get("merged_at")), None)
@@ -254,6 +423,14 @@ class Forge:
         except ForgeError as e:
             if e.status != 404:
                 raise
+
+    def line_comments(self, number):
+        """The review comments on a pull request's lines, every page."""
+        return pages(f"repos/{self.repo}/pulls/{number}/comments?per_page={PAGE}")
+
+    def post_review(self, number, sha, comments):
+        """One review that only comments: each comment on a line of the pull request's head."""
+        self.call("POST", f"pulls/{number}/reviews", {"commit_id": sha, "event": "COMMENT", "comments": comments})
 
     def comments(self, number):
         return self.call("GET", f"issues/{number}/comments?per_page=100") or []
@@ -322,5 +499,58 @@ class Forge:
     # --- issues -------------------------------------------------------------------------
 
     def issues(self, label="rail"):
-        found = self.call("GET", f"issues?labels={label}&state=open&per_page=100") or []
+        """Every open issue with the label, however many pages they fill."""
+        found = pages(f"repos/{self.repo}/issues?labels={label}&state=open&per_page={PAGE}")
         return [i for i in found if "pull_request" not in i]
+
+    def firsts(self):
+        """The numbers of the open issues a person labelled rail:first. Read once per command; with GitHub out of
+        reach there is nothing to read, and the order is the one the tickets themselves give."""
+        if self._firsts is None:
+            if not self.ok:
+                return set()
+            try:
+                self._firsts = {i["number"] for i in self.issues("rail:first")}
+            except ForgeError:
+                return set()
+        return self._firsts
+
+    def open_issue(self, title, body, labels):
+        return self.call("POST", "issues", {"title": title, "body": body, "labels": list(labels)})
+
+    def close_issue(self, number):
+        self.call("PATCH", f"issues/{number}", {"state": "closed", "state_reason": "completed"})
+
+    def asked_reverts(self):
+        """The merged pull requests a person labelled rail:revert, each in full. The issues endpoint lists pull
+        requests too, and only it filters by label."""
+        found = pages(f"repos/{self.repo}/issues?labels=rail:revert&state=closed&per_page={PAGE}")
+        merged = [i for i in found if (i.get("pull_request") or {}).get("merged_at")]
+        return [self.call("GET", f"pulls/{i['number']}") for i in sorted(merged, key=lambda i: i["number"])]
+
+    def stops(self):
+        """A person's brake: the open issues labelled rail:stop, as [{number, title, url, paths}], oldest first.
+        `paths` holds the globs of a `paths:` line in the issue's body, and is empty when the issue stops the whole
+        repository. Only someone who may triage the repository can set a label, so the label is a person's word.
+        Read once per command; with GitHub out of reach there is nothing to read, and nothing is stopped."""
+        if self._stops is None:
+            if not self.ok:
+                return []
+            try:
+                found = self.issues("rail:stop")
+            except ForgeError:
+                return []
+            self._stops = []
+            for issue in sorted(found, key=lambda i: i["number"]):
+                line = STOP_PATHS.search(issue.get("body") or "")
+                paths = [p.strip("`") for p in re.split(r"[,\s]+", line.group(1).strip())] if line else []
+                smoke = re.search(r"<!-- rail-smoke: (\d+) -->", issue.get("body") or "")
+                self._stops.append({"number": issue["number"], "title": issue.get("title") or "",
+                                    "url": issue.get("html_url") or "", "paths": [p for p in paths if p],
+                                    # the engine's own brake names the smoke check's issue it was set for
+                                    **({"smoke": int(smoke.group(1))} if smoke else {})})
+        return self._stops
+
+    def forget_stops(self):
+        """The engine set or lifted a brake itself: read them again."""
+        self._stops = None

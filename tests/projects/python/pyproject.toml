@@ -1,0 +1,16 @@
+[project]
+name = "notes"
+version = "0.1.0"
+description = "A notes API over HTTP with a SQLite store."
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

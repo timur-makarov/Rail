@@ -8,7 +8,7 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import CONFIG, Fixture, RailTest, ticket
+from railtest import APPROVE, CONFIG, Fixture, RailTest, ticket
 
 HALF_DONE = "def add(a, b):\n    return a * b  # not there yet\n"
 
@@ -376,7 +376,7 @@ class MergedContract(RailTest):
     PERSON = dict(title="Change the config", tier="PERSON", scope=("src/config/**",), check="test -f src/config/app.toml")
 
     def test_a_merged_contract_counts_as_its_approval_and_the_ticket_goes_on(self):
-        a, b, github = self.github_pair()
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
         a.add(ticket(**self.PERSON))
         github.person_merges(1)  # the contract's pull request has a merge button, and a person pressed it
         on = a.rail("next")
@@ -395,7 +395,7 @@ class MergedContract(RailTest):
         self.assertEqual(a.rail("status")["tickets"][0]["state"], "merged")
 
     def test_it_goes_on_in_a_fresh_clone_after_github_deleted_the_merged_branch(self):
-        a, b, github = self.github_pair()
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
         github.update(lambda s: s.__setitem__("delete_branch_on_merge", True))
         a.add(ticket(**self.PERSON))
         github.person_merges(1)
@@ -422,7 +422,7 @@ class MergedContract(RailTest):
     def test_a_drop_holds_after_the_tickets_branch_is_gone(self):
         # The contract reached the base branch by the merge. Dropped, and its branch deleted, the ticket must not
         # look approved again: the drop is also marked in the counter branch.
-        a, b, github = self.github_pair()
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
         github.update(lambda s: s.__setitem__("delete_branch_on_merge", True))
         a.add(ticket(**self.PERSON))
         github.person_merges(1)

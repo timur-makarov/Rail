@@ -1,0 +1,33 @@
+# The Rust profile. The engine reads it each time it derives the projects of a tree: a folder that tracks a manifest
+# below is a project, with these commands, rules and paths (rail docs languages). Nothing of it is written into a
+# project's files.
+
+manifests = ["Cargo.toml"]                                 # file names, matched in any folder
+domains = ["index.crates.io", "static.crates.io"]          # crates.io's index and downloads
+generated = []                                             # build output is in target/, which is untracked
+migration_paths = []
+tests = ["**/tests/**", "**/benches/**"]                   # unit tests inside src/ files can't be told by path
+
+# A project's commands: `setup`, and the parts of `verify`, run in the project's folder. Each part names the tool
+# it needs on the machine; `audit` runs only on a change that touches the lockfile. A build always runs the
+# dependencies' build scripts and procedural macros: cargo has no switch for it. `member` is what a part runs
+# for a member of a Cargo workspace, where {name} is the member's package name; not checked on a machine with
+# cargo. A [[projects]] entry of the config puts the repository's own commands in their place (rail docs
+# languages).
+[[managers]]
+name = "cargo"
+lockfile = "Cargo.lock"
+setup = "cargo fetch --locked"
+verify = [
+  { part = "format", tool = "rustfmt", run = "cargo fmt --check", member = "cargo fmt --check -p {name}" },
+  { part = "lint", tool = "cargo-clippy", run = "cargo clippy --all-targets --locked -- -D warnings", member = "cargo clippy -p {name} --all-targets --locked -- -D warnings" },
+  { part = "tests", tool = "cargo", run = "cargo test --locked", member = "cargo test --locked -p {name}" },
+  { part = "audit", tool = "cargo-deny", run = "cargo deny check advisories" },
+]
+
+[[rules]]
+id = "no-new-rust-suppressions"
+files = "**/*.rs"
+forbid = ["#[allow(", "#![allow(", "#[ignore"]
+fix = "Fix the cause instead of silencing the check."
+why = "the Rust profile: a lint allowed, or a test ignored"

@@ -4,9 +4,10 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import CONFIG, RailTest, ticket
+from railtest import APPROVE, CONFIG, RailTest, ticket
 
 
 def events(fx, nn="1", branch="origin/1-fix-add"):
@@ -103,7 +104,7 @@ class Lifecycle(RailTest):
 class Approvals(RailTest):
     def test_a_backlog_merges_auto_tickets_while_a_person_ticket_waits_on_its_pull_request(self):
         """One session runs an AUTO ticket inside skip_paths, an AUTO ticket the reviewer checks, and a PERSON ticket."""
-        a, b, github = self.github_pair(config=CONFIG.replace("[review]", '[review]\nskip_paths = ["src/calc.py"]'))
+        a, b, github = self.github_pair(config=APPROVE + CONFIG.replace("[review]", '[review]\nskip_paths = ["src/calc.py"]'))
         a.add(ticket(title="Fix add"))
         a.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
         a.add(ticket(title="Change the config", tier="PERSON", scope=("src/config/**",), check="test -f src/config/app.toml"))
@@ -128,7 +129,7 @@ class Approvals(RailTest):
         self.assertEqual(a.rail("advance", "2")["state"], "merged")
 
         waiting = a.rail("next")
-        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("human", "WAITING_HUMAN"))
+        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("person", "WAITING_PERSON"))
         self.assertEqual(waiting["waits"][0]["needs"], "APPROVE_CONTRACT")
         self.assertIn("rail:needs-you", github.pr(1)["labels"])
 
@@ -146,7 +147,7 @@ class Approvals(RailTest):
         self.assertIn("rail:needs-you", github.pr(1)["labels"])
         github.ci("3-change-the-config", "success")
         ready = a.rail("next")
-        self.assertEqual((ready["owner"], ready["waits"][0]["needs"]), ("human", "MERGE_BY_PERSON"))
+        self.assertEqual((ready["owner"], ready["waits"][0]["needs"]), ("person", "MERGE_BY_PERSON"))
         self.assertIn("rail:needs-you", github.pr(1)["labels"])
         self.assertEqual(github.pr(1)["title"], "3: change the config")
         github.person_merges(1)
@@ -163,7 +164,7 @@ class Approvals(RailTest):
         a.rail("next")
         github.label(1, "rail:hold")
         held = a.rail("next")
-        self.assertEqual((held["owner"], held["waits"][0]["needs"]), ("human", "HOLD"))
+        self.assertEqual((held["owner"], held["waits"][0]["needs"]), ("person", "HOLD"))
         github.update(lambda s: s.setdefault("comments", {}).__setitem__("1", [
             {"body": "Use the shared helper.", "created_at": "2099-01-01T00:00:00Z", "user": {"login": "owner"},
              "author_association": "OWNER"}]))
@@ -383,7 +384,7 @@ class Merges(RailTest):
 
     def test_next_reads_an_approval_on_a_ticket_it_does_not_go_on_with(self):
         # The run goes on with its own ticket 1; ticket 2's rail:go must not read as "waits for approval" meanwhile.
-        a, b, github = self.github_pair()
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
         a.add(ticket())
         a.add(ticket(title="Add subtract", tier="PERSON", scope=("docs/**",)))
         self.assertEqual(a.rail("next")["ticket"], "1")
@@ -404,7 +405,7 @@ class Merges(RailTest):
         github.ci("1-fix-add", "success")
         github.update(lambda s: s.__setitem__("fail_merge", "Repository rule violations found"))
         refused = a.rail("advance", "1", expect=3)
-        self.assertEqual((refused["owner"], refused["reason"]["code"]), ("human", "MERGE_FAILED"))
+        self.assertEqual((refused["owner"], refused["reason"]["code"]), ("person", "MERGE_FAILED"))
         self.assertIn("Repository rule violations found", refused["action"]["brief"])
 
     def test_a_pr_closed_by_hand_drops_the_ticket(self):
@@ -492,7 +493,7 @@ class Resume(RailTest):
 class Desk(RailTest):
     def test_a_wait_is_labelled_at_once_and_its_brief_says_what_to_do_on_github(self):
         # The contract's wait gets rail:needs-you even while the agent has other work.
-        a, b, github = self.github_pair()
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
         a.add(ticket(title="Change the config", tier="PERSON", scope=("src/config/**",), check="test -f src/config/app.toml"))
         a.add(ticket(title="Fix add"))
         working = a.rail("next")
@@ -503,12 +504,12 @@ class Desk(RailTest):
         github.ci("2-fix-add", "success")
         a.rail("advance", "2")
         waiting = a.rail("next")
-        self.assertEqual(waiting["reason"]["code"], "WAITING_HUMAN")
+        self.assertEqual(waiting["reason"]["code"], "WAITING_PERSON")
         self.assertIn("the label rail:go approves it", waiting["waits"][0]["brief"])
         self.assertIn("pull/1", waiting["waits"][0]["brief"])
 
     def test_a_contract_changed_before_approval_shows_on_its_pull_request(self):
-        a, b, github = self.github_pair()
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
         a.add(ticket(title="Change the config", tier="PERSON", scope=("src/config/**",), check="test -f src/config/app.toml"))
         self.assertIn("test -f src/config/app.toml", github.pr(1)["body"])
         self.assertIn("Don't merge it", github.pr(1)["body"])  # the page has a merge button; the label approves
@@ -521,7 +522,7 @@ class Desk(RailTest):
         self.assertIn("test -f docs/config.md", github.pr(1)["body"])
 
     def test_a_person_ticket_from_an_issue_gets_its_contract_pull_request_once_the_contract_is_written(self):
-        a, b, github = self.github_pair()
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
         github.update(lambda s: s["issues"].append({"number": 12, "title": "Rework the config", "body": "It is a mess.",
                                                     "labels": ["rail"], "state": "open"}))
         self.assertEqual(a.rail("next")["reason"]["code"], "TICKET_LINT")
@@ -531,7 +532,7 @@ class Desk(RailTest):
             f.write(ticket(title="Rework the config", tier="PERSON", scope=("src/config/**",),
                            check="test -f src/config/app.toml", front=('external_id = "github#12"',)))
         waiting = a.rail("amend", "1", "--file", written)
-        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("human", "APPROVE_CONTRACT"))
+        self.assertEqual((waiting["owner"], waiting["reason"]["code"]), ("person", "APPROVE_CONTRACT"))
         self.assertEqual(github.pr(1)["title"], "1: [contract] Rework the config")
         self.assertIn("pull/1", waiting["action"]["brief"])
         # The person's inbox is the label: the command that meets the wait puts it on, not only a bare rail next.
@@ -548,7 +549,183 @@ class Desk(RailTest):
         self.assertEqual(a.rail("next")["steps"], [])  # once: the issue has its ticket now
 
 
+class Scale(RailTest):
+    """GitHub past its first page and at its limits."""
+
+    def dummies(self, github, count):
+        """`count` closed pull requests from other branches, all newer than the ticket's."""
+        def change(s):
+            first = s.get("next_number", 1)
+            s["pulls"] += [{"number": n, "title": f"other {n}", "body": "", "head": f"other-{n}", "base": "main",
+                            "state": "closed", "merged": False, "labels": []} for n in range(first, first + count)]
+            s["next_number"] = first + count
+        github.update(change)
+
+    def test_a_pull_request_older_than_the_100_newest_is_found_by_its_branch(self):
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        a.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
+        a.rail("next")  # ticket 1 is claimed and has pull request #1; ticket 2 has no pull request yet
+        self.dummies(github, 150)
+        a.fix_calc("1")
+        shipped = a.rail("advance", "1")
+        self.assertEqual((shipped["state"], shipped["reason"]["code"]), ("in-ci", "CI_WAIT"))
+        self.assertEqual([s for s in shipped["steps"] if s["step"] == "pr"], [])  # no second pull request was tried
+        self.assertEqual(github.pr(1)["title"], "1: fix add")  # the ticket's own was found, and written at ship
+        asked = [c["query"].get("head") for c in github.read()["log"] if c["path"] == "pulls" and c["method"] == "GET"]
+        self.assertIn("acme:1-fix-add", asked)
+        # A ticket nobody claimed has no pull request to find: it costs no call of its own.
+        self.assertFalse([h for h in asked if h and h.startswith("acme:2-")], asked)
+
+    def test_a_contract_pull_request_older_than_the_100_newest_still_reads_its_rail_go(self):
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
+        a.add(ticket(tier="PERSON"))
+        self.assertEqual(a.rail("next")["reason"]["code"], "WAITING_PERSON")
+        self.dummies(github, 120)
+        github.label(1, "rail:go")
+        self.assertEqual(a.rail("next")["reason"]["code"], "IMPLEMENT")
+
+    def test_issues_on_a_later_page_are_taken_in(self):
+        a, b, github = self.github_pair()
+        github.update(lambda s: (s.__setitem__("max_per_page", 2), s["issues"].extend(
+            {"number": n, "title": f"Request {n}", "body": "Please.", "labels": ["rail"], "state": "open"}
+            for n in (11, 12, 13))))
+        took = [s["detail"] for s in a.rail("next")["steps"] if s["step"] == "intake"]
+        self.assertEqual(took, ["ticket 1 from github#11", "ticket 2 from github#12", "ticket 3 from github#13"])
+
+    def test_a_rate_limit_is_a_rest_that_changes_nothing_and_counts_no_attempt(self):
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        a.rail("next")
+        a.fix_calc("1")
+        before = events(a)
+        github.update(lambda s: s.__setitem__("limit", {"status": 429, "retry_after": 30,
+                                                        "message": "You have exceeded a secondary rate limit."}))
+        for verb in (("next",), ("advance", "1"), ("status",)):
+            limited = a.rail(*verb)
+            self.assertEqual((limited["owner"], limited["reason"]["code"], limited["action"]["kind"],
+                              limited["action"]["command"]), ("agent", "GITHUB_LIMIT", "script", "sleep 31; rail next"))
+            self.assertIn("secondary rate limit", limited["reason"]["message"])
+        self.assertEqual(events(a), before)
+        # The primary limit: 403, nothing left, and the time it resets. Too long to sleep through: the run ends.
+        github.update(lambda s: s.__setitem__("limit", {"status": 403, "remaining": 0, "reset": int(time.time()) + 1800}))
+        limited = a.rail("next")
+        self.assertEqual((limited["owner"], limited["reason"]["code"], limited["action"]["kind"]),
+                         ("none", "GITHUB_LIMIT", "rest"))
+        self.assertIn("used up until 20", limited["action"]["brief"])
+        self.assertTrue(1700 < limited["wait_secs"] <= 1801, limited["wait_secs"])
+        self.assertEqual(events(a), before)
+        github.update(lambda s: s.pop("limit"))
+        shipped = a.rail("advance", "1")
+        self.assertEqual((shipped["state"], shipped["reason"]["code"]), ("in-ci", "CI_WAIT"))
+        self.assertEqual(len([e for e in events(a) if e["event"] == "shipped"]), 1)
+
+    def test_a_limit_that_hits_a_write_after_the_ship_leaves_the_ship_done(self):
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        a.rail("next")
+        a.fix_calc("1")
+        github.update(lambda s: s.__setitem__("limit", {"status": 429, "retry_after": 5, "methods": ["PATCH", "POST"]}))
+        limited = a.rail("advance", "1")
+        self.assertEqual((limited["reason"]["code"], limited["action"]["command"]), ("GITHUB_LIMIT", "sleep 6; rail next"))
+        github.update(lambda s: s.pop("limit"))
+        again = a.rail("next")
+        self.assertEqual((again["state"], again["reason"]["code"]), ("in-ci", "CI_WAIT"))
+        self.assertEqual(github.pr(1)["title"], "1: fix add")
+        steps_ = [e for e in events(a) if e["event"] == "step"]
+        self.assertFalse([e for e in steps_ if e["result"] == "fail"], steps_)
+        self.assertEqual(len([e for e in events(a) if e["event"] == "shipped"]), 1)
+
+    def test_a_refusal_that_is_no_rate_limit_is_not_a_rest(self):
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        github.update(lambda s: s.__setitem__("limit", {"status": 403, "message": "Resource not accessible by integration"}))
+        offline = a.rail("next")
+        self.assertNotEqual(offline["reason"]["code"], "GITHUB_LIMIT")
+
+    def test_two_writes_in_one_command_are_a_second_apart(self):
+        a, b, github = self.github_pair(config=APPROVE + CONFIG)
+        a.add(ticket(tier="PERSON"))
+        a.rail("next")  # opens the contract pull request, then labels it for the person
+        writes = [c["at"] for c in github.read()["log"] if c["method"] != "GET"]
+        self.assertGreaterEqual(len(writes), 2)
+        self.assertTrue(all(later - earlier >= 0.99 for earlier, later in zip(writes, writes[1:])), writes)
+
+
+class Calls(RailTest):
+    """Every REST call the engine makes is on an event, or waits in the clone's cache for the next one."""
+
+    def kept(self, fx):
+        folder = fx.path(".git", "rail", "cache", "gh_calls")
+        names = os.listdir(folder) if os.path.isdir(folder) else []
+        total = 0
+        for name in names:
+            with open(os.path.join(folder, name)) as f:
+                total += int(f.read())
+        return total
+
+    def on_events(self, fx, *refs):
+        fx.git("fetch", "--quiet")
+        total = 0
+        for ref, nn in refs:
+            rows = [json.loads(line) for line in fx.git("show", f"{ref}:.rail/journal/{nn}-events.jsonl").splitlines()]
+            self.assertTrue(all(isinstance(e.get("gh_calls", 1), int) and e.get("gh_calls", 1) > 0 for e in rows), rows)
+            total += sum(e.get("gh_calls", 0) for e in rows)
+        return total
+
+    def test_gh_calls_on_the_events_match_the_fake_githubs_request_log(self):
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        a.rail("status")  # a command that writes no event: its calls wait in the cache
+        self.assertGreater(self.kept(a), 0)
+        a.rail("next")
+        logged = len(github.read()["log"])
+        self.assertGreater(logged, 0)
+        self.assertEqual(self.on_events(a, ("origin/1-fix-add", "1")) + self.kept(a), logged)
+        a.fix_calc("1")
+        a.rail("advance", "1")
+        github.ci("1-fix-add", "success")
+        a.rail("next")
+        self.assertEqual(self.on_events(a, ("origin/1-fix-add", "1")) + self.kept(a), len(github.read()["log"]))
+        self.assertEqual(a.rail("advance", "1")["state"], "merged")
+        merged_with = self.on_events(a, ("origin/main", "1"))
+        self.assertGreater(merged_with, 0)
+        self.assertEqual(merged_with + self.kept(a), len(github.read()["log"]))  # the merge's own calls wait
+
+        stats = a.rail("stats")["stats"]["github"]
+        self.assertEqual(stats, {"calls": merged_with, "calls_per_ticket": float(merged_with)})
+        self.assertIn(f"GitHub REST calls: {merged_with}, {merged_with} for each merged ticket.",
+                      a.rail("stats", raw=True).stdout)
+
+        # The next event written in this clone carries what waited, whatever its ticket.
+        a.add(ticket(title="Add a status code", scope=("api/**",), check="grep -q 201 api/handlers.py"))
+        a.rail("next")
+        both = self.on_events(a, ("origin/main", "1"), ("origin/2-add-a-status-code", "2"))
+        self.assertEqual(both + self.kept(a), len(github.read()["log"]))
+
+    def test_a_project_with_no_remote_counts_nothing(self):
+        p = self.fixture()
+        p.add(ticket())
+        p.rail("next")
+        rows = [json.loads(line) for line in p.git("show", "1-fix-add:.rail/journal/1-events.jsonl").splitlines()]
+        self.assertTrue(all("gh_calls" not in e for e in rows))
+        self.assertEqual(self.kept(p), 0)
+
+
 class Doctor(RailTest):
+    def test_doctor_shows_the_calls_the_token_has_left_this_hour(self):
+        a, b, github = self.github_pair()
+        self.assertNotIn("github rate limit", {s["step"] for s in a.rail("doctor", expect=3)["steps"]})  # no header
+        github.update(lambda s: s.update(rate={"limit": 5000, "remaining": 4321, "reset": int(time.time()) + 630}))
+        found = {s["step"]: s for s in a.rail("doctor", expect=3)["steps"]}["github rate limit"]
+        self.assertEqual((found["status"], found["result"]), ("ran", "pass"))
+        self.assertRegex(found["detail"], r"^4321 of 5000 REST calls left this hour, reset in (9|10) min$")
+        github.update(lambda s: s["rate"].update(remaining=499))
+        low = {s["step"]: s for s in a.rail("doctor", expect=3)["steps"]}["github rate limit"]
+        self.assertEqual(low["status"], "unavailable")  # a warning: nothing is wrong yet
+        self.assertIn("499 of 5000 REST calls left this hour", low["detail"])
+        self.assertIn("shares the limit", low["detail"])
+
     def test_doctor_checks_the_one_time_github_settings(self):
         a, b, github = self.github_pair()
         found = {s["step"]: s for s in a.rail("doctor", expect=3)["steps"]}
@@ -562,7 +739,8 @@ class Doctor(RailTest):
                                                    "allow_rebase_merge": False, "squash_merge_commit_title": "PR_TITLE",
                                                    "squash_merge_commit_message": "PR_BODY",
                                                    "delete_branch_on_merge": True},
-                                         labels=["rail", "rail:go", "rail:needs-you", "rail:hold"]))
+                                         labels=["rail", "rail:go", "rail:needs-you", "rail:hold", "rail:stop", "rail:revert",
+                                                 "rail:first"]))
         found = {s["step"]: s for s in a.rail("doctor", expect=None)["steps"]}
         for name in ("squash merging", "required check", "labels", "merged branches"):
             self.assertEqual(found[name]["result"], "pass", found[name])

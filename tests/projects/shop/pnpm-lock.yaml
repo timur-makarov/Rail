@@ -1,0 +1,17 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .: {}
+
+  lib: {}
+
+  web:
+    dependencies:
+      shop-lib-js:
+        specifier: workspace:*
+        version: link:../lib

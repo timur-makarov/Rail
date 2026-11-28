@@ -67,7 +67,7 @@ class BaseChecks(RailTest):
             text = f.read()
         p.write(".rail/tickets/1.md", text.replace("## Done Contract\n", f"## Done Contract\n- Check: `{CHECK_ADD}`\n"),
                 base=p.worktree("1"))
-        p.rail("amend", "1")
+        p.rail("amend", "1", "the check passed before any work")
         self.assertNotIn("already passed on the base branch", p.rail("next")["action"]["brief"])
 
     def test_when_a_check_failed_on_the_base_the_brief_says_nothing_of_it(self):

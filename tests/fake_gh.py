@@ -11,7 +11,7 @@ import os
 import subprocess
 import sys
 import time
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 def git(bare, *args, input=None):
@@ -53,12 +53,29 @@ def list_view(state, pr):
     return view
 
 
-def respond(status, body=None):
-    reason = {200: "OK", 201: "Created", 202: "Accepted", 204: "No Content", 404: "Not Found",
-              405: "Method Not Allowed", 409: "Conflict", 422: "Unprocessable Entity"}.get(status, "")
-    print(f"HTTP/2.0 {status} {reason}\r\nContent-Type: application/json\r\n\r\n" +
+RATE = {}  # the x-ratelimit-* headers every answer carries, when the state's "rate" sets them
+
+
+def respond(status, body=None, headers=None):
+    headers = {**RATE, **(headers or {})}
+    reason = {200: "OK", 201: "Created", 202: "Accepted", 204: "No Content", 403: "Forbidden", 404: "Not Found",
+              405: "Method Not Allowed", 409: "Conflict", 422: "Unprocessable Entity", 429: "Too Many Requests"}.get(status, "")
+    extra = "".join(f"{name}: {value}\r\n" for name, value in (headers or {}).items())
+    print(f"HTTP/2.0 {status} {reason}\r\nContent-Type: application/json\r\n{extra}\r\n" +
           (json.dumps(body) if body is not None else ""))
     return 0 if status < 400 else 1
+
+
+def paged(state, url, query, rows):
+    """One page of a list, as GitHub cuts it: per_page rows (30 unless asked, never more than the fake's
+    max_per_page), with a Link header naming the next page while there is one."""
+    size = min(int(query.get("per_page", 30)), state.get("max_per_page", 100))
+    page = int(query.get("page", 1))
+    headers = {}
+    if len(rows) > page * size:
+        rest = "&".join(f"{k}={v}" for k, v in query.items() if k != "page")
+        headers["Link"] = f'<https://api.github.com/{url.path.lstrip("/")}?{rest}&page={page + 1}>; rel="next"'
+    return respond(200, rows[(page - 1) * size:page * size], headers)
 
 
 def handle(state, method, path, body):
@@ -69,6 +86,15 @@ def handle(state, method, path, body):
         return respond(404, {"message": "Not Found"})
     rest = parts[3:]
     state.setdefault("calls", []).append(f"{method} {'/'.join(rest)}")
+    state.setdefault("log", []).append({"method": method, "path": "/".join(rest), "query": query, "at": time.time()})
+    RATE.update({f"x-ratelimit-{name}": str(value) for name, value in (state.get("rate") or {}).items()})
+    limit = state.get("limit")
+    if limit and method in limit.get("methods", [method]):
+        # A rate limit, as GitHub answers one: the status, and the headers that say when to come back.
+        headers = {k: str(v() if callable(v) else v) for k, v in (
+            ("retry-after", limit.get("retry_after")), ("x-ratelimit-remaining", limit.get("remaining")),
+            ("x-ratelimit-reset", limit.get("reset"))) if v is not None}
+        return respond(limit.get("status", 429), {"message": limit.get("message", "API rate limit exceeded")}, headers)
     pulls, issues = state.setdefault("pulls", []), state.setdefault("issues", [])
 
     def find_pr(n):
@@ -90,11 +116,33 @@ def handle(state, method, path, body):
               "base": body["base"], "state": "open", "merged": False, "labels": []}
         pulls.append(pr)
         return respond(201, pr_view(state, pr))
+    if len(rest) == 3 and rest[0] == "pulls" and rest[2] == "comments" and method == "GET":
+        return paged(state, url, query, state.setdefault("line_comments", {}).get(rest[1], []))
+    if len(rest) == 3 and rest[0] == "pulls" and rest[2] == "reviews" and method == "POST":
+        kept = state.setdefault("line_comments", {}).setdefault(rest[1], [])
+        for c in body.get("comments", []):
+            kept.append({"path": c["path"], "line": c["line"], "body": c["body"], "user": {"login": "owner"},
+                         "author_association": "OWNER", "created_at": "2026-11-11T12:00:00Z",
+                         "commit_id": body.get("commit_id")})
+        return respond(200, {"id": len(kept), "state": "COMMENTED"})
+    if rest == ["issues"] and method == "POST":
+        number = state.get("next_number", 1)
+        state["next_number"] = number + 1
+        issues.append({"number": number, "title": body["title"], "body": body.get("body", ""), "state": "open",
+                       "labels": list(body.get("labels", [])), "user": {"login": "owner"},
+                       "author_association": "OWNER"})
+        return respond(201, issues[-1])
+    if len(rest) == 2 and rest[0] == "issues" and method == "PATCH":
+        issue = next((i for i in issues if i["number"] == int(rest[1])), None)
+        if not issue:
+            return respond(404, {"message": "Not Found"})
+        issue.update({k: body[k] for k in ("state", "title", "body") if k in body})
+        return respond(200, issue)
     if rest == ["pulls"] and method == "GET":
         found = [p for p in pulls if query.get("state", "open") in ("all", p["state"])]
         if "head" in query:
             found = [p for p in found if p["head"] == query["head"].split(":", 1)[1]]
-        return respond(200, [list_view(state, p) for p in sorted(found, key=lambda p: -p["number"])])
+        return paged(state, url, query, [list_view(state, p) for p in sorted(found, key=lambda p: -p["number"])])
     if len(rest) == 2 and rest[0] == "pulls":
         pr = find_pr(rest[1])
         if not pr:
@@ -150,7 +198,10 @@ def handle(state, method, path, body):
     if rest == ["issues"] and method == "GET":
         found = [i for i in issues if i["state"] == query.get("state", "open")
                  and (not query.get("labels") or query["labels"] in i["labels"])]
-        return respond(200, [dict(i, labels=[{"name": n} for n in i["labels"]]) for i in found])
+        # GitHub lists pull requests here too, each with a pull_request key.
+        found += [dict(p, pull_request={"merged_at": p.get("merged_at")}) for p in pulls
+                  if p["state"] == query.get("state", "open") and query.get("labels") and query["labels"] in p["labels"]]
+        return paged(state, url, query, [dict(i, labels=[{"name": n} for n in i["labels"]]) for i in found])
     if len(rest) == 3 and rest[0] == "commits" and rest[2] == "check-runs":
         runs = state.setdefault("checks", {}).get(rest[1], [])
         return respond(200, {"total_count": len(runs), "check_runs": runs})
@@ -158,6 +209,25 @@ def handle(state, method, path, body):
         log = state.get("logs", {}).get(rest[2])  # plain text, as GitHub sends a job's log
         print(log if log is not None else json.dumps({"message": "Not Found"}))
         return 0 if log is not None else 1
+    if rest in (["actions", "secrets"], ["actions", "organization-secrets"]) and method == "GET":
+        if state.get("secrets_status"):  # a token that may not list secrets
+            return respond(state["secrets_status"], {"message": "Resource not accessible by integration"})
+        names = state.get("secrets" if rest[1] == "secrets" else "org_secrets", [])
+        return respond(200, {"total_count": len(names), "secrets": [{"name": n} for n in names]})
+    if rest == ["environments"] and method == "GET":
+        found = [{"name": e["name"], "deployment_branch_policy": None if e.get("branches") is None else {
+            "protected_branches": e["branches"] == "protected", "custom_branch_policies": e["branches"] != "protected"}}
+            for e in state.get("environments", [])]
+        return respond(200, {"total_count": len(found), "environments": found})
+    if len(rest) == 3 and rest[0] == "environments" and method == "GET":
+        env = next((e for e in state.get("environments", []) if e["name"] == unquote(rest[1])), None)
+        if env and rest[2] == "secrets":
+            return respond(200, {"total_count": len(env.get("secrets", [])),
+                                 "secrets": [{"name": n} for n in env.get("secrets", [])]})
+        if env and rest[2] == "deployment-branch-policies":
+            rows = [{"name": b, "type": "branch"} if isinstance(b, str) else b for b in env.get("branches") or []]
+            return respond(200, {"total_count": len(rows), "branch_policies": rows})
+        return respond(404, {"message": "Not Found"})
     if len(rest) == 3 and rest[0] == "rules" and rest[1] == "branches":
         required = [{"context": c} for c in state.get("required", [])]
         rules = [{"type": "required_status_checks", "parameters": {"required_status_checks": required}}] if required else []

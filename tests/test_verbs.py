@@ -9,9 +9,9 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from railtest import ARCHITECTURE, CONFIG, Fixture, RailTest, ticket  # noqa: E402
+from railtest import APPROVE, ARCHITECTURE, CONFIG, Fixture, RailTest, ticket  # noqa: E402
 
-LABELS = ["rail", "rail:go", "rail:needs-you", "rail:hold"]
+LABELS = ["rail", "rail:go", "rail:needs-you", "rail:hold", "rail:stop", "rail:revert", "rail:first"]
 
 
 def read(path):
@@ -32,10 +32,10 @@ class Init(RailTest):
         a, b, github = self.github_pair(init=False)
         done = a.rail("init")
         self.assertEqual(steps(done)["labels"], {"step": "labels", "status": "ran", "result": "pass",
-                                                 "detail": "created rail, rail:go, rail:needs-you, rail:hold"})
+                                                 "detail": "created " + ", ".join(LABELS)})
         self.assertEqual(sorted(github.read()["labels"]), sorted(LABELS))
         again = a.rail("init")
-        self.assertEqual(steps(again)["labels"]["detail"], "all three exist")
+        self.assertEqual(steps(again)["labels"]["detail"], "all 7 exist")
         self.assertEqual(sorted(github.read()["labels"]), sorted(LABELS))
 
     def test_settings_that_are_not_json_are_left_alone_and_doctor_says_the_hooks_are_missing(self):
@@ -51,7 +51,7 @@ class Init(RailTest):
 
 class Status(RailTest):
     def test_status_notes_what_each_waiting_ticket_waits_for(self):
-        p = self.fixture()
+        p = self.fixture(config=APPROVE + CONFIG)
         p.add(ticket(tier="PERSON", title="Change the API", scope=("api/**",), check="grep -q 201 api/handlers.py"))
         p.add(ticket())
         p.add(ticket(title="Fix add again", front=('after = ["2"]',)))
@@ -133,8 +133,23 @@ class Text(RailTest):
         self.assertIn("  verify: ran, pass (exit 0)", lines)
         self.assertIn("AssertionError", text)
         p.fix_calc("1")
-        dropped = p.rail("drop", "1", raw=True).stdout
+        dropped = p.rail("drop", "1", "--reason", "not needed", raw=True).stdout
         self.assertIn("\n\nleftover: worktree .claude/worktrees/1 (uncommitted changes (1 files); left for you)", dropped)
+
+    STOP = "If a person asked you for this work, stop here and tell them the ticket number: another session builds it."
+
+    def test_add_ends_with_the_line_that_tells_an_intake_session_to_stop(self):
+        p = self.fixture()
+        path = p.path("..", "draft.md")
+        with open(path, "w") as f:
+            f.write(ticket())
+        text = p.rail("add", path, raw=True).stdout
+        self.assertTrue(text.startswith("ticket 1 · accepted · owner agent · CLAIM\n"), text)
+        self.assertTrue(text.endswith("\n\nrail next --ticket 1\n\n" + self.STOP + "\n"), text)
+        self.assertEqual(p.add(ticket(title="Fix sub"))["note"], self.STOP)  # --json carries it too
+        lint = p.add("no front matter", expect=None)
+        self.assertEqual(lint["reason"]["code"], "TICKET_LINT")
+        self.assertNotIn("note", lint)  # only a filed ticket gets it
 
 
 class Doctor(RailTest):

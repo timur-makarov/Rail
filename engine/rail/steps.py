@@ -8,15 +8,16 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from . import doclint, gitx, rules
-from .project import event, events_path, ticket_path
+from . import config as configmod, doclint, flakes, gitx, rules, tools
+from .project import PRODUCT_SPEC, event, events_path, ticket_path
 from .state import raised_tier
 from .util import cloud
 from .ticket import Ticket, lint, rank
-from .util import MISSING_HELP, could_not_run, match_any, minutes_since, run_shell, tail
+from .util import (MISSING_HELP, NOT_COUNTED, could_not_run, family, match_any, minutes_since, run_shell, tail,
+                   tried_help)
 
 # A step's status: it ran and passed or failed, or the shell could not start its command (could_not_run, a failure
-# that checked nothing). Both are attempts, and both count toward the step's retry budget.
+# that checked nothing). A ship step that could not run counts as no attempt: twice in a row it waits for a person.
 TRIED = ("ran", "could_not_run")
 REVIEW_STEPS = ("review", "security", "refuter")  # every failed run at one of these is the same failure: plain count
 
@@ -50,7 +51,9 @@ class Run:
         self.size = None
 
     def record(self, step, passed, patch_id=None, detail=None, duration_ms=None, output="", status="ran",
-               counted=True, cost_usd=None):
+               counted=True, cost_usd=None, signed=None, **more):
+        """`signed`: the text a failure's signature is made of, where the output holds words that change from run to
+        run. `more`: other fields of the step's event."""
         receipt = {"step": step, "status": status}
         if status in TRIED:
             receipt["result"] = "pass" if passed else "fail"
@@ -66,8 +69,8 @@ class Run:
             if cost_usd is not None:
                 fields["cost_usd"] = cost_usd
             if not passed:
-                fields["signature"] = signature(step, output or detail or "")
-            self.events.append(event(self.t.id, "step", **fields))
+                fields["signature"] = signature(step, signed or output or detail or "")
+            self.events.append(event(self.t.id, "step", **fields, **more))
         if detail:
             receipt["detail"] = detail
         self.steps.append(receipt)
@@ -77,6 +80,10 @@ class Run:
 
     def not_run(self, *names):
         for name in names:
+            if name == "sensors" and not self.project.config["sensors"]:
+                continue  # a project with no sensor has no such step
+            if name == "product" and not self.project.config["surfaces"]:
+                continue  # nor has a project with no surface
             self.steps.append({"step": name, "status": "not_run"})
 
     @property
@@ -94,15 +101,25 @@ def keep_alive(project, t):
         project.append_events(t, [event(t.id, "saved", via="advance", files=0)], "still at work [skip ci]")
 
 
-def run_command(project, cwd, nn, step, command, run, patch_id=None, label=None):
-    """Run one configured command in `cwd` and record it."""
+def run_command(project, cwd, nn, step, command, run, patch_id=None, label=None, again=False):
+    """Run one configured command in `cwd` and record it. With `again`, a command that fails is run once more at
+    once: when that passes, the step still fails, and a `flake` event and the brief say that it did both on the same
+    code. A race the change brought in looks exactly like a flake, so the second run proves nothing about the change."""
     keep_alive(project, run.t)
-    code, output, ms = run_shell(command, cwd, {"RAIL_TICKET": nn, "RAIL_BASE": project.base_ref},
-                                 project.config["commands"]["timeout_secs"])
+    env = {"RAIL_TICKET": nn, "RAIL_BASE": project.base_ref}
+    code, output, ms = run_shell(command, cwd, env, configmod.timeout(project.config, step))
     missing = could_not_run(code)
     status = missing or ("timeout" if code is None else f"exit {code}")
     detail = (f"{label}: {status}" if code != 0 else label) if label else status
-    return run.record(step, code == 0, patch_id, detail, ms, output=f"$ {command}\n{tail(output)}",
+    shown = f"$ {command}\n{tail(output)}"
+    if again and code != 0 and not missing:
+        keep_alive(project, run.t)
+        second, _, _ = run_shell(command, cwd, env, configmod.timeout(project.config, step))
+        if second == 0:
+            run.events.append(event(nn, "flake", step=step, command=command, patch_id=patch_id,
+                                    codes=["timeout" if code is None else code, 0]))
+            shown += f"\n\n{flakes.TOLD}"
+    return run.record(step, code == 0, patch_id, detail, ms, output=shown,
                       status="could_not_run" if missing else "ran")
 
 
@@ -133,12 +150,66 @@ def copy_includes(project, path):
                     shutil.copy2(src, dest)
 
 
+def reached(project, ref, files):
+    """The projects of the branch a change of these files reaches, a project before the projects that use it (rail
+    docs languages). They are derived now, from the base branch's tree and from the branch's."""
+    from . import layout
+    branch = project.layout(ref)
+    base = project.layout(project.base_ref) if gitx.rev(project.base_ref, project.root) else branch
+    return [branch.by_name[name] for name in layout.reach(branch, base, files)]
+
+
+def in_scope(project, ref, scope):
+    """The projects a ticket's scope_paths reach: those the files of the branch that the scope names reach."""
+    return reached(project, ref, [p for p in project.layout(ref).tree.files if match_any(scope, p)])
+
+
+def folder_of(cwd, p):
+    """Where a project's commands run: its folder, or the repository's root for one an entry declares."""
+    return os.path.join(cwd, p["folder"]) if p["folder"] else cwd
+
+
+def _set_up(cwd):
+    """(the file that says which projects were set up in this checkout, what it holds): {project: its setup
+    command}. It is in the checkout's own git folder, so it goes when the worktree does."""
+    import json
+    path = os.path.join(gitx.out(["rev-parse", "--absolute-git-dir"], cwd), "rail-setup.json")
+    try:
+        with open(path) as f:
+            return path, json.load(f)
+    except (OSError, ValueError):
+        return path, {}
+
+
+def setup_projects(project, nn, cwd, projects, run):
+    """`setup` for each of these projects that this checkout has not set up yet, each its own step `setup:NAME` in
+    the project's folder. False when one failed."""
+    import json
+    path, done = _set_up(cwd)
+    for p in projects:
+        if not p["setup"] or done.get(p["name"]) == p["setup"]:
+            continue
+        if not run_command(project, folder_of(cwd, p), nn, f"setup:{p['name']}", p["setup"], run):
+            return False
+        done[p["name"]] = p["setup"]
+        with open(path, "w") as f:
+            json.dump(done, f)
+    return True
+
+
 def setup(project, t, run, cwd=None):
+    """At a claim: setup for the projects the ticket's scope reaches, then [commands] setup, which holds what
+    belongs to the whole repository. A project the change first reaches at ship is set up then."""
+    wt = cwd or t.worktree
+    scope = t.ticket.scope if getattr(t, "ticket", None) else []
+    if not setup_projects(project, t.id, wt, in_scope(project, t.ref, scope) if scope else [], run):
+        return False
     command = project.config["commands"]["setup"]
     if not command:
-        run.not_run("setup")
+        if not any(family(s["step"]) == "setup" for s in run.steps):
+            run.not_run("setup")
         return True
-    return run_command(project, cwd or t.worktree, t.id, "setup", command, run)
+    return run_command(project, wt, t.id, "setup", command, run)
 
 
 def base_checks(project, t):
@@ -172,6 +243,70 @@ def run_checks(project, commands, cwd, nn):
     return results
 
 
+def test_changes(project, ref):
+    """What the change does to files matching [tests] paths, and to REVIEW.md files, which are what checks it:
+    [(status, the path the base has it under or None, the path the change has it under or None)], with status M
+    (edited), A (new), D (deleted) or R (renamed). `git diff --name-only` lists only a renamed file's new path, so
+    this reads the status rows. [] when nothing of the kind changed."""
+    globs = project.config["tests"]["paths"]
+    rows = gitx.out(["diff", "--name-status", "-M", f"{project.base_ref}...{ref}", *PRODUCT_SPEC], project.root)
+    found = []
+    for row in rows.splitlines():
+        status, *paths = row.split("\t")
+        kind = {"T": "M", "C": "A"}.get(status[:1], status[:1])
+        old, new = (None if kind == "A" else paths[0]), (None if kind == "D" else paths[-1])
+        if any(path and (match_any(globs, path) or os.path.basename(path) == "REVIEW.md") for path in (old, new)):
+            found.append((kind, old, new))
+    return found
+
+
+def base_test_files(project, ref):
+    """The test files the base has that the change edits, deletes or renames, by the path the base has them under:
+    the files whose base version still says what the code did before the change. A file the change adds is the
+    author's own and is left out. A renamed file counts under its old path, wherever it went."""
+    globs = project.config["tests"]["paths"]
+    return [old for kind, old, _ in test_changes(project, ref) if old and match_any(globs, old)] if globs else []
+
+
+def base_tests(project, t, ticket, ref, patch_id):
+    """Run verify and each Check: line once more with the base's version of the test files the change edits, and
+    return the base_tests event: per command, green, red, could_not_run or timed_out, with the output's tail of a red
+    one. The Check: lines are frozen at acceptance, and the test files they run are not: a command that passed with
+    the edited tests and fails with the old ones is a fact the triage step asks about (rail docs triage). It runs
+    after a ship's steps have passed, once for a patch, and fails no step by itself. None when [tests] paths is
+    empty, the change edits no test file of the base, the patch already has its event, or something went wrong."""
+    if any(e.get("event") == "base_tests" and e.get("patch_id") == patch_id for e in t.events):
+        return None
+    files = base_test_files(project, ref)
+    if not files:
+        return None
+    keep_alive(project, t)  # it may commit an event: before the head the worktree is put back to is read
+    wt, env = t.worktree, {"RAIL_TICKET": t.id, "RAIL_BASE": project.base_ref}
+    head, base = gitx.rev(ref, project.root), gitx.rev(project.base_ref, project.root)
+    verify = project.config["commands"]["verify"]
+    limit = configmod.timeout(project.config, "verify")
+    commands = [(f"verify:{p['name']}", p["verify"], limit, folder_of(wt, p))
+                for p in reached(project, ref, project.changed_files(ref)) if p["verify"]] \
+        + ([("verify", verify, limit, wt)] if verify else []) \
+        + [("checks", command, project.config["commands"]["timeout_secs"], wt) for command in ticket.checks()]
+    try:
+        gitx.git(["checkout", "--quiet", base, "--", *files], wt)
+        results = []
+        for step, command, timeout, where in commands:
+            code, output, _ = run_shell(command, where, env, timeout)
+            result = "timed_out" if code is None else "could_not_run" if could_not_run(code) else \
+                "green" if code == 0 else "red"
+            results.append({"step": step, "command": command, "result": result,
+                            **({"output": tail(output, 40)} if result == "red" else {})})
+        return event(t.id, "base_tests", patch_id=patch_id, base=base[:12], files=files, commands=results)
+    except Exception:
+        return None  # a fact the engine couldn't gather: the ship goes on without it
+    finally:
+        # The worktree goes back to the change, as after base_checks: ignored files such as installed dependencies stay.
+        gitx.git(["reset", "--quiet", "--hard", head], wt, check=False)
+        gitx.git(["clean", "-fdq"], wt, check=False)
+
+
 @contextlib.contextmanager
 def scratch(project, commit):
     """A throwaway worktree at `commit`, detached, with the files .worktreeinclude lists. Removed afterwards."""
@@ -187,7 +322,8 @@ def scratch(project, commit):
 
 # --- ship and CI -------------------------------------------------------------------
 
-CHECKS = ["ticket-lint", "assumptions", "scope", "rules", "migration", "size", "doc-lint", "verify", "checks"]
+CHECKS = ["ticket-lint", "assumptions", "scope", "rules", "migration", "size", "doc-lint", "verify", "checks",
+          "sensors", "product"]
 
 
 def _stop(run, step):
@@ -195,7 +331,7 @@ def _stop(run, step):
     return None
 
 
-def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, offer=False):
+def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, offer=False, again=False):
     """The checks ship and CI share, in order, stopping at the first failure.
 
     Returns the tier the change needs (it may rise), or None when a check failed or, with `offer`, when an AUTO change
@@ -206,7 +342,7 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
         # The contract and tier freeze at acceptance: only `rail amend` changes them.
         if ticket.contract_hash() != accepted.get("contract"):
             errors.append(f"the contract (Done Contract and scope_paths) differs from the accepted one; change it with"
-                          f" rail amend {nn}")
+                          f" rail amend {nn} \"why\"")
         if rank(ticket.tier) < rank(accepted.get("tier")):
             errors.append(f"the tier is {ticket.tier}, below the accepted {accepted.get('tier')}; tiers only go up")
     if not run.record("ticket-lint", not errors, patch_id, "; ".join(errors) or None, output="\n".join(errors)):
@@ -218,7 +354,10 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
         return _stop(run, "assumptions")
 
     changed = project.changed_files(ref)
-    outside = [p for p in changed + project.other_tickets(ref, nn) if not match_any(ticket.scope, p)]
+    # A line in .gitleaksignore answers the secret scan's false finding in any ticket, and raises a question of its
+    # own (rail docs triage), so the file is in every ticket's scope.
+    from .triage import IGNORED
+    outside = [p for p in changed + project.other_tickets(ref, nn) if not match_any(ticket.scope, p) and p != IGNORED]
     if not run.record("scope", not outside, patch_id, f"outside scope: {', '.join(outside)}" if outside else None,
                       output=f"These files are outside scope_paths ({', '.join(ticket.scope)}):\n" + "\n".join(outside)):
         return _stop(run, "scope")
@@ -232,10 +371,10 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
                                        for rule, path, what in broken)):
         return _stop(run, "rules")
 
-    needed, reason = raised_tier(project, changed)
+    needed, kinds = raised_tier(project, changed)
     if rank(needed) > rank(tier):
-        hits = [p for p in changed if match_any(project.config[reason], p)]
-        run.events.append(event(nn, "tier_raised", **{"from": tier, "to": needed, "reason": reason,
+        kind, hits, key = kinds[0]
+        run.events.append(event(nn, "tier_raised", **{"from": tier, "to": needed, "reason": key, "kind": kind,
                                                      "detail": ", ".join(hits[:5])}))
         tier = needed
 
@@ -250,17 +389,12 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
     count, _ = rules.size(project, ref, cwd)
     cap = project.config["size"]["cap"] if tier == "AUTO" else None  # a PERSON change has no cap: a person reads it
     run.record("size", True, patch_id, f"size {count}/{cap}" if cap else f"size {count}")
-    sized = rules.size_tier(project, tier, count)
     run.size = count
-    if rank(sized) > rank(tier) and offer:
-        # Once per ticket, before a person has to merge it: the agent may split the change. No step failed, so it
-        # spends no attempt; an advance with the change as it is raises the tier below.
+    if cap is not None and count > cap and offer:
+        # Once per ticket: the agent may split the change, because a reviewer checks a small change better. No step
+        # failed, so it spends no attempt. Size raises no tier: a large change is reverted like a small one.
         run.events.append(event(nn, "split_offered", patch_id=patch_id, size=count, cap=cap))
         return _stop(run, "size")
-    if rank(sized) > rank(tier):
-        run.events.append(event(nn, "tier_raised", **{"from": tier, "to": sized, "reason": "size",
-                                                     "detail": f"{count} changed lines, over the cap of {cap}"}))
-        tier = sized
 
     if gitx.read_blobs([f"{ref}:ARCHITECTURE.md"], project.root).get(f"{ref}:ARCHITECTURE.md") is None:
         run.not_run("doc-lint")
@@ -270,26 +404,66 @@ def check(project, nn, ticket, ref, cwd, tier, run, patch_id, accepted=None, off
                           output="ARCHITECTURE.md:\n" + "\n".join(f"- {p}" for p in problems)):
             return _stop(run, "doc-lint")
 
-    verify = project.config["commands"]["verify"]
-    if verify:
-        if not run_command(project, cwd, nn, "verify", verify, run, patch_id):
-            return _stop(run, "verify")
-    else:
-        run.not_run("verify")
+    if not verify(project, nn, ref, cwd, changed, run, patch_id, again):
+        return _stop(run, "verify")
 
+    if ticket.get("kind") == "revert":
+        # No Check: lines: the change is compared with the reverse of the reverted ticket's change.
+        from . import revert
+        passed, detail, output = revert.check(project, run.t, project.tickets(), patch_id, ref)
+        if not run.record("checks", passed, patch_id, detail, output=output):
+            return _stop(run, "checks")
     for command in ticket.checks():
-        if not run_command(project, cwd, nn, "checks", command, run, patch_id, label=command):
-            return None
+        if not run_command(project, cwd, nn, "checks", command, run, patch_id, label=command, again=again):
+            return _stop(run, "checks")
+    # After verify and the Done Contract, so that they speak first.
+    from . import product, sensors
+    if not sensors.step(project, nn, ref, cwd, run, patch_id, changed):
+        return _stop(run, "sensors")
+    # Last: starting the product and driving it is the dearest check, so everything cheaper has passed.
+    if not product.step(project, nn, ref, cwd, run, patch_id, changed):
+        return None
     return tier
 
 
-def base_fails_verify(project):
-    """Run verify once more on the base branch, in a scratch worktree. Returns its output when it fails there too."""
+def verify(project, nn, ref, cwd, changed, run, patch_id=None, again=False):
+    """Each project the change reaches runs its own verify, in its folder, as a step of its own (`verify:NAME`),
+    after its setup where this checkout has not set it up. Then [commands] verify, which holds what belongs to the
+    whole repository. False at the first that fails; what was left is recorded as not run."""
+    whole = project.config["commands"]["verify"]
+    mine = reached(project, ref, changed)
+    for n, p in enumerate(mine):
+        rest = [f"verify:{q['name']}" for q in mine[n + 1:] if q["verify"]] + (["verify"] if whole else [])
+        if not setup_projects(project, nn, cwd, [p], run):
+            run.not_run(*([f"verify:{p['name']}"] if p["verify"] else []), *rest)
+            return False
+        if p["verify"] and not run_command(project, folder_of(cwd, p), nn, f"verify:{p['name']}", p["verify"], run,
+                                           patch_id, again=again):
+            run.not_run(*rest)
+            return False
+    if whole:
+        return run_command(project, cwd, nn, "verify", whole, run, patch_id, again=again)
+    if not any(p["verify"] for p in mine):
+        run.not_run("verify")
+    return True
+
+
+def base_fails_verify(project, step="verify"):
+    """Run the verify that failed once more on the base branch, in a scratch worktree: [commands] verify, or the
+    verify of the project a step `verify:NAME` names, as the base has that project. Returns its output when it
+    fails there too. A project the base does not have cannot fail there."""
+    setup, verify, folder = project.config["commands"]["setup"], project.config["commands"]["verify"], ""
+    if step != "verify":
+        p = project.layout(project.base_ref).by_name.get(step.split(":", 1)[1])
+        if not p or not p["verify"]:
+            return None
+        setup, verify, folder = p["setup"], p["verify"], p["folder"] or ""
     with scratch(project, gitx.rev(project.base_ref, project.root)) as path:
-        timeout = project.config["commands"]["timeout_secs"]
-        if project.config["commands"]["setup"]:
-            run_shell(project.config["commands"]["setup"], path, {"RAIL_TICKET": ""}, timeout)
-        code, output, _ = run_shell(project.config["commands"]["verify"], path, {"RAIL_TICKET": ""}, timeout)
+        where = os.path.join(path, folder) if folder else path
+        env = {"RAIL_TICKET": "", "RAIL_BASE": project.base_ref}
+        if setup:
+            run_shell(setup, where, env, configmod.timeout(project.config, "setup"))
+        code, output, _ = run_shell(verify, where, env, configmod.timeout(project.config, "verify"))
         # verify that can't start on the base proves nothing about the base: the ticket's own failure stands
         if code is None or code == 0 or could_not_run(code):  # None: it timed out, which proves nothing either
             return None
@@ -321,31 +495,63 @@ def ship(project, f, run):
         run.rebased = True
         run.record("rebase", True, project.patch_id(ref), f"onto {project.base}")
 
+    project.use_trees(ref)  # a manifest the change adds is a project in its own ship, with its profile's rules and paths
     patch_id = project.patch_id(ref)
     text = gitx.read_blobs([f"{ref}:{ticket_path(t.id)}"], project.root)[f"{ref}:{ticket_path(t.id)}"]
     tier = check(project, t.id, Ticket(text or ""), ref, wt, f.tier, run, patch_id, accepted=f.accepted,
-                 offer=not t.last("split_offered"))
-    if tier is None and run.failure and run.failure[0] == "verify" and run.events[-1].get("status") != "could_not_run":
+                 offer=not t.last("split_offered"), again=True)
+    last = run.events[-1] if run.events and run.events[-1].get("event") == "step" else {}
+    if tier is None and run.failure and last.get("result") == "fail":
+        # A failure that may be the machine's costs no attempt; the second in a row waits for a person (TOOL_DOWN).
+        if last.get("status") == "could_not_run":
+            last["counted"] = False  # the shell could not start the command: nothing was checked
+        elif family(run.failure[0]) in ("verify", "checks", "sensors", "product"):
+            down = tools.down(project)
+            if down:  # a declared tool is out of reach: the check may have failed for that alone
+                last["counted"], last["tools_down"] = False, down
+                run.failure = (run.failure[0], f"{run.failure[1]}\n\nA tool the project declares is out of reach"
+                                               f" ({tools.down_said(down)}). {tools.DOWN_HELP}")
+    failed = run.failure[0] if run.failure else ""
+    on_base = family(failed) == "verify" or (failed == "product" and last.get("detail") != "stop failed")
+    if tier is None and on_base and last.get("status") != "could_not_run" and not last.get("tools_down"):
         # A red base spends no budget: two tickets that each pass can break main together. A verify that could
-        # not start is the machine's lack, not the base's: it is never taken for a red base.
-        red = base_fails_verify(project)
+        # not start is the machine's lack, not the base's: it is never taken for a red base. A product that does
+        # not start is held against the base in the same way; a surface's failed check is the ticket's own.
+        if failed == "product":
+            from . import product
+            red = product.base_fails(project)
+        else:
+            red = base_fails_verify(project, failed)
         if red:
             run.events[-1]["counted"] = False
             run.events[-1]["detail"] = "red base"
-            run.steps[-1 if run.steps[-1]["step"] == "verify" else -2]["detail"] = "red base"
+            [s for s in run.steps if s["step"] == failed][-1]["detail"] = "red base"
             project.cache_write("red-base", "base", gitx.rev(project.base_ref, project.root))
             project.cache_write("red-base", "output", red)
-            run.failure = ("verify", "verify fails on the base branch too, so this attempt doesn't count. rail next"
-                                     " opens one ticket that fixes the base; this ticket's ship waits until it merges.")
+            project.cache_write("red-base", "step", failed)
+            what = "the product does not start on the base branch either" if failed == "product" else \
+                f"{failed} fails on the base branch too"
+            run.failure = (failed, f"{what}, so this attempt doesn't count. rail next"
+                                   " opens one ticket that fixes the base; this ticket's ship waits until it merges.")
     if tier is None:
         return run
     # Every check passed and no file changed: the checks passed before the ticket too, so there is nothing to ship
-    # or merge. A sweep ticket is the one exception: it merges to move the sweep's marker.
-    if not project.changed_files(ref) and not (f.ticket.get("external_id") or "").startswith("sweep#"):
+    # or merge.
+    # A sweep ticket is the one exception: it merges to move the sweep's marker. So is the ticket that asks about
+    # the folders inside no project, whose ship is the asking.
+    if not project.changed_files(ref) and not (f.ticket.get("external_id") or "").startswith(("sweep#", "coverage#")):
         run.record("change", False, patch_id, "no file changed",
                    output=f"Ticket {t.id} changes no file, so there is nothing to ship. If the work is already on the"
                           f" base branch, say so and close the ticket: rail drop {t.id} --reason \"already done:"
                           f" where\". If it is not, make the change, then run: rail advance {t.id}")
+        return run
+    # Every check passed: the facts of this patch that raise a question for the triage step. An answer that stopped
+    # this same patch still stands, and fails the step again.
+    from . import triage
+    held = base_tests(project, t, Ticket(text or ""), ref, patch_id)
+    if held:
+        run.events.append(held)
+    if not triage.raise_at_ship(project, f, run, ref, patch_id):
         return run
     head = gitx.rev(ref, project.root)
     run.events.append(event(t.id, "shipped", patch_id=patch_id, head=head[:12], tier=tier, size=run.size))
@@ -355,8 +561,15 @@ def ship(project, f, run):
 def ship_failed_brief(t, run):
     step, output = run.failure
     if any(s.get("status") == "could_not_run" for s in run.steps):
-        return f"Ship of ticket {t.id} could not run '{step}'.\n{output}\n\n{MISSING_HELP} Then run: rail advance {t.id}"
-    return f"Ship of ticket {t.id} failed at '{step}'.\n{output}\n\nFix it in the worktree, then run: rail advance {t.id}"
+        from . import sensors
+        told = "" if sensors.HELP in output else f"\n\n{MISSING_HELP}"  # a sensor that crashed says so itself
+        return (f"Ship of ticket {t.id} could not run '{step}'.\n{output}{told} Then run: rail advance {t.id}\n"
+                f"{NOT_COUNTED}")
+    if any(e.get("tools_down") for e in run.events):
+        return f"Ship of ticket {t.id} failed at '{step}'.\n{output}\n\nThen run: rail advance {t.id}"
+    tried = tried_help(step, ticket_path(t.id))
+    return (f"Ship of ticket {t.id} failed at '{step}'.\n{output}\n\nFix it in the worktree, then run: rail advance {t.id}"
+            + (f"\n{tried}" if tried else ""))
 
 
 # --- merge -------------------------------------------------------------------------
@@ -380,6 +593,8 @@ def describe(project, t, ticket, tier):
             continue
         name = f"check: {e.get('detail')}" if e.get("step") == "checks" else e.get("step")
         said = "could not run" if e.get("status") == "could_not_run" else f"{e.get('status')}, {e.get('result')}"
+        if (e.get("step") or "").startswith("product:") and e.get("detail"):
+            said += f": {e['detail']}"  # what the surface's driving check left as evidence
         rows.append(f"| {name} | {said} |")
     from .review import Ledger, load_doc, needs_review
     ledger = Ledger(t.events, load_doc(t.review_text, t.id))
@@ -402,21 +617,37 @@ def describe(project, t, ticket, tier):
         f"Migrations: {ticket.get('reversibility')}; rollback: {ticket.get('rollback')}.")
     risk = (f"{tier}. Touches {', '.join(ticket.scope)}. {migrations} "
             f"Changed lockfiles: {', '.join(lockfiles) or 'none'}.")
-    risk += "".join(f"\n\nThe reviewer asked for a person: {said}" for said in ledger.asked_for_person())
+    risk += "".join(f"\n\nThe reviewer found what a revert doesn't undo: {said}" for said in ledger.asked_for_person())
+    advisory = [ledger.describe(fid, with_answer=False) for fid in ledger.open_advisory()]
     external = ticket.get("external_id", "") or ""
+    from . import readthese
+    listed = readthese.items(project, t, ticket, tier, ledger, changed)
+    added_count = sum(len(lines) for lines in readthese.numbered(project, t.ref).values())
     body = [
+        # First, and built from facts: the author's own "Look at" below frames the change as its author sees it.
+        "## Read these", *readthese.section(project, ticket, listed, added_count, reviewed), "",
         "## Why", f"{ticket.sections.get('Why', '')} (ticket {t.id})", "",
         "## Look at", ticket.sections.get("Look at") or "(not written)", "",
         "## Evidence", "| Step | Status |", "|---|---|", *rows, "",
+        *(["Advisory findings left open, for the sweep:", *[f"- {line}" for line in advisory], ""] if advisory else []),
         "## Risk", risk, "",
         # Trailers. The sweep reads Review: to find what merged with no reviewer.
         f"Ticket: {t.id}", f"Tier: {tier}",
         "Review: " + (("reviewer, security seat" if tier == "PERSON" else "reviewer") if reviewed else "none"),
     ]
+    from . import revert
+    reverted = revert.target(project, ticket, project.tickets())
+    if reverted and reverted[1]:
+        body.append(f"Reverts: {reverted[1]}")  # rail stats reads it: a squash has neither of git's revert wordings
     if external.startswith("github#"):
-        # A ticket narrowed to the first part of its request leaves the issue open for the rest.
-        word = "Part of" if ticket.sections.get("Split") else "Closes"
+        # A ticket narrowed to the first part of its request leaves the issue open for the rest, and so does one of
+        # several tickets for the same issue while another of them is still open (the parts of a split ticket).
+        others = [x for x in project.tickets().values() if x.id != t.id and x.ticket and x.ticket.get("external_id") == external
+                  and not x.merged and not x.dropped_mark and not x.last("dropped")]
+        word = "Part of" if ticket.sections.get("Split") or others else "Closes"
         body.append(f"{word} #{external.split('#', 1)[1]}")
+    if external.startswith("smoke#"):
+        body.append(f"Part of #{external.split('#', 1)[1]}")  # the fix after this revert closes the issue
     if external.startswith("sweep#"):
         body.append(f"Sweep: since {external.split('#', 1)[1]}")  # where the next sweep starts
     sessions = [e["session_url"] for e in t.events if e.get("event") == "claimed" and e.get("session_url")]

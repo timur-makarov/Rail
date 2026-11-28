@@ -11,10 +11,14 @@ from .util import cloud
 
 # The cloud environment's setup script: it runs as root before each new machine's first session, from the folder
 # that holds the repositories, and its result is kept as the environment's snapshot. `rail provision` links rail
-# onto PATH, writes the machine's hooks, and runs the project's own provision command.
-ENVIRONMENT_SCRIPT = """for d in */; do
-  [ -x "$d.rail/bin/rail" ] && (cd "$d" && RAIL_CLOUD=1 .rail/bin/rail provision) || true
-done"""
+# onto PATH, writes the machine's hooks, and runs the project's own provision command. The lines live in one file,
+# engine/environment-setup.sh, which a person can also paste whole; doctor prints them without its comments.
+ENVIRONMENT_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "environment-setup.sh")
+
+
+def environment_script():
+    with open(ENVIRONMENT_FILE) as f:
+        return "".join(line for line in f if not line.startswith("#")).strip()
 
 
 def _run(args, cwd):
@@ -66,6 +70,26 @@ def checks(project):
                                           " they pause unattended cloud sessions, and the guard hook asks the same on"
                                           " your own machine"))
 
+    worker = project.config["worker"]
+    if worker["command"]:
+        # The runner calls rail work in one Bash call: the Bash tool ends it at its ceiling, 10 minutes when unset.
+        ceiling = (settings.get("env") or {}).get("BASH_MAX_TIMEOUT_MS")
+        ceiling = int(ceiling) if str(ceiling).isdigit() else 600000
+        under = worker["timeout_minutes"] * 60000 < ceiling
+        found.append(("worker timeout", under, f"[worker] timeout_minutes ({worker['timeout_minutes']}) is under the Bash"
+                      f" tool's ceiling ({ceiling // 60000} min)" if under else
+                      f"[worker] timeout_minutes ({worker['timeout_minutes']}) is not under the Bash tool's ceiling"
+                      f" ({ceiling // 60000} min, BASH_MAX_TIMEOUT_MS in .claude/settings.json's env; 10 when unset):"
+                      " the Bash call that runs rail work would end first. Lower it, or raise the ceiling"))
+
+    old = [name for name in ("reviewer.md", "review-v1.json") if f".rail/engine/{name}" in project.config["review"]["command"]]
+    if old:
+        found.append(("review command", False,
+                      f"[review] command reads .rail/engine/{' and '.join(old)} from the ticket's worktree, so a ticket"
+                      " that changes them is reviewed by its own copy. Use the paths the engine passes, which hold the"
+                      ' base branch\'s: --system-prompt-file "$RAIL_REVIEW_PROMPT" and --json-schema'
+                      ' "$(cat "$RAIL_REVIEW_SCHEMA")"'))
+
     agents = os.path.join(root, "AGENTS.md")
     has_section = os.path.exists(agents) and any(l.strip() == "## Rail" for l in open(agents).read().splitlines())
     found.append(("AGENTS.md", has_section, "has the ## Rail section" if has_section else "no ## Rail section: run rail init"))
@@ -85,11 +109,38 @@ def checks(project):
         parent = os.path.dirname(parent)
 
     found.append(("config", True, ".rail/config.toml is valid"))  # Project() failed otherwise
+    from . import sensors
+    tools = sensors.tools(project)
+    if tools:
+        gone = [f"{tool} (sensor {name})" for name, tool in tools.items() if not shutil.which(tool)]
+        found.append(("sensors", not gone, f"the tools of the {len(tools)} sensors are on this machine" if not gone else
+                      f"not on this machine: {', '.join(gone)}; a sensor whose tool is missing can't run at ship"))
+    from . import tools as toolsmod
+    found += toolsmod.doctor(project)
+    found += toolsmod.doctor_workflows(project)
     guides = {key: path for key, path in project.config["guides"].items() if path}
     if guides:
-        gone = [f"{key} = {path}" for key, path in guides.items() if not os.path.isfile(os.path.join(root, path))]
+        from .docs import read_part
+        gone = [f"{key} = {path}" for key, path in guides.items() if not read_part(path, root)]
         found.append(("guides", not gone, f"the {len(guides)} pages [guides] names are there" if not gone else
-                      f"[guides] names pages that aren't there, so no brief names them: {', '.join(gone)}"))
+                      f"[guides] names pages or sections that aren't there, so no brief carries them:"
+                      f" {', '.join(gone)}"))
+    # The projects are not written anywhere, so they are printed: as the engine derives them from the files this
+    # checkout tracks, each with its paths, what it uses and its commands.
+    here = project.layout()
+    for p in here.projects:
+        found.append((f"project {p['name']}", True, project_line(p)))
+    if not here.projects:
+        found.append(("projects", True, "no tracked manifest marks a project and [[projects]] declares none: only"
+                                        " [commands] setup and verify run"))
+    loose = here.unanswered()
+    found.append(("coverage", True, "every tracked file is inside a project, or its folder has been answered about"
+                  if not loose else "inside no project, and not answered about yet: "
+                  + "; ".join(f"{folder}/ ({', '.join(types)})" for folder, types in loose.items())
+                  + ". No check reads these files. The next ship, or rail next, asks what each folder holds"))
+    # What the machine needs to start and drive the product with no person (rail docs product).
+    from . import product
+    found += product.bar(project, set(here.tree.names), lambda path: os.access(os.path.join(root, path), os.X_OK))
     from . import sources
     if sources.names(project):
         bad = sources.problems(project)
@@ -107,6 +158,8 @@ def checks(project):
         else:
             for name, passed, detail in forge.doctor_checks(project, repo):
                 found.append((name, passed, detail))
+            if found[-1][0] != "gh":  # gh reads the repository
+                found += toolsmod.github_checks(project, repo)
     return found
 
 
@@ -130,7 +183,7 @@ def cloud_checks(project):
     found.append(("environment", ready, "rail is on PATH and the machine's hooks are in place" if ready else
                   "add these lines to the cloud environment's setup script (your agent can propose them with its"
                   " environment tool; you approve once). They provision each new machine before its first session,"
-                  " so every session starts with rail, its hooks and the tools:\n" + ENVIRONMENT_SCRIPT))
+                  " so every session starts with rail, its hooks and the tools:\n" + environment_script()))
     session = os.environ.get("CLAUDE_CODE_SESSION_ID")
     if session:
         loaded = bool(project.cache_read("hooks", session))
@@ -140,16 +193,36 @@ def cloud_checks(project):
                       " project thread); the machine's hooks do their work" if machine else
                       "Rail's hooks didn't run in this session (it holds several repositories, or is a project"
                       " thread), so the guard and the saves aren't active here. The environment's setup script puts"
-                      " them on the machine before a session starts (rail docs cloud); rail provision does it now if"
+                      " them on the machine before a session starts; rail provision does it now if"
                       " this session lets it. Until then GitHub's ruleset is the guard"))
     return found
 
 
+def project_line(p):
+    """One project as doctor prints it: where it comes from, its paths, what it uses and its commands."""
+    source = ("declared in [[projects]]" if p["folder"] is None else
+              ", ".join(filter(None, [p["profile"], p["manager"],
+                                      f"a member of the workspace at {p['workspace'] or 'the root'}"
+                                      if p["workspace"] is not None else "",
+                                      "changed by its [[projects]] entry" if p["entry"] else ""])))
+    return (f"{source}; paths {', '.join(p['paths']) or '(none)'}"
+            + (f"; uses {', '.join(p['uses'])}" if p["uses"] else "")
+            + f"; setup: {p['setup'] or '(none)'}; verify: {p['verify'] or '(none)'}")
+
+
+def kind_of(line):
+    """Whose act a failed line is: `ticket` (the machine can build it), `grant` (a person's one-time act), or None
+    for a line that says neither, which a person fixes."""
+    return line[3] if len(line) > 3 and line[1] is False else None
+
+
 def as_steps(found):
     steps = []
-    for name, passed, detail in found:
+    for line in found:
+        name, passed, detail = line[:3]
         if passed is None:
             steps.append({"step": name, "status": "unavailable", "detail": detail})
         else:
-            steps.append({"step": name, "status": "ran", "result": "pass" if passed else "fail", "detail": detail})
+            steps.append({"step": name, "status": "ran", "result": "pass" if passed else "fail", "detail": detail,
+                          **({"kind": kind_of(line)} if kind_of(line) else {})})
     return steps

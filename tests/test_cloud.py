@@ -26,7 +26,7 @@ class Provision(RailTest):
     def test_on_a_persons_own_machine_rail_installs_nothing(self):
         p = self.project()
         told = p.rail("provision", env_extra=self.vm)
-        self.assertEqual((told["owner"], told["reason"]["code"]), ("human", "PROVISION_LOCAL"))
+        self.assertEqual((told["owner"], told["reason"]["code"]), ("person", "PROVISION_LOCAL"))
         self.assertIn(f"echo ran >> {self.log}", told["action"]["brief"])
         self.assertFalse(os.path.exists(self.log))
         self.assertEqual(p.rail("next", env_extra=self.vm)["reason"]["code"], "NO_WORK")  # and next doesn't ask for it
@@ -75,6 +75,26 @@ class Provision(RailTest):
         self.assertEqual((ci["reason"]["code"], ci["steps"][0]["step"]), ("CI_FAIL", "provision"))
 
 
+class EnvironmentScript(RailTest):
+    def test_the_script_provisions_each_repository_with_rail_and_never_fails_the_machine(self):
+        # The machine's folder of repositories: one whose provision passes, one whose provision fails, one without
+        # Rail. Each rail here is a stand-in that records where it ran and with what.
+        home = os.path.join(self.tmp, "repositories")
+        log = os.path.join(self.tmp, "calls.log")
+        for name, code in (("passes", 0), ("fails", 1)):
+            os.makedirs(os.path.join(home, name, ".rail", "bin"))
+            launcher = os.path.join(home, name, ".rail", "bin", "rail")
+            with open(launcher, "w") as f:
+                f.write(f'#!/bin/sh\necho "$(basename "$PWD") $1 cloud=$RAIL_CLOUD" >> {log}\nexit {code}\n')
+            os.chmod(launcher, 0o755)
+        os.makedirs(os.path.join(home, "no-rail"))
+        framework = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        done = subprocess.run(["bash", os.path.join(framework, "engine", "environment-setup.sh")], cwd=home,
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(sorted(read(log).splitlines()), ["fails provision cloud=1", "passes provision cloud=1"])
+
+
 class Doctor(RailTest):
     def test_in_a_cloud_session_doctor_says_what_the_environment_still_needs(self):
         p = self.fixture(config=CONFIG.replace("[commands]", '[commands]\nprovision = "true"'))
@@ -87,6 +107,10 @@ class Doctor(RailTest):
         self.assertIn("rail provision", found["provision"]["detail"])
         self.assertEqual(found["environment"]["result"], "fail")
         self.assertIn("RAIL_CLOUD=1 .rail/bin/rail provision", found["environment"]["detail"])
+        # The lines doctor prints are the project's copy of the one file, without its comments.
+        script = [line for line in read(p.path(".rail", "engine", "environment-setup.sh")).splitlines()
+                  if not line.startswith("#")]
+        self.assertTrue(found["environment"]["detail"].endswith("\n".join(script)))
         # No hook ran for this session id: a session with several repositories, or a project thread.
         self.assertEqual(found["session hooks"]["status"], "unavailable")
 
@@ -139,10 +163,33 @@ class Machine(RailTest):
         for name in ("session-start", "guard", "pulse", "stop"):
             self.assertIn(f"hook {name} --machine", commands)
         self.assertEqual(settings["hooks"]["PreToolUse"][0]["matcher"], "Bash")
+        # The Bash tool's two timeouts, as the repository's own settings hold them: a session that loads no
+        # repository settings reads the machine's.
+        with open(p.path(".claude", "settings.json")) as f:
+            theirs = json.load(f)["env"]
+        self.assertEqual(theirs, {"BASH_DEFAULT_TIMEOUT_MS": "1800000", "BASH_MAX_TIMEOUT_MS": "7200000"})
+        self.assertEqual(settings["env"], theirs)
+        self.assertIn("the Bash tool's timeouts written to ~/.claude/settings.json", done["steps"][0]["detail"])
         p.rail("provision", "--force", cloud=True)
         with open(os.path.join(home, ".claude", "settings.json")) as f:
             self.assertEqual(json.load(f), settings)  # written once
         self.assertEqual(p.rail("next", cloud=True)["reason"]["code"], "NO_WORK")
+
+    def test_provision_keeps_a_timeout_the_machine_has_and_takes_the_repositorys_for_one_it_lacks(self):
+        p = self.fixture()
+        home, bin_dir = self.machine(p)
+        os.makedirs(os.path.join(home, ".claude"))
+        with open(os.path.join(home, ".claude", "settings.json"), "w") as f:
+            json.dump({"env": {"BASH_MAX_TIMEOUT_MS": "10800000", "OTHER": "1"}}, f)
+        mine = p.path(".claude", "settings.json")
+        with open(mine) as f:
+            settings = json.load(f)
+        settings["env"]["BASH_DEFAULT_TIMEOUT_MS"] = "900000"
+        p.write(mine, json.dumps(settings))
+        p.rail("provision", cloud=True)
+        with open(os.path.join(home, ".claude", "settings.json")) as f:
+            self.assertEqual(json.load(f)["env"], {"BASH_MAX_TIMEOUT_MS": "10800000", "OTHER": "1",
+                                                   "BASH_DEFAULT_TIMEOUT_MS": "900000"})
 
     def test_a_tickets_newer_engine_leaves_the_machine_to_the_projects_own(self):
         """The link and the hooks call the engine in the project's checkout. An older one there doesn't know them,

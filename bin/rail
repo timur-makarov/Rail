@@ -44,7 +44,7 @@ if launcher and os.path.exists(launcher):
 
 message = "not inside a Rail project: run rail init in your project's repository"
 if "--json" in args:
-    print(json.dumps({"schema_version": 1, "ok": False, "reason": {"code": "NOT_A_PROJECT", "message": message}}, indent=2))
+    print(json.dumps({"schema_version": 2, "ok": False, "reason": {"code": "NOT_A_PROJECT", "message": message}}, indent=2))
 else:
     print(f"rail: {message}")
 sys.exit(2)
