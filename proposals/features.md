@@ -28,15 +28,9 @@ section leaves this page.
 
 ### 2. Numbers later decisions wait for
 
-Built, but for one question on how two numbers are shown. `rail stats` counts the GitHub REST calls for each
-merged ticket and the declared tools the worker runs used, `rail doctor` shows the calls the token has left,
-and `rail provision` writes the Bash tool's two timeouts into the machine's settings (`rail docs stats`,
-`rail docs tools`, `rail docs cloud`).
-
-**Open decision**, to settle with the person who reads the stats: whether the dropped tickets' cost needs a
-line of its own rather than the sentence ending the `Dropped` line, and whether the worker's cost alone
-(without the review's) is shown for each tier, since only the JSON has it (`worker_usd`). Nothing was changed
-for either.
+Built. `rail stats` counts the GitHub REST calls for each merged ticket and the declared tools the worker runs
+used, `rail doctor` shows the calls the token has left, and `rail provision` writes the Bash tool's two
+timeouts into the machine's settings (`rail docs stats`, `rail docs tools`, `rail docs cloud`).
 
 ### 3. Answer facts, renderers and the answer schema
 
@@ -2512,3 +2506,9 @@ The owner decided on 2026-11-27 not to build these.
 - **A blocking finding of the engine's that the worker answers**, for an old test that fails on the new code.
   The triage run answers it.
 - **`.gitleaksignore` in `person_paths`.** A line in it raises a question for the triage run.
+
+The owner decided on 2026-11-28 not to build these.
+
+- **Two more cost lines in `rail stats`**: a line of its own for what the dropped tickets cost, and the
+  worker's cost alone for each tier. The `Dropped` line ends with the first, and the JSON holds the second
+  (`worker_usd`). What else is shown is left to the people who use Rail.
