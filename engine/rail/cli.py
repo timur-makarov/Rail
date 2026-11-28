@@ -352,6 +352,8 @@ def ensure_pr(project, f, receipts):
         if f.lint_errors or not f.approve_first:
             return None  # only a contract a person approves before the build has a pull request of its own
         title, body = contract_pr(f)
+    elif f.state in OPEN and f.shipped:
+        title, body = described(project, f)  # opened after the ship: at the claim GitHub could not be reached
     elif f.state in OPEN:
         title = f"{t.id}: {f.ticket.title}"
         body = (f"{f.ticket.sections.get('Why', '')} (ticket {t.id})\n\nNot shipped yet: the rail check stays red until"
@@ -367,14 +369,19 @@ def ensure_pr(project, f, receipts):
         return None
 
 
+def described(project, f):
+    """The title and description of a shipped ticket's pull request, from the ticket as its branch has it."""
+    ticket = Ticket(gitx.read_blobs([f"{f.t.ref}:{ticket_path(f.id)}"], project.root)[f"{f.t.ref}:{ticket_path(f.id)}"])
+    return steps.describe(project, f.t, ticket, f.tier)
+
+
 def update_pr(project, f, receipts):
     """At ship, the PR's title loses [contract] and its description becomes the ticket's."""
     from .forge import ForgeError
 
     if not f.pr_open or not f.shipped:
         return
-    ticket = Ticket(gitx.read_blobs([f"{f.t.ref}:{ticket_path(f.id)}"], project.root)[f"{f.t.ref}:{ticket_path(f.id)}"])
-    subject, body = steps.describe(project, f.t, ticket, f.tier)
+    subject, body = described(project, f)
     if f.pr.get("title") == subject and f.pr.get("body") == body:
         return
     try:

@@ -48,6 +48,24 @@ class Lifecycle(RailTest):
         self.assertIn("Ticket: 1", log)
         self.assertEqual(b.rail("status")["tickets"][0]["state"], "merged")
 
+    def test_a_shipped_ticket_with_no_pull_request_gets_one_from_next_with_the_tickets_description(self):
+        a, b, github = self.github_pair()
+        a.add(ticket())
+        a.rail("next")
+        github.update(lambda s: s["pulls"].clear())  # as when GitHub could not be reached at the claim
+        a.fix_calc("1")
+        shipped = a.rail("advance", "1")
+        self.assertEqual((shipped["state"], shipped["reason"]["code"]), ("in-ci", "CI_WAIT"))
+        self.assertIn("has no open pull request: run rail next --ticket 1", shipped["action"]["brief"])
+        self.assertEqual(a.rail("advance", "1")["action"]["brief"], shipped["action"]["brief"])  # advance opens none
+        opened = a.rail("next", "--ticket", "1")
+        self.assertIn({"step": "pr", "status": "ran", "result": "pass"},
+                      [{k: s.get(k) for k in ("step", "status", "result")} for s in opened["steps"]])
+        (pr,) = github.read()["pulls"]
+        self.assertEqual(pr["title"], "1: fix add")
+        self.assertIn("Ticket: 1\nTier: AUTO\nReview: reviewer", pr["body"])
+        self.assertIn("CI runs on PR #", opened["action"]["brief"])
+
     def test_the_brief_counts_only_this_tickets_lines_when_the_projects_own_checkout_is_behind(self):
         # After a merge on the remote, the next ticket's brief must not count the merged lines as its own.
         a, b, github = self.github_pair()

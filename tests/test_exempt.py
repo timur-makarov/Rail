@@ -353,3 +353,24 @@ class IgnoredSecret(RailTest):
         there = b.rail("next", "1", session="session-b")
         self.assertEqual((there["reason"]["code"], there["action"]["facts"]["branch"]), ("IMPLEMENT", "1-fix-add--2"))
         self.assertEqual(there["action"]["facts"]["restarted"]["branch"], "1-fix-add")
+
+    def test_a_ticket_that_started_again_and_merged_is_read_from_the_base_not_from_the_branch_left_behind(self):
+        p, b, github = self.claimed(pair=True)
+        self.github_bin = github.bin
+        github.update(lambda s: s.__setitem__("delete_branch_on_merge", True))
+        p.queue_reviews(said("secret", "A live token."))
+        p.rail("advance", "1", expect=3, env_extra=self.scan(), cloud=True)
+        p.rail("accept", "1", cloud=True)
+        p.rail("next", "1", cloud=True)
+        p.fix_calc("1")
+        p.queue_reviews(clean())
+        self.assertEqual(p.rail("advance", "1", cloud=True)["state"], "in-ci")
+        github.ci("1-fix-add--2")
+        p.rail("next", cloud=True)
+        self.assertEqual(p.rail("advance", "1", cloud=True)["state"], "merged")
+        # GitHub deleted the merged branch. The one the ticket gave up is all the remote has of it, with no review.
+        self.assertEqual(on_remote(github), ["1-fix-add"])
+        stats = b.rail("stats", session="session-b")["stats"]
+        self.assertEqual((stats["tiers"]["AUTO"]["merged"], stats["tiers"]["AUTO"]["reviewed"]), (1, 1))
+        (row,) = b.rail("status", session="session-b")["tickets"]
+        self.assertEqual(row["state"], "merged")
