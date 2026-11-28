@@ -145,6 +145,8 @@ The source only files tickets. The runner above picks them up on its own schedul
 - **Approve or continue:** add the label `rail:go` to the pull request. A comment you leave there reaches
   the agent as your note. Don't merge a contract pull request: it holds only the contract. If you do, Rail
   takes it as your approval and opens a new pull request for the work.
+- **Merge a PERSON ticket:** press the merge button on its pull request once its checks are green. The label
+  `rail:go` merges nothing there, and Rail takes it off. Close the pull request to drop the ticket.
 - **Change a contract:** comment on its pull request. **Reject it:** close the pull request.
 - **Stop a ticket:** add the label `rail:hold` to its pull request. Nothing moves it until you add `rail:go`.
   `rail:needs-you` is the engine's own label: adding or removing it by hand changes nothing.

@@ -352,6 +352,8 @@ def ensure_pr(project, f, receipts):
         if f.lint_errors or not f.approve_first:
             return None  # only a contract a person approves before the build has a pull request of its own
         title, body = contract_pr(f)
+    elif f.state in OPEN and f.shipped:
+        title, body = described(project, f)  # opened after the ship: at the claim GitHub could not be reached
     elif f.state in OPEN:
         title = f"{t.id}: {f.ticket.title}"
         body = (f"{f.ticket.sections.get('Why', '')} (ticket {t.id})\n\nNot shipped yet: the rail check stays red until"
@@ -367,14 +369,19 @@ def ensure_pr(project, f, receipts):
         return None
 
 
+def described(project, f):
+    """The title and description of a shipped ticket's pull request, from the ticket as its branch has it."""
+    ticket = Ticket(gitx.read_blobs([f"{f.t.ref}:{ticket_path(f.id)}"], project.root)[f"{f.t.ref}:{ticket_path(f.id)}"])
+    return steps.describe(project, f.t, ticket, f.tier)
+
+
 def update_pr(project, f, receipts):
     """At ship, the PR's title loses [contract] and its description becomes the ticket's."""
     from .forge import ForgeError
 
     if not f.pr_open or not f.shipped:
         return
-    ticket = Ticket(gitx.read_blobs([f"{f.t.ref}:{ticket_path(f.id)}"], project.root)[f"{f.t.ref}:{ticket_path(f.id)}"])
-    subject, body = steps.describe(project, f.t, ticket, f.tier)
+    subject, body = described(project, f)
     if f.pr.get("title") == subject and f.pr.get("body") == body:
         return
     try:
@@ -420,6 +427,22 @@ def wait_code(f):
 def answers_wait(f):
     """Whether a rail:go on the ticket answers a wait for a person."""
     return "rail:go" in f.labels and bool(wait_code(f))
+
+
+def label_merges_nothing(project, f, receipts):
+    """Whether a rail:go sits on a PERSON ticket that waits for its merge on GitHub. The merge is the person's own
+    act, made with GitHub's merge button: the label merges nothing, and an event on the branch would start its
+    checks again and hold the merge. So the label is taken off and the ticket is read without it."""
+    if not ("rail:go" in f.labels and project.remote and f.pr_open and wait_code(f) == "MERGE_BY_PERSON"):
+        return False
+    try:
+        project.forge.remove_label(f.pr["number"], "rail:go")
+    except ForgeError:
+        pass  # the next run takes it off
+    f.labels = f.labels - {"rail:go"}
+    receipts.append({"step": "go", "status": "not_run",
+                     "detail": f"the label rail:go merges nothing on ticket {f.id}: a person merges its pull request on GitHub"})
+    return True
 
 
 def transition(project, f, code):
@@ -480,9 +503,11 @@ def transition(project, f, code):
                           "detail": "its pull request was merged before the work: taken as the approval"})
     elif code == "GO":
         # A person's rail:go: it approves a contract or an amend, or continues any other wait.
+        waited = wait_code(f)
+        if label_merges_nothing(project, f, run.steps):
+            return True, run
         note = person_comments(project, f) or None
         ensure_local(project, t)
-        waited = wait_code(f)
         if waited != "BUDGET" and (f.state == "new" or f.amend_pending):
             record = accepted_event(project, t.id, f.ticket, f.tier, "person", "label", note, wait=waited)
         else:
@@ -1043,6 +1068,9 @@ def cmd_accept(project, args):
         events = [accepted_event(project, nn, f.ticket, f.tier, "person", "accept", note, wait=waited)]
     elif f.amend_pending:
         events = [accepted_event(project, nn, f.ticket, f.tier, "person", "accept", note, wait=waited)]
+    elif waited == "MERGE_BY_PERSON" and project.remote:
+        raise RailError(f"ticket {nn} waits for its merge, and a person merges it on GitHub: {f.pr['html_url'] if f.pr else 'its pull request'}",
+                        code="MERGE_ON_GITHUB")
     elif f.state in OPEN and waited:
         events = [event(nn, "continued", via="accept", wait=waited, **({"note": note} if note else {}))]
     else:
@@ -1442,6 +1470,7 @@ def cmd_next(project, args):
         tickets, facts = load(project)
     # A person's inbox is the label: every wait gets it now, not only when the agent runs dry.
     for f in facts.values():
+        label_merges_nothing(project, f, took_in)
         code, owner, _ = first_match(f)
         # A ship whose pull request GitHub didn't let it write (a rate limit, an outage) left the old title and
         # description there, and a person's merge squashes with what the pull request says.

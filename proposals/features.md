@@ -155,10 +155,11 @@ Left:
   reviewer's section on files no check read, of the sweep's line on kind paths, of the init task's first step
   and of the two paragraphs on projects in the `rail-verify` skill is a first wording, marked as not tested
   where it is written. It waits for the owner to restart the model tests.
-- **A workspace member's commands on a machine with every toolchain.** Rail's tests run a uv workspace's and a
-  pnpm workspace's members and a Cargo workspace's members with the real tools. Not run: the modules of a
-  `go.work`, any audit, and a planted mistake for a member's command (**Language fixtures checked on a machine
-  with every toolchain**).
+- **A workspace member's commands on a machine with every toolchain.** Rail's tests run the members of a uv
+  workspace, a pnpm workspace and a Cargo workspace and the modules of a `go.work` with the real tools
+  (`rail docs languages` has the table). Not run: the audit of a `go.work`'s modules, an audit that finds an
+  advisory, and a planted mistake for a member's command (**Language fixtures checked on a machine with every
+  toolchain**).
 - **A profile for anything but the four languages.** What a Terraform folder or any other new kind of thing
   needs is looked up by an agent the first time it appears and written into `[[projects]]` once.
 - **Not built:** a task graph or a build cache of Rail's own; a required check for each project; a release for
@@ -269,7 +270,7 @@ Left:
   the product waits for the same feature: the local machine always is one.
 - **The pull request's link to the uploaded evidence.** The seed workflow uploads `$RAIL_EVIDENCE` as the
   artifact `rail-evidence`; the Evidence table does not link it, because the table is written at ship, before
-  CI ran. The upload step was not run on GitHub.
+  CI ran. The upload ran on GitHub on 2026-11-28, for a ticket whose product step ran in CI.
 - **Whether a mobile surface is Android or iOS.** Doctor's `product machine` line passes on a machine with
   `/dev/kvm` or on a Mac, whichever the surface is. The platform comes with **Mobile surfaces**.
 - **The wording** of the reviewer's section on what the product did, of the init task's step on the product,
@@ -384,11 +385,32 @@ the reviewer and the triage run. `python3 tests/run.py --languages` runs it.
 - Two defects the run found are fixed with it: the package at a pnpm workspace's root was no project, and a
   filter that names it runs nothing and exits 0; the Python audit failed on a lockfile with no dependency.
 
+**Run once on GitHub itself**, on 2026-11-28, for Python, in the repository on GitHub kept for such checks,
+with the same stand-ins. Seven tickets merged, each through its pull request and the required `rail` check: the
+first taken in from an issue with the label `rail` and carried to its merge, a second project, an `old-test`
+question answered `lost`, a PERSON ticket of the kind `runs-with-secrets`, a ticket stuck and started again by
+its diagnosis, a Terraform folder, and the product driven with the planted fault on and then off. The check on
+GitHub's runner ran `provision`, the setup, `verify`, the checks and the product step, and uploaded the
+evidence. The PERSON ticket got the label `rail:needs-you` and its `## Read these` list as comments on the
+lines of the pull request, and merged when the person pressed the merge button. `rail stats` then held each
+number. The run cost 448 calls to GitHub's REST API, 64 for each merged ticket.
+
+- Three defects the run found are fixed with it: the Python type check failed on a warning on a GitHub runner
+  and nowhere else; a ticket that started again and merged was read from the branch its first attempt left on
+  the remote, so `rail stats` counted it as merged with no review; a shipped ticket with no pull request was
+  sent to `rail advance`, which opens none, and the pull request `rail next` then opened said "Not shipped
+  yet".
+- At the PERSON ticket's merge the label `rail:go` was recorded as `continued` and started the checks again,
+  and nothing merged. The owner decided on 2026-11-28 that the merge button is the act: the label is now
+  taken off with no event, and `rail accept` is refused there.
+- Not shown: the `uncovered` question, which needs a sample whose project is not the repository's root (the
+  Rust sample). The Terraform folder of a rooted sample asks nothing.
+
 **Left.**
-- **Once on real GitHub**, for one language, in the repository on GitHub kept for such checks: the same run
-  with the same stand-ins. It shows what the stand-in for GitHub cannot: the required check, the labels, the
-  line comments of `## Read these`, the merge on `rail:go`, an issue carried to its merge. Kept when the run
-  ends with every ticket merged or waiting where the steps say.
+- **A clone that fetches one branch** (`git clone --depth 1`, as some cloud machines make) has no tracking
+  branch for a ticket's branch after its push, so no pull request is opened at the claim and `rail doctor`
+  says nothing. Seen in this run. A line in doctor would say it; `rail next --ticket NN` opens the pull
+  request once the clone fetches every branch.
 - **Once with a model**, when the owner restarts the model tests: the same run with a real worker, reviewer and
   triage run, two runs for each language. This is the only place where the wording of every brief is read by a
   model in the order a real ticket meets it. Kept when at least six of the eight runs end the same way; a step
@@ -2416,10 +2438,17 @@ Refused:
   then says it could not check them.
 - Deleting a branch.
 
+On 2026-11-28 the language scenario ran there for Python (step 12 has what it showed). Worked in that run:
+
+- A ticket carried from an issue with the label `rail` to its merge, with the engine's commands run by a cloud
+  session.
+- The engine's own "Read these" comments on the lines of a pull request, and the label `rail:needs-you`.
+- The required `rail` check holding a merge until it was green, and squash merges through the API.
+- The upload of the evidence artifact from the runner.
+
 Not yet tried:
 
-- A ticket carried from a labelled issue to its merge by a runner, on the current engine.
-- The engine's own "Read these" comments on the lines of a pull request.
+- A ticket carried from a labelled issue to its merge by a runner (the workflow in `rail docs github-runner`).
 - The issues endpoint returning merged pull requests with a label when asked for closed items.
 - GitHub folding a file marked `linguist-generated` in a pull request's diff.
 
@@ -2462,7 +2491,8 @@ Stated here once, as facts the features rest on.
 - Where the worker judged its own case, a fresh run with no stake answers one closed question the engine
   raises (2026-11-27).
 - A person acts once on a PERSON ticket, at the merge. Approval of a contract before the build is a setting,
-  off unless a project turns it on for a kind (2026-11-27).
+  off unless a project turns it on for a kind (2026-11-27). With a remote that act is GitHub's merge button:
+  the label `rail:go` merges nothing there (2026-11-28).
 - A stuck ticket gets one diagnosis before it is dropped or waits (2026-11-27).
 - A Rail serves one repository (2026-11-27).
 - Anything may be put into a repository, and Rail drives what needs driving. What Rail knows about a

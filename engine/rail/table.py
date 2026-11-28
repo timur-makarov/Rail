@@ -759,7 +759,9 @@ def _render_answer(x):
 def _render_merge_by_person(x):
     asked = "".join(f"\nThe reviewer found what a revert doesn't undo: {said}" for said in x["asked"])
     if x["remote"]:
-        return f"Ticket {x['ticket']} ({x['tier']}) is ready: a person reviews and merges {_pr(x)}." + asked
+        # Not tested with a model run: the sentence on the merge button and the label.
+        return (f"Ticket {x['ticket']} ({x['tier']}) is ready: a person reviews {_pr(x)} and merges it with GitHub's merge"
+                " button, or closes it. The label rail:go merges nothing there." + asked)
     return (f"Ticket {x['ticket']} ({x['tier']}) is ready to merge. A person reviews branch {x['branch']} and approves the"
             f" merge: {x['wait']['accept']}. The engine then merges it." + asked)
 
@@ -999,6 +1001,9 @@ ROWS = [
      lambda f: f"rail next --ticket {f.id}"),
     ("CI_WAIT",            "none",  "rest",        lambda f: f.state == "in-ci",
      lambda f: f"Ticket {f.id} shipped; CI runs on {_pr_of(f)}." if f.pushed else
+               # Not tested with a model run: the sentence for a ticket that has no pull request.
+               f"Ticket {f.id} shipped and has no open pull request: run rail next --ticket {f.id}, which opens one."
+               if not f.pr_open else
                f"Ticket {f.id} shipped; its branch isn't pushed to {_pr_of(f)} yet: run rail advance {f.id}. If that answer"
                " has a `push` step that failed, the remote refuses the push: do what the step says, and don't run"
                " rail advance again until the two branches agree."),

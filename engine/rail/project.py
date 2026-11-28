@@ -239,7 +239,10 @@ class Project:
                 t.ref = f"refs/heads/{t.branch}"
                 t.worktree = trees.get(t.branch) or stopped.get(t.branch)
                 t.rebasing = t.branch in stopped
-            elif t.remote_branch:
+            elif t.remote_branch and not t.merged:
+                # A merged ticket is read from the base branch. A branch of its id that is still on the remote is
+                # the one GitHub has not deleted yet, or one the engine left for a new start and could not delete:
+                # that one holds the attempts the ticket gave up, and no review.
                 t.ref = f"refs/remotes/{self.remote}/{t.remote_branch}"
             source = t.ref or base
             specs += [f"{source}:{ticket_path(nn)}", f"{source}:{events_path(nn)}", f"{source}:{review_path(nn)}"]

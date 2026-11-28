@@ -21,8 +21,10 @@ With a pull request, a conflict with the base or a red required check returns a 
 `implementing`, with the check's output in the brief.
 
 Any state can wait for a person: `owner` is `person`, and the brief says what is needed. The engine labels
-the ticket's pull request `rail:needs-you`. One act continues any wait: the label `rail:go` on the pull
-request, or `rail accept NN "note"`. The note, and any comments the person wrote on the pull request during
+the ticket's pull request `rail:needs-you`. One act continues any wait but one: the label `rail:go` on the pull
+request, or `rail accept NN "note"`. The one is a PERSON ticket's merge when the project has a remote: the
+person merges its pull request with GitHub's merge button, the label there is taken off and changes nothing,
+and `rail accept` is refused (`MERGE_ON_GITHUB`). The note, and any comments the person wrote on the pull request during
 the wait, go into the agent's next brief. A person can hold any ticket by adding the label `rail:hold`. The engine never
 sets that one, and never reads its own `rail:needs-you` as a hold.
 
